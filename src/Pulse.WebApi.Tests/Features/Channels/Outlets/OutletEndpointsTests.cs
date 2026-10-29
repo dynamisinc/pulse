@@ -292,7 +292,7 @@ public sealed class OutletEndpointsTests
 
         var response = await host.PutAsync(outlet.Guid, new
         {
-            slug = "metro-desk-nine",
+            slug = "metro-desk-9",
             name = "Metro Desk Nine",
             skinKey = "newsline7",
             categories = new[] { "Local" },
@@ -303,7 +303,7 @@ public sealed class OutletEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var edited = (await response.Content.ReadFromJsonAsync<WireStaffOutlet>())!;
         edited.Version.Should().Be(2);
-        edited.Slug.Should().Be("metro-desk-nine");
+        edited.Name.Should().Be("Metro Desk Nine");
         edited.Tagline.Should().BeNull("an omitted optional field is cleared by the PUT");
         edited.Enabled.Should().BeFalse();
         edited.SortOrder.Should().Be(outlet.SortOrder, "an omitted sortOrder keeps its value");
@@ -316,7 +316,59 @@ public sealed class OutletEndpointsTests
             .Which.Should().Contain((nameof(TelemetryEvent), "Added"));
 
         host.ActAs(seeded.ExerciseId, staffUserId: null);
-        (await host.GetAsync("/api/outlets/metro-desk-nine")).StatusCode.Should().Be(HttpStatusCode.NotFound, "now disabled");
+        (await host.GetAsync("/api/outlets/metro-desk-9")).StatusCode.Should().Be(HttpStatusCode.NotFound, "now disabled");
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_ThatChangesTheSlug_Is400_AndChangesNothing()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var outlet = await host.CreateOkAsync(OutletTestHost.Body());
+
+        var problem = await OutletTestHost.ProblemAsync(await host.PutAsync(outlet.Guid, OutletTestHost.Body(slug: "metro-desk-nine", version: 1)));
+
+        problem.Status.Should().Be(400);
+        problem.Detail.Should().Be("slug cannot be changed after the outlet is created (permalink stability, NWS-011).");
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.Outlets.SingleAsync(o => o.Id == outlet.Guid)).Should().Match<Outlet>(o => o.Slug == "metro-desk-9" && o.Version == 1);
+    }
+
+    [RequiresDockerFact]
+    public async Task Edit_ThatLosesTheRaceAtTheSave_Is409_WithTheCurrentItem()
+    {
+        // The version check passes, then another writer bumps the row before the UPDATE runs: the EF concurrency token
+        // (Version) matches no row, and the service answers 409 with the outlet as the other writer left it.
+        var bumper = new ConcurrentVersionBumper();
+        await using var host = await StartAsync(services => services.AddSingleton<IInterceptor>(bumper));
+        var seeded = await ActAsControllerAsync(host);
+        var outlet = await host.CreateOkAsync(OutletTestHost.Body());
+        bumper.Arm(outlet.Guid, host.ConnectionString);
+
+        var problem = await OutletTestHost.ProblemAsync(await host.PutAsync(outlet.Guid, OutletTestHost.Body(name: "Lost edit", version: 1)));
+
+        problem.Status.Should().Be(409);
+        problem.Detail.Should().Be(OutletService.StaleVersionMessage);
+        problem.Item!.Name.Should().Be(ConcurrentVersionBumper.OtherName);
+        problem.Item.Version.Should().Be(2);
+        (await host.OutletEventsAsync(seeded.ExerciseId)).Should().ContainSingle("only the create; the losing edit's event rolled back with it");
+    }
+
+    [RequiresDockerFact]
+    public async Task Delete_ThatLosesTheRaceAtTheSave_Is409_AndDeletesNothing()
+    {
+        var bumper = new ConcurrentVersionBumper();
+        await using var host = await StartAsync(services => services.AddSingleton<IInterceptor>(bumper));
+        var seeded = await ActAsControllerAsync(host);
+        var outlet = await host.CreateOkAsync(OutletTestHost.Body());
+        bumper.Arm(outlet.Guid, host.ConnectionString);
+
+        var problem = await OutletTestHost.ProblemAsync(await host.DeleteAsync(outlet.Guid, version: 1));
+
+        problem.Status.Should().Be(409);
+        problem.Item!.Version.Should().Be(2);
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.Outlets.AnyAsync(o => o.Id == outlet.Guid)).Should().BeTrue("the losing delete wrote nothing");
     }
 
     [RequiresDockerFact]
@@ -503,10 +555,64 @@ public sealed class OutletEndpointsTests
 
         (await host.PostAsync("/api/outlets", OutletTestHost.Body(channelId: "press", slug: "kestrel-em", skinKey: "wire-room", parentOutletId: wireRoom.Id)))
             .StatusCode.Should().Be(HttpStatusCode.Created, "an org newsroom under The Wire Room");
-        (await OutletTestHost.ProblemAsync(await host.PostAsync("/api/outlets", OutletTestHost.Body(slug: "child", parentOutletId: news.Id))))
+        (await OutletTestHost.ProblemAsync(await host.PostAsync("/api/outlets", OutletTestHost.Body(channelId: "press", slug: "child", skinKey: "wire-room", parentOutletId: news.Id))))
             .Detail.Should().Be(OutletService.ParentNotFoundMessage, "a news outlet cannot be a parent");
+        (await OutletTestHost.ProblemAsync(await host.PostAsync("/api/outlets", OutletTestHost.Body(slug: "news-child", parentOutletId: wireRoom.Id))))
+            .Detail.Should().Be("parentOutletId is only allowed on a press outlet.", "the child must be on press too");
         (await OutletTestHost.ProblemAsync(await host.PutAsync(wireRoom.Guid, OutletTestHost.Body(channelId: "press", slug: "wire-room", skinKey: "wire-room", parentOutletId: wireRoom.Id, version: 1))))
             .Detail.Should().Be(OutletService.ParentCycleMessage);
+    }
+
+    [RequiresDockerFact]
+    public async Task AnIndirectParentCycle_Is400()
+    {
+        await using var host = await StartAsync();
+        await ActAsControllerAsync(host);
+        var b = await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "b", skinKey: "wire-room"));
+        var a = await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "a", skinKey: "wire-room", parentOutletId: b.Id)); // A -> B
+
+        var problem = await OutletTestHost.ProblemAsync(
+            await host.PutAsync(b.Guid, OutletTestHost.Body(channelId: "press", slug: "b", skinKey: "wire-room", parentOutletId: a.Id, version: 1)));
+
+        problem.Status.Should().Be(400);
+        problem.Detail.Should().Be(OutletService.ParentCycleMessage, "B -> A would close the loop A -> B -> A");
+    }
+
+    [RequiresDockerFact]
+    public async Task DeletingAnOutletWithLiveChildren_Is409_UntilTheChildrenAreGone()
+    {
+        await using var host = await StartAsync();
+        await ActAsControllerAsync(host);
+        var wireRoom = await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "wire-room", skinKey: "wire-room"));
+        var child = await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "kestrel-em", skinKey: "wire-room", parentOutletId: wireRoom.Id));
+
+        var problem = await OutletTestHost.ProblemAsync(await host.DeleteAsync(wireRoom.Guid, version: 1));
+        problem.Status.Should().Be(409);
+        problem.Detail.Should().Be("outlet has child outlets; delete or re-parent them first.");
+
+        (await host.DeleteAsync(child.Guid, child.Version)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await host.DeleteAsync(wireRoom.Guid, version: 1)).StatusCode.Should().Be(HttpStatusCode.NoContent, "a deleted child no longer blocks");
+    }
+
+    [RequiresDockerFact]
+    public async Task AParticipantNeverSeesAParentItCannotOpen()
+    {
+        await using var host = await StartAsync();
+        var seeded = await ActAsControllerAsync(host);
+        var wireRoom = await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "wire-room", skinKey: "wire-room"));
+        await host.CreateOkAsync(OutletTestHost.Body(channelId: "press", slug: "kestrel-em", skinKey: "wire-room", parentOutletId: wireRoom.Id));
+
+        host.ActAs(seeded.ExerciseId, staffUserId: null);
+        (await ReadOutletAsync(host, "/api/outlets/kestrel-em")).ParentOutletId.Should().Be(wireRoom.Id, "the parent is served");
+
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        (await host.PutAsync(wireRoom.Guid, OutletTestHost.Body(channelId: "press", slug: "wire-room", skinKey: "wire-room", enabled: false, version: 1)))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        host.ActAs(seeded.ExerciseId, staffUserId: null);
+        (await ReadOutletAsync(host, "/api/outlets/kestrel-em")).ParentOutletId.Should().BeNull("a disabled parent would be a 404");
+        (await (await host.GetAsync("/api/outlets?channel=press")).Content.ReadFromJsonAsync<List<WireOutlet>>())!
+            .Should().ContainSingle().Which.ParentOutletId.Should().BeNull();
     }
 
     [RequiresDockerFact]

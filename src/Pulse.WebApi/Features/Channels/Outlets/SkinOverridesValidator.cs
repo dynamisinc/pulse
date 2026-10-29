@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Channels.Outlets;
 
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Pulse.WebApi.Features.Channels.Contracts;
@@ -26,12 +27,28 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// structurally unreachable: no token key addresses any of it.
 /// </para>
 /// <para>
-/// <b>Defence in depth on string values.</b> Token strings end up in CSS custom properties and font stacks on the
-/// client. The client escapes them, but the server also refuses the characters and sequences that would break out of
-/// a declaration or a value (<c>&lt;</c> <c>&gt;</c> <c>{</c> <c>}</c> <c>;</c>, <c>url(</c>, <c>expression(</c>,
-/// <c>javascript:</c>, case-insensitive) and any control character, and caps each string at
-/// <see cref="MaxStringLength"/> characters. The whole object is capped at <see cref="MaxBytes"/> UTF-8 bytes of
-/// compact JSON.
+/// <b>Defence in depth on string values.</b> The client escapes tokens too; the server additionally refuses, in every
+/// string value (case-insensitively):
+/// </para>
+/// <list type="bullet">
+///   <item><description><b>CSS-bound strings</b> (<c>type</c>, <c>palette</c>, <c>density</c>, <c>media</c>,
+///   <c>ext.&lt;ns&gt;</c>; they end up in CSS custom properties and font stacks): the characters and
+///   sequences <c>&lt;</c> <c>&gt;</c> <c>{</c> <c>}</c> <c>;</c> <c>\</c> <c>@</c> <c>/*</c> <c>*/</c> <c>!</c>
+///   <c>javascript:</c>, and any CSS function call (<c>name(</c>) other than <see cref="AllowedCssFunctions"/>, which
+///   refuses <c>url(</c>, <c>image-set(</c>, <c>-webkit-image-set(</c>, <c>image(</c>, <c>cross-fade(</c>,
+///   <c>element(</c>, <c>src(</c>, <c>expression(</c> and the rest. Quotes stay allowed (font stacks need them).
+///   </description></item>
+///   <item><description><b>Text templates</b> (<c>byline</c>, <c>dateline</c>, <c>breaking</c> and the <c>clutter</c> chips; rendered as text, so
+///   <c>{placeholder}</c> braces are allowed): <c>&lt;</c> <c>&gt;</c> <c>;</c> <c>\</c> <c>url(</c>
+///   <c>expression(</c> <c>javascript:</c>.</description></item>
+///   <item><description><b>Everywhere</b>: control characters and invisible formatting characters (Unicode Cf, Zl,
+///   Zp, e.g. U+202E), and strings longer than <see cref="MaxStringLength"/> characters.</description></item>
+/// </list>
+/// <para>
+/// <b>Size cap.</b> The whole object, serialized by <see cref="Serialize"/> (compact, relaxed escaping, so non-Latin
+/// text is not inflated into <c>\uXXXX</c> escapes), must be at most <see cref="MaxBytes"/> UTF-8 bytes; over the cap,
+/// that is the only error reported. The outlet registry stores exactly this serialization. Relaxed escaping is safe
+/// here because <c>&lt;</c> and <c>&gt;</c> are refused in every string anyway.
 /// </para>
 /// <para>
 /// <b>Null means unset.</b> A null overrides object, an empty object and a <c>null</c> token value are all valid.
@@ -59,11 +76,23 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
 
     private const string Root = "skinOverrides";
 
-    private static readonly string[] Breakouts = ["<", ">", "{", "}", ";", "url(", "expression(", "javascript:"];
+    private const string CssBreakoutList = "< > { } ; \\ @ /* */ ! javascript:";
+    private const string TextTemplateBreakoutList = "< > ; \\ url( expression( javascript:";
+
+    private static readonly string[] CssBreakouts = ["<", ">", "{", "}", ";", "\\", "@", "/*", "*/", "!", "javascript:"];
 
     // Text-template groups render as text, never as CSS, so their formats may use {placeholder} syntax
-    // ("By {name}"). Every other group feeds CSS custom properties and keeps the full breakout list.
-    private static readonly string[] TextTemplateBreakouts = ["<", ">", ";", "url(", "expression(", "javascript:"];
+    // ("By {name}"). Every other group feeds CSS custom properties and keeps the full CSS rules.
+    private static readonly string[] TextTemplateBreakouts = ["<", ">", ";", "\\", "url(", "expression(", "javascript:"];
+
+    private static readonly JsonSerializerOptions CompactRelaxed = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = false,
+    };
+
+    /// <summary>The only CSS functions a CSS-bound token may call (case-insensitive).</summary>
+    public static IReadOnlyList<string> AllowedCssFunctions { get; } = ["rgb", "rgba", "hsl", "hsla", "var", "calc", "min", "max", "clamp"];
 
     private static readonly HashSet<string> TextTemplateGroups = new(StringComparer.Ordinal) { "breaking", "byline", "dateline" };
 
@@ -93,13 +122,13 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
             return SkinOverridesValidationResult.Valid;
         }
 
+        if (Encoding.UTF8.GetByteCount(Serialize(skinOverrides)) > MaxBytes)
+        {
+            return new SkinOverridesValidationResult([$"{Root} exceeds the 4 KB cap."]);
+        }
+
         var errors = new List<string>();
         var isTabloid = string.Equals(skinKey, TabloidSkinKey, StringComparison.Ordinal);
-
-        if (Encoding.UTF8.GetByteCount(skinOverrides.ToJsonString()) > MaxBytes)
-        {
-            errors.Add($"{Root} exceeds the 4 KB cap.");
-        }
 
         foreach (var (key, value) in skinOverrides)
         {
@@ -133,6 +162,18 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
         }
 
         return errors.Count == 0 ? SkinOverridesValidationResult.Valid : new SkinOverridesValidationResult(errors);
+    }
+
+    /// <summary>
+    /// The one serialization of an overrides object: compact JSON with relaxed escaping. The 4 KB cap is measured on it,
+    /// and the outlet registry stores it.
+    /// </summary>
+    /// <param name="skinOverrides">The overrides.</param>
+    /// <returns>The compact JSON.</returns>
+    public static string Serialize(JsonObject skinOverrides)
+    {
+        ArgumentNullException.ThrowIfNull(skinOverrides);
+        return skinOverrides.ToJsonString(CompactRelaxed);
     }
 
     private static void ValidateSchemaVersion(string path, JsonNode? value, List<string> errors)
@@ -249,7 +290,8 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
             return;
         }
 
-        ValidateStringArray(path, value, MaxClutterItemLength, errors);
+        // Clutter items are tabloid chip TEXT ("SHOCKING!"), rendered as text, never as CSS: text-template rules.
+        ValidateStringArray(path, value, MaxClutterItemLength, errors, isTextTemplate: true);
     }
 
     private static void ValidateExt(string path, JsonNode? value, List<string> errors)
@@ -312,7 +354,7 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
         }
     }
 
-    private static void ValidateStringArray(string path, JsonNode value, int maxItemLength, List<string> errors)
+    private static void ValidateStringArray(string path, JsonNode value, int maxItemLength, List<string> errors, bool isTextTemplate = false)
     {
         if (value is not JsonArray array)
         {
@@ -335,28 +377,48 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
                 continue;
             }
 
-            ValidateString(itemPath, item!.GetValue<string>(), maxItemLength, errors);
+            ValidateString(itemPath, item!.GetValue<string>(), maxItemLength, errors, isTextTemplate);
         }
     }
 
     private static void ValidateString(string path, string value, int maxLength, List<string> errors, bool isTextTemplate = false)
     {
-        var breakouts = isTextTemplate ? TextTemplateBreakouts : Breakouts;
         if (value.Length > maxLength)
         {
             errors.Add($"{path} is longer than {maxLength} characters.");
         }
 
-        if (value.Any(char.IsControl))
+        if (OutletText.HasControlOrInvisible(value))
         {
-            errors.Add($"{path} contains a control character.");
+            errors.Add($"{path} contains a control or invisible formatting character.");
         }
 
-        if (breakouts.Any(breakout => value.Contains(breakout, StringComparison.OrdinalIgnoreCase)))
+        if (isTextTemplate)
         {
-            errors.Add(isTextTemplate
-                ? $"{path} contains a disallowed character or sequence (< > ; url( expression( javascript:)."
-                : $"{path} contains a disallowed character or sequence (< > {{ }} ; url( expression( javascript:).");
+            if (TextTemplateBreakouts.Any(breakout => value.Contains(breakout, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"{path} contains a disallowed character or sequence ({TextTemplateBreakoutList}).");
+            }
+
+            return;
+        }
+
+        if (CssBreakouts.Any(breakout => value.Contains(breakout, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add($"{path} contains a disallowed character or sequence ({CssBreakoutList}).");
+            return;
+        }
+
+        foreach (Match call in CssFunctionCall().Matches(value))
+        {
+            var name = call.Groups["name"].Value;
+            if (!AllowedCssFunctions.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                errors.Add(
+                    $"{path} contains a disallowed character or sequence: the CSS function '{name}(' "
+                    + $"(only {string.Join(", ", AllowedCssFunctions)} are allowed).");
+                return;
+            }
         }
     }
 
@@ -364,4 +426,8 @@ public sealed partial class SkinOverridesValidator : ISkinOverridesValidator
 
     [GeneratedRegex(@"\A[A-Za-z][A-Za-z0-9_-]{0,63}\z", RegexOptions.CultureInvariant)]
     private static partial Regex ExtKeyPattern();
+
+    // Any identifier-like run directly before "(" (whitespace allowed); CSS idents may contain digits, '_' and '-'.
+    [GeneratedRegex(@"(?<name>[A-Za-z_-][A-Za-z0-9_-]*)\s*\(", RegexOptions.CultureInvariant)]
+    private static partial Regex CssFunctionCall();
 }

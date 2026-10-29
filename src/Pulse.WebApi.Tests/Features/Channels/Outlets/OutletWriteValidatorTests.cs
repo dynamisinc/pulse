@@ -102,9 +102,49 @@ public sealed class OutletWriteValidatorTests
         OutletWriteValidator.Parse(Valid() with { Name = new string('n', Outlet.MaxNameLength + 1) }, null, Skin).Error
             .Should().Be("name must be at most 120 characters.");
         OutletWriteValidator.Parse(Valid() with { Name = "Metro\u0000Desk" }, null, Skin).Error
-            .Should().Be("name must not contain control characters.");
+            .Should().Be("name must not contain control or invisible formatting characters.");
         OutletWriteValidator.Parse(Valid() with { Tagline = new string('t', Outlet.MaxTaglineLength + 1) }, null, Skin).Error
             .Should().Be("tagline must be at most 200 characters.");
+    }
+
+    [Fact]
+    public void InvisibleFormattingCharacters_AreRefusedInNameTaglineAndCategories()
+    {
+        const string Rlo = "\u202E";
+
+        OutletWriteValidator.Parse(Valid() with { Name = $"Metro{Rlo}Desk" }, null, Skin).Error
+            .Should().Be("name must not contain control or invisible formatting characters.");
+        OutletWriteValidator.Parse(Valid() with { Tagline = $"On your{Rlo} side" }, null, Skin).Error
+            .Should().Be("tagline must not contain control or invisible formatting characters.");
+        OutletWriteValidator.Parse(Valid() with { Categories = [$"Lo{Rlo}cal"] }, null, Skin).Error
+            .Should().Be("categories[0] must not contain control or invisible formatting characters.");
+    }
+
+    [Fact]
+    public void TheSlugIsImmutableAfterCreate()
+    {
+        OutletWriteValidator.Parse(Valid() with { Slug = "metro-desk-nine", Version = 3 }, Existing(), Skin).Error
+            .Should().Be("slug cannot be changed after the outlet is created (permalink stability, NWS-011).");
+        OutletWriteValidator.Parse(Valid() with { Version = 3 }, Existing(), Skin).Draft.Should().NotBeNull("echoing the slug is fine");
+    }
+
+    [Fact]
+    public void AParentIsOnlyAllowedOnAPressOutlet()
+    {
+        var parent = Guid.NewGuid().ToString();
+
+        OutletWriteValidator.Parse(Valid() with { ParentOutletId = parent }, null, Skin).Error
+            .Should().Be("parentOutletId is only allowed on a press outlet.");
+        OutletWriteValidator.Parse(Valid() with { ChannelId = "press", ParentOutletId = parent }, null, Skin).Draft.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void SkinOverrides_AreStoredWithRelaxedEscaping()
+    {
+        var draft = OutletWriteValidator.Parse(
+            Valid() with { SkinOverrides = JsonNode.Parse("""{ "type": { "hedFamily": "\"Noto Sans\" , 'Ж'" } }""") }, null, Skin).Draft!;
+
+        draft.SkinOverridesJson.Should().Be("""{"type":{"hedFamily":"\"Noto Sans\" , 'Ж'"}}""");
     }
 
     [Fact]

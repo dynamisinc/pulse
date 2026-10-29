@@ -491,3 +491,43 @@ internal sealed class ConcurrentSlugWriter : SaveChangesInterceptor
         return await base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 }
+
+/// <summary>
+/// Plays a concurrent writer that wins at the SAVE: when a save is about to modify the armed outlet, it first bumps that
+/// row's <c>Version</c> (and renames it) through an independent context, so the original UPDATE's concurrency token
+/// matches no row and EF throws <see cref="DbUpdateConcurrencyException"/>. Fires once.
+/// </summary>
+internal sealed class ConcurrentVersionBumper : SaveChangesInterceptor
+{
+    public const string OtherName = "Changed by the other writer";
+
+    private Guid? _outletId;
+    private string? _connectionString;
+    private int _fired;
+
+    public void Arm(Guid outletId, string connectionString)
+    {
+        _outletId = outletId;
+        _connectionString = connectionString;
+    }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        var target = eventData.Context?.ChangeTracker.Entries<Outlet>()
+            .FirstOrDefault(e => e.State == EntityState.Modified && e.Entity.Id == _outletId);
+        if (target is not null && Interlocked.Exchange(ref _fired, 1) == 0)
+        {
+            var options = new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer(_connectionString).Options;
+            await using var other = new PulseDbContext(options, new ExerciseContext { CurrentExerciseId = target.Entity.ExerciseId });
+            var row = await other.Outlets.SingleAsync(o => o.Id == target.Entity.Id, cancellationToken);
+            row.Name = OtherName;
+            row.Version++;
+            await other.SaveChangesAsync(cancellationToken);
+        }
+
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+}

@@ -27,6 +27,16 @@ public static class OutletWriteValidator
     /// </summary>
     public const string ReservedSlug = "staff";
 
+    /// <summary>
+    /// The refusal for a PUT that changes the slug. A slug is immutable once created: content permalinks
+    /// (<c>/{channel}/{outletSlug}/{contentSlug}</c>) embed it (NWS-011).
+    /// </summary>
+    public const string SlugImmutableMessage =
+        "slug cannot be changed after the outlet is created (permalink stability, NWS-011).";
+
+    /// <summary>The refusal for a parent on a non-press outlet: only press org newsrooms are children (of The Wire Room).</summary>
+    public const string ParentOnlyOnPressMessage = "parentOutletId is only allowed on a press outlet.";
+
     /// <summary>Parses and validates a write body.</summary>
     /// <param name="request">The untrusted body, or null.</param>
     /// <param name="existing">The outlet being edited (a PUT), or null for a create.</param>
@@ -64,6 +74,10 @@ public static class OutletWriteValidator
         {
             errors.Add($"slug '{ReservedSlug}' is reserved.");
         }
+        else if (existing is not null && !string.Equals(slug, existing.Slug, StringComparison.Ordinal))
+        {
+            errors.Add(SlugImmutableMessage);
+        }
 
         var name = Trim(request.Name);
         if (name is null)
@@ -82,6 +96,11 @@ public static class OutletWriteValidator
         }
 
         var parentOutletId = ParseId("parentOutletId", request.ParentOutletId, errors);
+        var outletChannel = existing?.ChannelId ?? channelId;
+        if (parentOutletId is not null && outletChannel is not null && outletChannel != ChannelVocabulary.Press)
+        {
+            errors.Add(ParentOnlyOnPressMessage);
+        }
         var pairedPersonaId = ParseId("pairedPersonaId", request.PairedPersonaId, errors);
         var logoMediaId = ParseId("logoMediaId", request.LogoMediaId, errors);
 
@@ -105,7 +124,7 @@ public static class OutletWriteValidator
                 errors.AddRange(result.Errors);
                 if (result.IsValid && overrides.Count > 0)
                 {
-                    skinOverridesJson = overrides.ToJsonString();
+                    skinOverridesJson = SkinOverridesValidator.Serialize(overrides);
                 }
 
                 break;
@@ -207,9 +226,9 @@ public static class OutletWriteValidator
             errors.Add($"{field} must be at most {maxLength} characters.");
         }
 
-        if (value.Any(char.IsControl))
+        if (OutletText.HasControlOrInvisible(value))
         {
-            errors.Add($"{field} must not contain control characters.");
+            errors.Add($"{field} must not contain control or invisible formatting characters.");
         }
     }
 

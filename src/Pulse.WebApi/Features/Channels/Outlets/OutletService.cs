@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Channels.Outlets;
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
@@ -30,9 +31,10 @@ using Pulse.WebApi.Features.Media;
 /// <see cref="OutletResult.NotFoundMessage"/> 404.
 /// </para>
 /// <para>
-/// <b>Slugs</b> are unique per <c>(exercise, channel)</c>, and F01's unique index is unfiltered, so a soft-deleted
-/// outlet keeps its slug reserved (permalinks are never reused, NWS-011). A taken slug, live or deleted, is a
-/// <c>409</c>; a concurrent writer that wins the race on the index gets the same <c>409</c>.
+/// <b>Slugs</b> keep content permalinks stable (NWS-011) in two ways: a slug is IMMUTABLE once the outlet is created (a
+/// PUT that changes it is a <c>400</c>), and it is unique per <c>(exercise, channel)</c> on F01's UNFILTERED unique
+/// index, so a soft-deleted outlet keeps its slug reserved too. A taken slug, live or deleted, is a <c>409</c> on
+/// create; a concurrent writer that wins the race on the index gets the same <c>409</c>.
 /// </para>
 /// <para>
 /// <b>Concurrency.</b> Every write bumps <see cref="Outlet.Version"/> (an EF concurrency token). A PUT or DELETE whose
@@ -62,6 +64,9 @@ public sealed partial class OutletService
 
     /// <summary>The ONE message for an unknown, non-image or other-exercise logo (COR-001).</summary>
     public const string LogoNotFoundMessage = "logoMediaId does not name an image in this exercise.";
+
+    /// <summary>The refusal to delete an outlet that still has live child outlets.</summary>
+    public const string HasChildrenMessage = "outlet has child outlets; delete or re-parent them first.";
 
     /// <summary>The readable refusal for a reorder that does not name the channel's outlets exactly.</summary>
     public const string ReorderListMessage = "ids must list every outlet of the channel exactly once.";
@@ -162,8 +167,9 @@ public sealed partial class OutletService
             .ToListAsync(cancellationToken);
 
         var logos = await SignLogosAsync(outlets, cancellationToken);
+        var servedParents = await ServedParentIdsAsync(outlets, cancellationToken);
         return OutletResult.Ok<IReadOnlyList<OutletDto>>(
-            outlets.Select(outlet => ToParticipantDto(outlet, logos.GetValueOrDefault(outlet.Id))).ToList());
+            outlets.Select(outlet => ToParticipantDto(outlet, logos.GetValueOrDefault(outlet.Id), servedParents)).ToList());
     }
 
     /// <summary>
@@ -220,7 +226,8 @@ public sealed partial class OutletService
         }
 
         var logos = await SignLogosAsync([match], cancellationToken);
-        return OutletResult.Ok(ToParticipantDto(match, logos.GetValueOrDefault(match.Id)));
+        var servedParents = await ServedParentIdsAsync([match], cancellationToken);
+        return OutletResult.Ok(ToParticipantDto(match, logos.GetValueOrDefault(match.Id), servedParents));
     }
 
     // ---- staff reads ---------------------------------------------------------------------------------
@@ -357,14 +364,8 @@ public sealed partial class OutletService
             return OutletResult.Invalid<OutletStaffDto>(referenceError);
         }
 
-        if (draft.Slug != outlet.Slug
-            && await SlugConflictAsync(outlet.ChannelId, draft.Slug, outlet.Id, cancellationToken) is { } slugConflict)
-        {
-            return OutletResult.Conflict<OutletStaffDto>(slugConflict, null);
-        }
-
+        // The slug is immutable (OutletWriteValidator refuses a change), so an edit can never meet the slug index.
         var time = await TimeForAsync(caller.ExerciseId, cancellationToken);
-        outlet.Slug = draft.Slug;
         outlet.Name = draft.Name;
         outlet.SkinKey = draft.SkinKey;
         outlet.Enabled = draft.Enabled ?? outlet.Enabled;
@@ -381,16 +382,6 @@ public sealed partial class OutletService
         {
             _dbContext.ChangeTracker.Clear();
             return await ConflictWithCurrentAsync(outletId, cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            _dbContext.ChangeTracker.Clear();
-            if (await SlugConflictAsync(draft.ChannelId, draft.Slug, outletId, cancellationToken) is { } raced)
-            {
-                return OutletResult.Conflict<OutletStaffDto>(raced, null);
-            }
-
-            throw;
         }
 
         return OutletResult.Ok(await ProjectStaffAsync(outlet, cancellationToken));
@@ -431,8 +422,16 @@ public sealed partial class OutletService
             return OutletResult.Conflict<OutletStaffDto>(StaleVersionMessage, await ProjectStaffAsync(outlet, cancellationToken));
         }
 
+        if (await _dbContext.Outlets.AnyAsync(child => child.ParentOutletId == outletId, cancellationToken))
+        {
+            return OutletResult.Conflict<OutletStaffDto>(HasChildrenMessage, await ProjectStaffAsync(outlet, cancellationToken));
+        }
+
         var time = await TimeForAsync(caller.ExerciseId, cancellationToken);
         outlet.Version++;
+
+        // One clock read: PulseDbContext's soft-delete conversion only stamps DeletedAt when it is unset (??=), so this
+        // value, shared with the telemetry event, is the one persisted.
         outlet.DeletedAt = time.WallClock;
         _dbContext.Outlets.Remove(outlet); // converted to a soft delete by PulseDbContext (XC-010)
         _dbContext.TelemetryEvents.Add(OutletTelemetry.ForOutlet(outlet, OutletTelemetry.ActionDelete, caller.StaffUserId, time));
@@ -520,9 +519,11 @@ public sealed partial class OutletService
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateConcurrencyException ex)
         {
+            // An outlet's version moved since the read (an edit, delete or another reorder). Nothing else is a race.
             _dbContext.ChangeTracker.Clear();
+            LogLostRace(ex, OutletTelemetry.ActionReorder, channelId!);
             return OutletResult.Conflict<IReadOnlyList<OutletStaffDto>>(
                 "The outlets changed while you were reordering. Refresh and try again.", null);
         }
@@ -616,10 +617,12 @@ public sealed partial class OutletService
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException || IsUniqueViolation(ex))
             {
                 // A concurrent "add defaults" (or create) took one of these slugs first: nothing of this call was saved.
+                // Anything else is not a race and propagates.
                 _dbContext.ChangeTracker.Clear();
+                LogLostRace(ex, "defaults", channelId!);
                 return OutletResult.Conflict<OutletDefaultsResultDto>(
                     "Outlets were added on this channel at the same time. Refresh and try again.", null);
             }
@@ -875,17 +878,38 @@ public sealed partial class OutletService
     }
 
     /// <summary>
+    /// The parents of <paramref name="outlets"/> a participant may be pointed at: enabled and not deleted (the central
+    /// filter drops deleted and other-exercise rows). A parent is on press, as is its child, so the channel gate that
+    /// admitted the child admits it too. A participant DTO never names a parent it would get a 404 for.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> ServedParentIdsAsync(IReadOnlyCollection<Outlet> outlets, CancellationToken cancellationToken)
+    {
+        var parentIds = outlets.Select(outlet => outlet.ParentOutletId).OfType<Guid>().Distinct().ToList();
+        if (parentIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        var served = await _dbContext.Outlets
+            .AsNoTracking()
+            .Where(outlet => parentIds.Contains(outlet.Id) && outlet.Enabled)
+            .Select(outlet => outlet.Id)
+            .ToListAsync(cancellationToken);
+        return served.ToHashSet();
+    }
+
+    /// <summary>
     /// The PARTICIPANT projection (XC-002): only the frozen <see cref="OutletDto"/> fields, never the exercise id, the
     /// enabled flag, the order, the version or any wall clock.
     /// </summary>
-    private static OutletDto ToParticipantDto(Outlet outlet, ContentMediaDto? logo) => new()
+    private static OutletDto ToParticipantDto(Outlet outlet, ContentMediaDto? logo, IReadOnlySet<Guid> servedParents) => new()
     {
         Id = outlet.Id.ToString(),
         ChannelId = outlet.ChannelId,
         Slug = outlet.Slug,
         Name = outlet.Name,
         Tagline = outlet.Tagline,
-        ParentOutletId = outlet.ParentOutletId?.ToString(),
+        ParentOutletId = outlet.ParentOutletId is { } parentId && servedParents.Contains(parentId) ? parentId.ToString() : null,
         PairedPersonaId = outlet.PairedPersonaId?.ToString(),
         Logo = logo,
         Categories = ReadCategories(outlet.CategoriesJson),
@@ -984,6 +1008,16 @@ public sealed partial class OutletService
         var staff = await _staffSession.GetCurrentStaffSessionAsync(cancellationToken);
         return staff is null ? null : new Caller(exerciseId, staff.StaffUserId);
     }
+
+    /// <summary>Whether a save failed on a unique index (SQL Server 2601 duplicate key, 2627 unique constraint).</summary>
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 2601 or 2627 };
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "The outlet {Action} on channel {ChannelId} lost a race to a concurrent writer; answered 409.")]
+    private partial void LogLostRace(Exception exception, string action, string channelId);
 
     [LoggerMessage(
         EventId = 1,

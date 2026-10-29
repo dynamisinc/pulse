@@ -89,7 +89,8 @@ public sealed record OutletStaffDto
 /// A PUT replaces the outlet's fields: an omitted optional field (<c>tagline</c>, <c>parentOutletId</c>,
 /// <c>pairedPersonaId</c>, <c>logoMediaId</c>, <c>categories</c>, <c>skinOverrides</c>) is cleared. Two fields keep
 /// their current value when omitted on a PUT: <c>enabled</c> and <c>sortOrder</c> (on a create they default to
-/// <c>true</c> and "after the last outlet of the channel"). <c>channelId</c> is set on create and immutable after.
+/// <c>true</c> and "after the last outlet of the channel"). <c>channelId</c> and <c>slug</c> are set on create and
+/// immutable after (a PUT may echo them, not change them): content permalinks embed the slug (NWS-011).
 /// </remarks>
 public sealed record OutletWriteRequest
 {
@@ -97,7 +98,7 @@ public sealed record OutletWriteRequest
     [JsonPropertyName("channelId")]
     public string? ChannelId { get; init; }
 
-    /// <summary>The FC-1 slug.</summary>
+    /// <summary>The FC-1 slug (immutable after create; a PUT must echo it).</summary>
     [JsonPropertyName("slug")]
     public string? Slug { get; init; }
 
@@ -109,7 +110,7 @@ public sealed record OutletWriteRequest
     [JsonPropertyName("tagline")]
     public string? Tagline { get; init; }
 
-    /// <summary>The parent press outlet's id.</summary>
+    /// <summary>The parent press outlet's id (only on a press outlet).</summary>
     [JsonPropertyName("parentOutletId")]
     public string? ParentOutletId { get; init; }
 

@@ -120,7 +120,7 @@ public sealed class SkinOverridesValidatorTests
         var overlong = new JsonObject { ["byline"] = new JsonObject { ["format"] = new string('x', SkinOverridesValidator.MaxStringLength + 1) } };
         var atLimit = new JsonObject { ["byline"] = new JsonObject { ["format"] = new string('x', SkinOverridesValidator.MaxStringLength) } };
 
-        _validator.Validate(NewsSkin, control).Errors.Should().ContainSingle().Which.Should().Be("skinOverrides.byline.format contains a control character.");
+        _validator.Validate(NewsSkin, control).Errors.Should().ContainSingle().Which.Should().Be("skinOverrides.byline.format contains a control or invisible formatting character.");
         _validator.Validate(NewsSkin, overlong).Errors.Should().ContainSingle().Which.Should().Be("skinOverrides.byline.format is longer than 200 characters.");
         _validator.Validate(NewsSkin, atLimit).IsValid.Should().BeTrue();
     }
@@ -128,7 +128,7 @@ public sealed class SkinOverridesValidatorTests
     [Fact]
     public void Clutter_IsAllowedOnlyOnTheTabloidKey()
     {
-        const string Clutter = """{ "clutter": ["SHOCKING", "You won't believe"] }""";
+        const string Clutter = """{ "clutter": ["SHOCKING!", "You won't believe"] }""";
 
         Validate(Clutter, SkinOverridesValidator.TabloidSkinKey).IsValid.Should().BeTrue("The Scoop owns clutter (D3-P2)");
         Validate(Clutter, NewsSkin).Errors.Should().ContainSingle()
@@ -212,7 +212,7 @@ public sealed class SkinOverridesValidatorTests
         {
             var ext = new JsonObject();
             var overrides = new JsonObject { ["ext"] = new JsonObject { ["news"] = ext } };
-            int Size() => Encoding.UTF8.GetByteCount(overrides.ToJsonString());
+            int Size() => Encoding.UTF8.GetByteCount(SkinOverridesValidator.Serialize(overrides));
 
             var index = 0;
             while (Size() + 130 <= totalBytes)
@@ -228,11 +228,100 @@ public sealed class SkinOverridesValidatorTests
 
         var atCap = OfSize(SkinOverridesValidator.MaxBytes);
         var overCap = OfSize(SkinOverridesValidator.MaxBytes + 1);
-        Encoding.UTF8.GetByteCount(atCap.ToJsonString()).Should().Be(4096);
-        Encoding.UTF8.GetByteCount(overCap.ToJsonString()).Should().Be(4097);
+        Encoding.UTF8.GetByteCount(SkinOverridesValidator.Serialize(atCap)).Should().Be(4096);
+        Encoding.UTF8.GetByteCount(SkinOverridesValidator.Serialize(overCap)).Should().Be(4097);
 
         _validator.Validate(NewsSkin, atCap).IsValid.Should().BeTrue("4096 bytes is within the cap");
         _validator.Validate(NewsSkin, overCap).Errors.Should().ContainSingle().Which.Should().Be("skinOverrides exceeds the 4 KB cap.");
+    }
+
+    [Fact]
+    public void OverTheCap_TheCapIsTheOnlyError()
+    {
+        var overrides = new JsonObject
+        {
+            ["slotOrder"] = 1,
+            ["ext"] = new JsonObject { ["foo"] = new string('x', SkinOverridesValidator.MaxBytes) },
+        };
+
+        _validator.Validate(NewsSkin, overrides).Errors.Should().Equal("skinOverrides exceeds the 4 KB cap.");
+    }
+
+    [Fact]
+    public void TheCap_IsMeasuredWithRelaxedEscaping_SoNonLatinTextIsNotInflated()
+    {
+        // 10 x 190 Cyrillic letters: about 3.9 KB as raw UTF-8, but ~11 KB if each letter were escaped as \uXXXX.
+        var ext = new JsonObject();
+        for (var i = 0; i < 10; i++)
+        {
+            ext[$"k{i}"] = new string('\u0416', 190);
+        }
+
+        var overrides = new JsonObject { ["ext"] = new JsonObject { ["news"] = ext } };
+
+        SkinOverridesValidator.Serialize(overrides).Should().Contain("\u0416", "stored as the character itself, not an escape");
+        _validator.Validate(NewsSkin, overrides).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("u\\72l(x)")]
+    [InlineData("image-set(\"https://x/p.png\" 1x)")]
+    [InlineData("-webkit-image-set(\"a.png\" 1x)")]
+    [InlineData("cross-fade(red, blue)")]
+    [InlineData("element(#x)")]
+    [InlineData("@import")]
+    [InlineData("red /* x */")]
+    [InlineData("red !important")]
+    [InlineData("url (x)")]
+    public void CssBoundStrings_RefuseEscapesAtRulesCommentsImportantAndNonAllowlistedFunctions(string value)
+    {
+        foreach (var overrides in new[]
+                 {
+                     new JsonObject { ["palette"] = new JsonObject { ["accent"] = value } },
+                     new JsonObject { ["ext"] = new JsonObject { ["press"] = new JsonObject { ["letterhead"] = value } } },
+                 })
+        {
+            _validator.Validate(NewsSkin, overrides).Errors.Should().ContainSingle()
+                .Which.Should().Contain("contains a disallowed character or sequence", "{0} is refused in a CSS-bound token", value);
+        }
+    }
+
+    [Theory]
+    [InlineData("rgb(1,2,3)")]
+    [InlineData("RGBA(1, 2, 3, 0.5)")]
+    [InlineData("var(--x)")]
+    [InlineData("\"Playfair Display\", serif")]
+    [InlineData("'Inter', sans-serif")]
+    [InlineData("calc(1rem + 2px)")]
+    [InlineData("clamp(1rem, 2vw, 3rem)")]
+    [InlineData("hsl(10 20% 30%)")]
+    public void CssBoundStrings_AcceptColoursFontStacksAndAllowlistedFunctions(string value)
+    {
+        var overrides = new JsonObject { ["type"] = new JsonObject { ["hedFamily"] = value } };
+
+        _validator.Validate(NewsSkin, overrides).Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TextTemplates_AlsoRefuseABackslash()
+    {
+        var overrides = new JsonObject { ["byline"] = new JsonObject { ["format"] = "By {name} \\3c" } };
+
+        _validator.Validate(NewsSkin, overrides).Errors.Should().ContainSingle()
+            .Which.Should().StartWith("skinOverrides.byline.format contains a disallowed character or sequence");
+    }
+
+    [Theory]
+    [InlineData("\u202E")]
+    [InlineData("\u200B")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void Strings_RefuseInvisibleFormattingCharacters(string invisible)
+    {
+        var overrides = new JsonObject { ["palette"] = new JsonObject { ["accent"] = $"#c8{invisible}102e" } };
+
+        _validator.Validate(NewsSkin, overrides).Errors.Should().ContainSingle()
+            .Which.Should().Be("skinOverrides.palette.accent contains a control or invisible formatting character.");
     }
 
     [Fact]
