@@ -8,9 +8,12 @@ const REASON = 'Only the lead controller can enable swamped mode.'
 describe('LeadOnlyNote (#787: compact, so the 1180px command band stays one row)', () => {
   it('shows the short label, and gives the full reason as the tooltip', () => {
     render(<LeadOnlyNote testId="note" label="Swamped: lead only" reason={REASON} />)
-    const note = screen.getByTestId('note')
-    expect(note).toHaveTextContent('Swamped: lead only')
-    expect(note).toHaveAttribute('title', REASON)
+    const label = screen.getByTestId('note-label')
+    expect(label).toHaveTextContent('Swamped: lead only')
+    expect(label).toHaveAttribute('aria-hidden', 'true')
+    expect(label).toHaveAttribute('title', REASON)
+    // The note itself carries no title, so assistive tech can't read the reason twice.
+    expect(screen.getByTestId('note')).not.toHaveAttribute('title')
   })
 
   it('describes a control by the full reason only (the short label and the icon are not read)', () => {

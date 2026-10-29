@@ -368,7 +368,7 @@ export function EngineControlBar() {
         <LeadOnlyNote
           id="engine-lead-only-reason"
           testId="engine-lead-only-reason"
-          label="Raise: lead only"
+          label="Raise engine: lead only"
           reason={LEAD_ONLY_RAISE_REASON}
         />
       )}
