@@ -17,6 +17,11 @@ namespace Pulse.WebApi.Data.Migrations
                 type: "uniqueidentifier",
                 nullable: true);
 
+            migrationBuilder.AddUniqueConstraint(
+                name: "AK_MediaAssets_ExerciseId_Id",
+                table: "MediaAssets",
+                columns: new[] { "ExerciseId", "Id" });
+
             migrationBuilder.CreateTable(
                 name: "ChannelAlerts",
                 columns: table => new
@@ -66,11 +71,12 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     table.PrimaryKey("PK_Outlets", x => x.Id);
                     table.UniqueConstraint("AK_Outlets_ExerciseId_Id", x => new { x.ExerciseId, x.Id });
+                    table.UniqueConstraint("AK_Outlets_ExerciseId_Id_ChannelId", x => new { x.ExerciseId, x.Id, x.ChannelId });
                     table.ForeignKey(
-                        name: "FK_Outlets_MediaAssets_LogoMediaId",
-                        column: x => x.LogoMediaId,
+                        name: "FK_Outlets_MediaAssets_ExerciseId_LogoMediaId",
+                        columns: x => new { x.ExerciseId, x.LogoMediaId },
                         principalTable: "MediaAssets",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_Outlets_Outlets_ExerciseId_ParentOutletId",
@@ -99,10 +105,10 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     table.PrimaryKey("PK_PortalConfigs", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_PortalConfigs_MediaAssets_LogoMediaId",
-                        column: x => x.LogoMediaId,
+                        name: "FK_PortalConfigs_MediaAssets_ExerciseId_LogoMediaId",
+                        columns: x => new { x.ExerciseId, x.LogoMediaId },
                         principalTable: "MediaAssets",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -125,10 +131,10 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     table.PrimaryKey("PK_PortalResources", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_PortalResources_MediaAssets_MediaAssetId",
-                        column: x => x.MediaAssetId,
+                        name: "FK_PortalResources_MediaAssets_ExerciseId_MediaAssetId",
+                        columns: x => new { x.ExerciseId, x.MediaAssetId },
                         principalTable: "MediaAssets",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -199,16 +205,16 @@ namespace Pulse.WebApi.Data.Migrations
                     table.PrimaryKey("PK_ContentItems", x => x.Id);
                     table.UniqueConstraint("AK_ContentItems_ExerciseId_Id", x => new { x.ExerciseId, x.Id });
                     table.ForeignKey(
-                        name: "FK_ContentItems_MediaAssets_HeroMediaId",
-                        column: x => x.HeroMediaId,
+                        name: "FK_ContentItems_MediaAssets_ExerciseId_HeroMediaId",
+                        columns: x => new { x.ExerciseId, x.HeroMediaId },
                         principalTable: "MediaAssets",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_ContentItems_Outlets_ExerciseId_OutletId",
-                        columns: x => new { x.ExerciseId, x.OutletId },
+                        name: "FK_ContentItems_Outlets_ExerciseId_OutletId_ChannelId",
+                        columns: x => new { x.ExerciseId, x.OutletId, x.ChannelId },
                         principalTable: "Outlets",
-                        principalColumns: new[] { "ExerciseId", "Id" },
+                        principalColumns: new[] { "ExerciseId", "Id", "ChannelId" },
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -235,10 +241,10 @@ namespace Pulse.WebApi.Data.Migrations
                         principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_ContentItemMedia_MediaAssets_MediaAssetId",
-                        column: x => x.MediaAssetId,
+                        name: "FK_ContentItemMedia_MediaAssets_ExerciseId_MediaAssetId",
+                        columns: x => new { x.ExerciseId, x.MediaAssetId },
                         principalTable: "MediaAssets",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "ExerciseId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -286,9 +292,9 @@ namespace Pulse.WebApi.Data.Migrations
                 columns: new[] { "ExerciseId", "ContentItemId", "SortOrder" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_ContentItemMedia_MediaAssetId",
+                name: "IX_ContentItemMedia_ExerciseId_MediaAssetId",
                 table: "ContentItemMedia",
-                column: "MediaAssetId");
+                columns: new[] { "ExerciseId", "MediaAssetId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_ContentItemRevisions_ExerciseId_ContentItemId_Number",
@@ -309,20 +315,26 @@ namespace Pulse.WebApi.Data.Migrations
                 filter: "[ExternalSource] IS NOT NULL AND [ExternalRef] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
+                name: "IX_ContentItems_ExerciseId_HeroMediaId",
+                table: "ContentItems",
+                columns: new[] { "ExerciseId", "HeroMediaId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ContentItems_ExerciseId_OutletId_ChannelId",
+                table: "ContentItems",
+                columns: new[] { "ExerciseId", "OutletId", "ChannelId" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ContentItems_ExerciseId_OutletId_Slug",
                 table: "ContentItems",
                 columns: new[] { "ExerciseId", "OutletId", "Slug" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ContentItems_HeroMediaId",
+                name: "IX_ContentItems_ScheduledScenarioTime_ExerciseId",
                 table: "ContentItems",
-                column: "HeroMediaId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ContentItems_Status_ScheduledScenarioTime",
-                table: "ContentItems",
-                columns: new[] { "Status", "ScheduledScenarioTime" });
+                columns: new[] { "ScheduledScenarioTime", "ExerciseId" },
+                filter: "[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Outlets_ExerciseId_ChannelId_Slug",
@@ -331,14 +343,14 @@ namespace Pulse.WebApi.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_Outlets_ExerciseId_LogoMediaId",
+                table: "Outlets",
+                columns: new[] { "ExerciseId", "LogoMediaId" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Outlets_ExerciseId_ParentOutletId",
                 table: "Outlets",
                 columns: new[] { "ExerciseId", "ParentOutletId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Outlets_LogoMediaId",
-                table: "Outlets",
-                column: "LogoMediaId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PortalConfigs_ExerciseId",
@@ -347,19 +359,19 @@ namespace Pulse.WebApi.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PortalConfigs_LogoMediaId",
+                name: "IX_PortalConfigs_ExerciseId_LogoMediaId",
                 table: "PortalConfigs",
-                column: "LogoMediaId");
+                columns: new[] { "ExerciseId", "LogoMediaId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PortalResources_ExerciseId_MediaAssetId",
+                table: "PortalResources",
+                columns: new[] { "ExerciseId", "MediaAssetId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_PortalResources_ExerciseId_SortOrder",
                 table: "PortalResources",
                 columns: new[] { "ExerciseId", "SortOrder" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_PortalResources_MediaAssetId",
-                table: "PortalResources",
-                column: "MediaAssetId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_WeatherZones_ExerciseId_Slug",
@@ -406,6 +418,10 @@ namespace Pulse.WebApi.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "Outlets");
+
+            migrationBuilder.DropUniqueConstraint(
+                name: "AK_MediaAssets_ExerciseId_Id",
+                table: "MediaAssets");
 
             migrationBuilder.DropIndex(
                 name: "IX_InjectItems_ExerciseId_ContentItemId",

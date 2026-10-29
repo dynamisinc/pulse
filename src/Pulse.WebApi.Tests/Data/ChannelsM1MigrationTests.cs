@@ -215,10 +215,27 @@ public class ChannelsM1MigrationTests
         using var context = ModelOnlyContext();
 
         AssertSameExercise(context, typeof(Outlet), typeof(Outlet), nameof(Outlet.ParentOutletId));
-        AssertSameExercise(context, typeof(ContentItem), typeof(Outlet), nameof(ContentItem.OutletId));
+        var toOutlet = context.Model.FindEntityType(typeof(ContentItem))!.GetForeignKeys()
+            .Single(fk => fk.PrincipalEntityType.ClrType == typeof(Outlet));
+        toOutlet.Properties.Select(p => p.Name).Should().Equal(
+            ["ExerciseId", "OutletId", "ChannelId"], "an item is filed under an outlet of its own exercise AND channel");
+        toOutlet.PrincipalKey.Properties.Select(p => p.Name).Should().Equal(["ExerciseId", "Id", "ChannelId"]);
         AssertSameExercise(context, typeof(ContentItemRevision), typeof(ContentItem), nameof(ContentItemRevision.ContentItemId));
         AssertSameExercise(context, typeof(ContentItemMedia), typeof(ContentItem), nameof(ContentItemMedia.ContentItemId));
         AssertSameExercise(context, typeof(InjectItem), typeof(ContentItem), nameof(InjectItem.ContentItemId));
+        AssertSameExercise(context, typeof(Outlet), typeof(MediaAsset), nameof(Outlet.LogoMediaId));
+        AssertSameExercise(context, typeof(ContentItem), typeof(MediaAsset), nameof(ContentItem.HeroMediaId));
+        AssertSameExercise(context, typeof(ContentItemMedia), typeof(MediaAsset), nameof(ContentItemMedia.MediaAssetId));
+        AssertSameExercise(context, typeof(PortalConfig), typeof(MediaAsset), nameof(PortalConfig.LogoMediaId));
+        AssertSameExercise(context, typeof(PortalResource), typeof(MediaAsset), nameof(PortalResource.MediaAssetId));
+
+        foreach (var type in ChannelRows.M1EntityTypes)
+        {
+            var exerciseId = context.Model.FindEntityType(type)!.FindProperty(nameof(IExerciseScoped.ExerciseId))!;
+            exerciseId.IsConcurrencyToken.Should().BeTrue("{0}: every tracked UPDATE is confined to the row's original exercise", type.Name);
+            exerciseId.GetAfterSaveBehavior().Should().Be(
+                PropertySaveBehavior.Throw, "{0}: a row can never be moved into another exercise", type.Name);
+        }
 
         foreach (var type in ChannelRows.M1EntityTypes.Append(typeof(InjectItem)))
         {

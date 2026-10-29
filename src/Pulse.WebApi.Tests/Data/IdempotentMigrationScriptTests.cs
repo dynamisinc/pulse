@@ -225,8 +225,9 @@ public class IdempotentMigrationScriptTests
         var injectItemId = await database.InsertLegacyInjectItemAsync(exerciseId);
         var script = database.GenerateIdempotentScript();
 
-        // The one filtered index M1 creates reaches the batch inside EXEC(N'…') (#413).
-        script.Should().Contain("EXEC(N'CREATE UNIQUE INDEX [IX_ContentItems_ExerciseId_ExternalSource_ExternalRef]");
+        // M1's filtered indexes reach the batch inside EXEC(N'…') (#413).
+        script.Should().Contain("EXEC(N'CREATE UNIQUE INDEX [IX_ContentItems_ExerciseId_ExternalSource_ExternalRef]")
+            .And.Contain("EXEC(N'CREATE INDEX [IX_ContentItems_ScheduledScenarioTime_ExerciseId]");
 
         await database.ApplyScriptAsync(script);
 

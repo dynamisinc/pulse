@@ -160,12 +160,23 @@ public class ChannelsIsolationTests
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
         var (outletA, itemA) = await ChannelRows.SeedOutletAndItemAsync(_fixture, exerciseA);
+        var (outletB, itemB) = await ChannelRows.SeedOutletAndItemAsync(_fixture, exerciseB);
+        var assetA = ChannelRows.MediaAsset(exerciseA);
         var assetB = ChannelRows.MediaAsset(exerciseB);
         await using (var seed = _fixture.CreateContext())
         {
-            seed.MediaAssets.Add(assetB);
+            seed.MediaAssets.AddRange(assetA, assetB);
             await seed.SaveChangesAsync();
         }
+
+        var heroFromA = ChannelRows.ContentItem(exerciseB, outletB.Id, slug: "hero-from-a");
+        heroFromA.HeroMediaId = assetA.Id;
+        var logoFromA = ChannelRows.Outlet(exerciseB, slug: "logo-from-a");
+        logoFromA.LogoMediaId = assetA.Id;
+        var portalLogoFromA = ChannelRows.PortalConfig(exerciseB);
+        portalLogoFromA.LogoMediaId = assetA.Id;
+        var resourceImageFromA = ChannelRows.PortalResource(exerciseB);
+        resourceImageFromA.MediaAssetId = assetA.Id;
 
         object[] crossExercise =
         [
@@ -173,6 +184,11 @@ public class ChannelsIsolationTests
             ChannelRows.Outlet(exerciseB, slug: "child", parentOutletId: outletA.Id),
             ChannelRows.Revision(exerciseB, itemA.Id),
             ChannelRows.Media(exerciseB, itemA.Id, assetB.Id),
+            ChannelRows.Media(exerciseB, itemB.Id, assetA.Id),
+            heroFromA,
+            logoFromA,
+            portalLogoFromA,
+            resourceImageFromA,
             ChannelRows.Inject(exerciseB, itemA.Id),
         ];
 
@@ -187,14 +203,105 @@ public class ChannelsIsolationTests
                 .Which.Number.Should().Be(ForeignKeyViolation, "the same-exercise composite foreign key is what refuses it");
         }
 
+        // A press release filed under a NEWS outlet of the same exercise is refused too: the outlet key carries the channel.
+        await using (var crossChannel = _fixture.CreateContext(ScopeFor(exerciseA)))
+        {
+            var release = ChannelRows.ContentItem(exerciseA, outletA.Id, slug: "wrong-channel");
+            release.ChannelId = "press";
+            release.Kind = "release";
+            crossChannel.Add(release);
+            var act = async () => await crossChannel.SaveChangesAsync();
+            (await act.Should().ThrowAsync<DbUpdateException>()).Which.InnerException.Should().BeOfType<SqlException>()
+                .Which.Number.Should().Be(ForeignKeyViolation, "an item's channel must be its outlet's channel");
+        }
+
         // The same references inside A's own exercise are accepted.
         await using var writeA = _fixture.CreateContext(ScopeFor(exerciseA));
         writeA.Add(ChannelRows.ContentItem(exerciseA, outletA.Id, slug: "second-item"));
         writeA.Add(ChannelRows.Outlet(exerciseA, slug: "child", parentOutletId: outletA.Id));
         writeA.Add(ChannelRows.Revision(exerciseA, itemA.Id));
         writeA.Add(ChannelRows.Inject(exerciseA, itemA.Id));
+        writeA.Add(ChannelRows.Media(exerciseA, itemA.Id, assetA.Id));
         var save = async () => await writeA.SaveChangesAsync();
         await save.Should().NotThrowAsync("same-exercise references are the normal shape");
+    }
+
+    [RequiresDockerFact]
+    public async Task AStubOrStaleEntity_NamingAsRow_CannotWriteItUnderB_TheExerciseIdTokenMatchesNoRow()
+    {
+        // The write guard checks only for an EMPTY scope; a detached entity attached under another context is otherwise
+        // written by key. ExerciseId is a concurrency token on every M1 entity, so the UPDATE carries the original
+        // ExerciseId and an entity that claims B's scope for A's id matches nothing.
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var (_, itemA) = await ChannelRows.SeedOutletAndItemAsync(_fixture, exerciseA);
+
+        await using (var writeB = _fixture.CreateContext(ScopeFor(exerciseB)))
+        {
+            var stub = ChannelRows.ContentItem(exerciseB, Guid.NewGuid());
+            stub.Id = itemA.Id;
+            writeB.Attach(stub);
+            stub.Headline = "Hijacked";
+            var act = async () => await writeB.SaveChangesAsync();
+            await act.Should().ThrowAsync<DbUpdateConcurrencyException>("B's stub of A's item matches no row");
+        }
+
+        await using (var deleteB = _fixture.CreateContext(ScopeFor(exerciseB)))
+        {
+            var stub = ChannelRows.ContentItem(exerciseB, Guid.NewGuid());
+            stub.Id = itemA.Id;
+            deleteB.Remove(stub);
+            var act = async () => await deleteB.SaveChangesAsync();
+            await act.Should().ThrowAsync<DbUpdateConcurrencyException>("nor can B soft-delete A's item by stub");
+        }
+
+        await using var readA = _fixture.CreateContext(ScopeFor(exerciseA));
+        var row = await readA.ContentItems.SingleAsync(c => c.Id == itemA.Id);
+        row.Headline.Should().Be(itemA.Headline);
+        row.DeletedAt.Should().BeNull();
+    }
+
+    [RequiresDockerFact]
+    public async Task ASoftDeleteByStub_WritesOnlyDeletedAt_AndLeavesEveryOtherColumnIntact()
+    {
+        var exerciseId = Guid.NewGuid();
+        var (_, item) = await ChannelRows.SeedOutletAndItemAsync(_fixture, exerciseId);
+
+        await using (var delete = _fixture.CreateContext(ScopeFor(exerciseId)))
+        {
+            // The delete-by-id idiom: a stub carrying only the keys and the concurrency tokens.
+            var stub = new ContentItem
+            {
+                Id = item.Id, ExerciseId = exerciseId, Version = item.Version, ChannelId = "x", Kind = "x", Slug = "x",
+                Status = "x", Headline = "x", Origin = "x", ActingHumanId = "x",
+                CreatedScenarioTime = default, CreatedWallClock = default,
+            };
+            delete.Remove(stub);
+            await delete.SaveChangesAsync();
+        }
+
+        await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
+        var row = await read.IncludingSoftDeleted<ContentItem>().SingleAsync(c => c.Id == item.Id);
+        row.DeletedAt.Should().NotBeNull("the stub delete is a soft delete");
+        row.Headline.Should().Be(item.Headline, "only DeletedAt is written; the stub's placeholder values never reach the row");
+        row.BodyHtml.Should().Be(item.BodyHtml);
+        row.Slug.Should().Be(item.Slug);
+        row.OutletId.Should().Be(item.OutletId);
+        row.CreatedScenarioTime.Should().Be(item.CreatedScenarioTime);
+    }
+
+    [RequiresDockerFact]
+    public async Task ARowsExercise_CannotBeChangedAfterInsert()
+    {
+        var exerciseId = Guid.NewGuid();
+        var rows = await ChannelRows.SeedOneOfEachAsync(_fixture, exerciseId);
+
+        await using var write = _fixture.CreateContext(ScopeFor(exerciseId));
+        var alert = await write.ChannelAlerts.SingleAsync(a => a.Id == rows[typeof(ChannelAlert)]);
+        alert.ExerciseId = Guid.NewGuid();
+        var act = async () => await write.SaveChangesAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "ExerciseId is save-once on every M1 entity: a row can never be moved into another exercise");
     }
 
     // ---- soft delete (XC-010) -------------------------------------------------------------------

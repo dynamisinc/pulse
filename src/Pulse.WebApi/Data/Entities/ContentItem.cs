@@ -121,10 +121,10 @@ public sealed class ContentItem : IExerciseScoped, ISoftDeletable
     public DateTimeOffset? RetractedScenarioTime { get; set; }
 
     /// <summary>The scenario instant the item was created.</summary>
-    public DateTimeOffset CreatedScenarioTime { get; set; }
+    public required DateTimeOffset CreatedScenarioTime { get; set; }
 
     /// <summary>Server wall-clock instant the item was created. Staff/telemetry only.</summary>
-    public DateTimeOffset CreatedWallClock { get; set; }
+    public required DateTimeOffset CreatedWallClock { get; set; }
 
     /// <summary>Who caused the item: <c>controller</c> / <c>participant</c> / <c>engine</c> / <c>inject</c>. Staff-only.</summary>
     public required string Origin { get; set; }

@@ -113,6 +113,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset?>("ExpiresScenarioTime")
@@ -210,6 +211,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ExternalRef")
@@ -299,13 +301,16 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("HeroMediaId");
+                    b.HasIndex("ExerciseId", "HeroMediaId");
 
-                    b.HasIndex("Status", "ScheduledScenarioTime");
+                    b.HasIndex("ScheduledScenarioTime", "ExerciseId")
+                        .HasFilter("[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
                     b.HasIndex("ExerciseId", "ExternalSource", "ExternalRef")
                         .IsUnique()
                         .HasFilter("[ExternalSource] IS NOT NULL AND [ExternalRef] IS NOT NULL");
+
+                    b.HasIndex("ExerciseId", "OutletId", "ChannelId");
 
                     b.HasIndex("ExerciseId", "OutletId", "Slug")
                         .IsUnique();
@@ -332,6 +337,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("MediaAssetId")
@@ -347,7 +353,7 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MediaAssetId");
+                    b.HasIndex("ExerciseId", "MediaAssetId");
 
                     b.HasIndex("ExerciseId", "ContentItemId", "SortOrder");
 
@@ -372,6 +378,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Kind")
@@ -1224,6 +1231,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("LogoMediaId")
@@ -1266,7 +1274,7 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("LogoMediaId");
+                    b.HasIndex("ExerciseId", "LogoMediaId");
 
                     b.HasIndex("ExerciseId", "ParentOutletId");
 
@@ -1509,6 +1517,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("nvarchar(120)");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("LayoutKey")
@@ -1543,7 +1552,7 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("ExerciseId")
                         .IsUnique();
 
-                    b.HasIndex("LogoMediaId");
+                    b.HasIndex("ExerciseId", "LogoMediaId");
 
                     b.ToTable("PortalConfigs");
                 });
@@ -1561,6 +1570,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("MediaAssetId")
@@ -1587,7 +1597,7 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MediaAssetId");
+                    b.HasIndex("ExerciseId", "MediaAssetId");
 
                     b.HasIndex("ExerciseId", "SortOrder");
 
@@ -2038,6 +2048,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<Guid>("ExerciseId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDefault")
@@ -2088,28 +2099,30 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
                         .WithMany()
-                        .HasForeignKey("HeroMediaId")
+                        .HasForeignKey("ExerciseId", "HeroMediaId")
+                        .HasPrincipalKey("ExerciseId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Pulse.WebApi.Data.Entities.Outlet", null)
                         .WithMany()
-                        .HasForeignKey("ExerciseId", "OutletId")
-                        .HasPrincipalKey("ExerciseId", "Id")
+                        .HasForeignKey("ExerciseId", "OutletId", "ChannelId")
+                        .HasPrincipalKey("ExerciseId", "Id", "ChannelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.ContentItemMedia", b =>
                 {
-                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
-                        .WithMany()
-                        .HasForeignKey("MediaAssetId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Pulse.WebApi.Data.Entities.ContentItem", null)
                         .WithMany()
                         .HasForeignKey("ExerciseId", "ContentItemId")
+                        .HasPrincipalKey("ExerciseId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("ExerciseId", "MediaAssetId")
                         .HasPrincipalKey("ExerciseId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -2249,7 +2262,8 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
                         .WithMany()
-                        .HasForeignKey("LogoMediaId")
+                        .HasForeignKey("ExerciseId", "LogoMediaId")
+                        .HasPrincipalKey("ExerciseId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Pulse.WebApi.Data.Entities.Outlet", null)
@@ -2276,7 +2290,8 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
                         .WithMany()
-                        .HasForeignKey("LogoMediaId")
+                        .HasForeignKey("ExerciseId", "LogoMediaId")
+                        .HasPrincipalKey("ExerciseId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -2284,7 +2299,8 @@ namespace Pulse.WebApi.Data.Migrations
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
                         .WithMany()
-                        .HasForeignKey("MediaAssetId")
+                        .HasForeignKey("ExerciseId", "MediaAssetId")
+                        .HasPrincipalKey("ExerciseId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

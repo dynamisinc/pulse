@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Data;
 
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
@@ -1033,9 +1034,12 @@ public class PulseDbContext : DbContext
         // reflect-over-the-model idiom, so a newly-added org-owned library entity is covered automatically.
         //
         // ADDITIVE, NEVER SUBSTITUTIVE. This loop runs AFTER the exercise loop above and uses a DISTINCT
-        // filter key (OrganizationScopeFilterKey), so on an entity carrying both markers EF Core 10 keeps
-        // BOTH named filters and ANDs them. It cannot overwrite, relax or disable the always-Critical
-        // exercise predicate — which is why the exercise loop above is left byte-for-byte unchanged.
+        // filter key (OrganizationScopeFilterKey), so it cannot overwrite, relax or disable the always-Critical
+        // exercise predicate — which is why the exercise loop above is left byte-for-byte unchanged. NOTE (found
+        // by channels-foundation/01): EF Core 10 REFUSES an anonymous and a named filter on the same entity at
+        // model build, so an entity carrying BOTH markers fails loudly rather than ANDing the two. Today the axes
+        // cover disjoint entity sets; an entity that ever needs both must compose them into one predicate, the
+        // way the soft-delete loop below composes DeletedAt with the exercise predicate.
         //
         // FAIL CLOSED (captured in the ctor): _currentOrganizationId is
         //     organizationContext?.CurrentOrganizationId ?? Guid.Empty
@@ -1094,11 +1098,17 @@ public class PulseDbContext : DbContext
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Same-exercise references.</b> Every reference BETWEEN these tables (and the inject column) is a composite foreign
-    /// key <c>(ExerciseId, XId)</c> onto an alternate key <c>(ExerciseId, Id)</c>, so the database itself refuses a row
-    /// that points into another exercise — a cross-exercise write fails even if a service forgets to check. References to
-    /// <c>MediaAssets</c> are plain Restrict foreign keys (house style, as <c>PostMediaItems</c>; tightening them would alter
-    /// an existing table); persona, post, inject and alert ids are logical references resolved through the scoped sets.
+    /// <b>Same-exercise references.</b> Every reference from these tables to another table row — each other, the inject
+    /// column, and <c>MediaAssets</c> — is a composite foreign key <c>(ExerciseId, XId)</c> onto an alternate key
+    /// <c>(ExerciseId, Id)</c>, so the database itself refuses a row that points into another exercise: a cross-exercise
+    /// write fails even if a service forgets to check. M1 adds that alternate key to <c>MediaAssets</c> (a unique constraint
+    /// over the existing unique <c>Id</c>; no column change). Persona, post, inject and alert ids are logical references
+    /// resolved through the scoped sets.
+    /// </para>
+    /// <para>
+    /// <b>ExerciseId is a concurrency token</b> on every M1 entity, so every tracked UPDATE carries
+    /// <c>AND [ExerciseId] = @original</c>: a stale or stub entity naming another exercise's id matches no row and throws
+    /// <c>DbUpdateConcurrencyException</c> instead of writing across the boundary. Model-only, no DDL.
     /// </para>
     /// <para>
     /// <b>Every foreign key is Restrict</b> (XC-010: no cascade path, no hard delete). Slug indexes are unfiltered, so a
@@ -1109,11 +1119,16 @@ public class PulseDbContext : DbContext
     /// </remarks>
     private static void ConfigureChannels(ModelBuilder modelBuilder)
     {
+        // The principal side of the same-exercise media references below (see remarks).
+        modelBuilder.Entity<MediaAsset>().HasAlternateKey(e => new { e.ExerciseId, e.Id });
+
         modelBuilder.Entity<Outlet>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
             entity.HasAlternateKey(e => new { e.ExerciseId, e.Id });
+            entity.HasAlternateKey(e => new { e.ExerciseId, e.Id, e.ChannelId });
 
             entity.Property(e => e.ChannelId).IsRequired().HasMaxLength(Outlet.MaxChannelIdLength);
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(Outlet.MaxSlugLength);
@@ -1135,14 +1150,16 @@ public class PulseDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<MediaAsset>()
                 .WithMany()
-                .HasForeignKey(e => e.LogoMediaId)
+                .HasForeignKey(e => new { e.ExerciseId, e.LogoMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ContentItem>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
             entity.HasAlternateKey(e => new { e.ExerciseId, e.Id });
 
             entity.Property(e => e.ChannelId).IsRequired().HasMaxLength(Outlet.MaxChannelIdLength);
@@ -1175,23 +1192,28 @@ public class PulseDbContext : DbContext
 
             // The participant list read (newest-first per channel) and the scheduler's due-item sweep (story 05).
             entity.HasIndex(e => new { e.ExerciseId, e.ChannelId, e.Status, e.PublishedScenarioTime });
-            entity.HasIndex(e => new { e.Status, e.ScheduledScenarioTime });
+            entity.HasIndex(e => new { e.ScheduledScenarioTime, e.ExerciseId })
+                .HasFilter("[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
+            // The outlet reference also carries ChannelId, so an item can only be filed under an outlet of its OWN
+            // channel (a news item under a press outlet would render in one channel with another's skin and permalink).
             entity.HasOne<Outlet>()
                 .WithMany()
-                .HasForeignKey(e => new { e.ExerciseId, e.OutletId })
-                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .HasForeignKey(e => new { e.ExerciseId, e.OutletId, e.ChannelId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id, e.ChannelId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<MediaAsset>()
                 .WithMany()
-                .HasForeignKey(e => e.HeroMediaId)
+                .HasForeignKey(e => new { e.ExerciseId, e.HeroMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ContentItemRevision>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             entity.Property(e => e.Kind).IsRequired().HasMaxLength(ContentItemRevision.MaxKindLength);
             entity.Property(e => e.Note).HasMaxLength(ContentItemRevision.MaxNoteLength);
@@ -1211,7 +1233,8 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<ContentItemMedia>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             entity.Property(e => e.Role).IsRequired().HasMaxLength(Entities.ContentItemMedia.MaxRoleLength);
             entity.Property(e => e.Alt).HasMaxLength(Entities.ContentItemMedia.MaxAltLength);
@@ -1225,14 +1248,16 @@ public class PulseDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<MediaAsset>()
                 .WithMany()
-                .HasForeignKey(e => e.MediaAssetId)
+                .HasForeignKey(e => new { e.ExerciseId, e.MediaAssetId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ChannelAlert>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             entity.Property(e => e.Severity).IsRequired().HasMaxLength(ChannelAlert.MaxLiteralLength);
             entity.Property(e => e.Headline).IsRequired().HasMaxLength(ChannelAlert.MaxHeadlineLength);
@@ -1249,7 +1274,8 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<PortalConfig>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             // PC-2: at most one row per exercise (absent row = defaults).
             entity.HasIndex(e => e.ExerciseId).IsUnique();
@@ -1264,14 +1290,16 @@ public class PulseDbContext : DbContext
 
             entity.HasOne<MediaAsset>()
                 .WithMany()
-                .HasForeignKey(e => e.LogoMediaId)
+                .HasForeignKey(e => new { e.ExerciseId, e.LogoMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PortalResource>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             entity.Property(e => e.Title).IsRequired().HasMaxLength(PortalResource.MaxTitleLength);
             entity.Property(e => e.Summary).HasMaxLength(PortalResource.MaxSummaryLength);
@@ -1283,14 +1311,16 @@ public class PulseDbContext : DbContext
 
             entity.HasOne<MediaAsset>()
                 .WithMany()
-                .HasForeignKey(e => e.MediaAssetId)
+                .HasForeignKey(e => new { e.ExerciseId, e.MediaAssetId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<WeatherZone>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(WeatherZone.MaxSlugLength);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(WeatherZone.MaxNameLength);
@@ -1409,8 +1439,12 @@ public class PulseDbContext : DbContext
                 continue;
             }
 
-            entry.State = EntityState.Modified;
+            // Unchanged + ONE modified property, never State = Modified: Modified would write every column, so a
+            // delete-by-stub (`Remove(new X { Id = id, ... })`) would blank the row it meant to retain. ExerciseId and
+            // Version (concurrency tokens on these entities) keep the UPDATE confined to the row as it was read.
+            entry.State = EntityState.Unchanged;
             entry.Entity.DeletedAt ??= DateTimeOffset.UtcNow;
+            entry.Property(nameof(ISoftDeletable.DeletedAt)).IsModified = true;
         }
     }
 

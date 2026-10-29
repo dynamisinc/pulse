@@ -40,10 +40,10 @@ public sealed class ContentItemRevision : IExerciseScoped, ISoftDeletable
     public string SnapshotJson { get; set; } = "{}";
 
     /// <summary>The scenario instant of the revision.</summary>
-    public DateTimeOffset ScenarioTime { get; set; }
+    public required DateTimeOffset ScenarioTime { get; set; }
 
     /// <summary>Server wall-clock instant of the revision. Staff/telemetry only.</summary>
-    public DateTimeOffset WallClock { get; set; }
+    public required DateTimeOffset WallClock { get; set; }
 
     /// <summary>The human who made the revision (COR-018). Staff-only.</summary>
     public required string ActingHumanId { get; set; }

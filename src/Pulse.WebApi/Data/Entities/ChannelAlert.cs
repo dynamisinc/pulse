@@ -42,7 +42,7 @@ public sealed class ChannelAlert : IExerciseScoped, ISoftDeletable
     public string? Href { get; set; }
 
     /// <summary>The scenario instant the alert was issued.</summary>
-    public DateTimeOffset IssuedScenarioTime { get; set; }
+    public required DateTimeOffset IssuedScenarioTime { get; set; }
 
     /// <summary>The scenario instant the alert lapses, else <c>null</c>.</summary>
     public DateTimeOffset? ExpiresScenarioTime { get; set; }
