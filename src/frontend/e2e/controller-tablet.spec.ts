@@ -452,9 +452,12 @@ test.describe('command band at 1180x820 (dev versus production)', () => {
     await expect(page.getByText('PROVIDER DEGRADED', { exact: false })).toBeVisible()
     await page.addStyleTag({ content: HIDE_DEV_BUTTON_CSS })
 
-    const { band, end } = await measureBand(page)
+    const { band, end, wraps } = await measureBand(page)
+    expect(wraps, 'the alarm banner wraps the band (the state this test is about)').toBe(true)
+    expect(end.x + end.width, 'End exercise ends inside the band (no clip)').toBeLessThanOrEqual(band.x + band.width)
     expect(end.x + end.width, 'End exercise ends inside the viewport').toBeLessThanOrEqual(1180)
     expect(end.y + end.height, 'End exercise sits inside the band').toBeLessThanOrEqual(band.y + band.height)
+    expect(end.y + end.height, 'End exercise sits inside the viewport').toBeLessThanOrEqual(820)
     await expect(page.getByTestId('lifecycle-end')).toBeVisible()
     await expectTouchTarget(page.getByTestId('lifecycle-end'))
     await expectNoHorizontalScroll(page)
