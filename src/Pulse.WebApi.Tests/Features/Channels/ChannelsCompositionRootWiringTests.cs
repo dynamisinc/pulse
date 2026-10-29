@@ -8,7 +8,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Microsoft.Extensions.Hosting;
 using Pulse.WebApi.Features.Channels;
+using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Contracts;
 using Xunit;
 
 /// <summary>
@@ -18,8 +21,8 @@ using Xunit;
 /// exercise filter — and that the <c>AddChannels()</c> seam later stories fill is safe to compose.
 /// </summary>
 /// <remarks>
-/// Story 01 registers no service of its own (schema only), so there is no route or service to find yet; stories 03+ extend
-/// this file as they fill <c>AddChannels()</c>. Resolving the context only needs the host to BUILD, so it is fed a dummy,
+/// Story 01 registers no service of its own (schema only); stories 03+ extend this file as they fill <c>AddChannels()</c>
+/// (story 04: the publish funnel). Resolving the context only needs the host to BUILD, so it is fed a dummy,
 /// never-connecting connection string.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
@@ -50,12 +53,43 @@ public sealed class ChannelsCompositionRootWiringTests
     }
 
     [Fact]
-    public void AddChannels_IsIdempotentAndRegistersNothingYet()
+    public void AddChannels_IsIdempotent()
     {
         var services = new ServiceCollection();
 
         services.AddChannels().AddChannels().Should().BeSameAs(services);
-        services.Should().BeEmpty("story 01 is schema only; stories 03+ add their registrations to this seam");
+        services.GroupBy(descriptor => (descriptor.ServiceType, descriptor.ImplementationType))
+            .Should().OnlyContain(group => group.Count() == 1, "a second AddChannels() registers nothing twice");
+    }
+
+    [Fact]
+    public void ProgramCs_ResolvesThePublishFunnel_AndItsSeams()
+    {
+        // Story 04: the funnel, its projector, the profile registry and the startup check reach the REAL host through
+        // AddChannels(); no Program.cs edit.
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<IContentPublishService>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<ContentProjector>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IContentPermalinks>().Should().BeSameAs(ContentPermalinks.Instance);
+        var profiles = factory.Services.GetRequiredService<ISanitizerProfileRegistry>();
+        profiles.Contains(ISanitizerProfileRegistry.Plain).Should().BeTrue();
+        profiles.Contains(ISanitizerProfileRegistry.RichBasic).Should().BeTrue();
+        profiles.Contains(ISanitizerProfileRegistry.RichTables).Should().BeTrue();
+        factory.Services.GetServices<IHostedService>().OfType<ContentKindStartupCheck>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public void AKindNamingAnUnregisteredProfile_FailsHostStart()
+    {
+        using var factory = new WiringProbeFactory(services =>
+            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("article", "news", "article-rich")));
+
+        var start = () => factory.Services;
+
+        start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
     }
 
     /// <summary>Boots the real <c>Program</c> host with a dummy, never-connecting connection string. Overrides nothing else.</summary>
@@ -65,9 +99,20 @@ public sealed class ChannelsCompositionRootWiringTests
         private const string DummyConnectionString =
             "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
-        public WiringProbeFactory()
+        private readonly Action<IServiceCollection>? _configure;
+
+        public WiringProbeFactory(Action<IServiceCollection>? configure = null)
         {
+            _configure = configure;
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+        }
+
+        protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+        {
+            if (_configure is not null)
+            {
+                builder.ConfigureServices(_configure);
+            }
         }
 
         protected override void Dispose(bool disposing)

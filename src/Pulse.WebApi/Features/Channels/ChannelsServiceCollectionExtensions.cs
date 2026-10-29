@@ -1,5 +1,7 @@
 namespace Pulse.WebApi.Features.Channels;
 
+using Pulse.WebApi.Features.Channels.Content.Publish;
+
 /// <summary>
 /// The channels foundation's one DI entry point (FC-9.10), called once from the orchestrator-owned <c>Program.cs</c>.
 /// </summary>
@@ -17,6 +19,9 @@ public static class ChannelsServiceCollectionExtensions
     public static IServiceCollection AddChannels(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        // Story 04: the content publish funnel (IContentPublishService), its sanitizer profiles and startup check.
+        services.AddContentPublishFunnel();
         return services;
     }
 }
