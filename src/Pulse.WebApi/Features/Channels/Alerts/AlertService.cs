@@ -115,7 +115,7 @@ public sealed partial class AlertService : IAlertRaiser
 
         // The central filter confines this to the resolved exercise: a cross-exercise id reads as absent.
         var alert = await _dbContext.ChannelAlerts.FirstOrDefaultAsync(row => row.Id == id, cancellationToken);
-        if (alert is null || !IsActive(alert, time.ScenarioTime))
+        if (alert is null || !IsActive(alert, time.KnownScenarioTime))
         {
             return false;
         }
@@ -135,7 +135,7 @@ public sealed partial class AlertService : IAlertRaiser
             return false;
         }
 
-        await AnnounceAsync(exerciseId, time.ScenarioTime, raised: null, clearedIds: [alert.Id]);
+        await AnnounceAsync(exerciseId, raised: null, clearedIds: [alert.Id]);
         return true;
     }
 
@@ -238,7 +238,7 @@ public sealed partial class AlertService : IAlertRaiser
             return 0;
         }
 
-        await AnnounceAsync(exerciseId, scenarioNow, raised: null, clearedIds: due.Select(alert => alert.Id).ToList());
+        await AnnounceAsync(exerciseId, raised: null, clearedIds: due.Select(alert => alert.Id).ToList());
         return due.Count;
     }
 
@@ -285,7 +285,7 @@ public sealed partial class AlertService : IAlertRaiser
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var dto = AlertReader.ToDto(alert);
-        await AnnounceAsync(exerciseId, time.ScenarioTime, raised: dto, clearedIds: []);
+        await AnnounceAsync(exerciseId, raised: dto, clearedIds: []);
         return AlertRaiseOutcome.Raised(dto);
     }
 
@@ -299,13 +299,14 @@ public sealed partial class AlertService : IAlertRaiser
     /// commits, and carries the newest set (per host instance).
     /// </remarks>
     private async Task AnnounceAsync(
-        Guid exerciseId, DateTimeOffset scenarioNow, AlertDto? raised, IReadOnlyList<Guid> clearedIds)
+        Guid exerciseId, AlertDto? raised, IReadOnlyList<Guid> clearedIds)
     {
         var gate = _announcementGate.For(exerciseId);
         await gate.WaitAsync(CancellationToken.None);
         try
         {
-            var active = await _reader.ReadActiveAsync(scenarioNow, CancellationToken.None);
+            var time = await _reader.ReadTimeAsync(exerciseId, CancellationToken.None);
+            var active = await _reader.ReadActiveAsync(time.KnownScenarioTime, CancellationToken.None);
             await _broadcaster.BroadcastAlertsChangedAsync(
                 exerciseId, new AlertsChangedDto { Alerts = active }, CancellationToken.None);
         }
@@ -358,9 +359,9 @@ public sealed partial class AlertService : IAlertRaiser
             : new ContentCaller { Origin = ChannelVocabulary.OriginController, ActingHumanId = staff.StaffUserId.ToString() };
     }
 
-    private static bool IsActive(ChannelAlert alert, DateTimeOffset scenarioNow) =>
+    private static bool IsActive(ChannelAlert alert, DateTimeOffset? scenarioNow) =>
         alert.ClearedScenarioTime is null
-        && (alert.ExpiresScenarioTime is null || alert.ExpiresScenarioTime > scenarioNow);
+        && (scenarioNow is null || alert.ExpiresScenarioTime is null || alert.ExpiresScenarioTime > scenarioNow);
 
     [LoggerMessage(
         EventId = 1,

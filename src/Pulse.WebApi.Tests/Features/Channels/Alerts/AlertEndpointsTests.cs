@@ -87,6 +87,11 @@ public sealed class AlertEndpointsTests
 
         host.Time.Advance(TimeSpan.FromMinutes(11));
 
+        // The clock is not started and no scenario instant is persisted: expiry is never decided on wall time (COR-053).
+        (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
+
+        await PinScenarioTimeAsync(host, host.Time.GetUtcNow(), exercise.ExerciseId);
+
         (await ActiveIdsAsync(host)).Should().Equal(advisory, info);
         var history = await host.Client.GetFromJsonAsync<JsonElement>("/api/alerts/history");
         history.GetProperty("alerts").EnumerateArray().Select(a => a.GetProperty("id").GetString())
@@ -167,16 +172,7 @@ public sealed class AlertEndpointsTests
         var bId = await RaiseOkAsync(host, new { severity = "emergency", headline = "B", expiresScenarioTime = expires });
 
         // The exercise clocks are not started here, so pin a persisted scenario instant: the sweep never expires on wall time.
-        await using (var db = host.Db(exerciseId: null))
-        {
-            foreach (var exercise in await db.Exercises.IgnoreQueryFilters()
-                         .Where(x => x.Id == a.ExerciseId || x.Id == b.ExerciseId).ToListAsync())
-            {
-                exercise.CurrentScenarioTime = host.Time.GetUtcNow().AddMinutes(11);
-            }
-
-            await db.SaveChangesAsync();
-        }
+        await PinScenarioTimeAsync(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
 
         var sweeper = ActivatorUtilities.CreateInstance<AlertExpirySweeper>(host.Services);
         (await sweeper.SweepAsync()).Should().BeGreaterThanOrEqualTo(2, "other tests' exercises may share the database");
@@ -293,6 +289,18 @@ public sealed class AlertEndpointsTests
         var response = await host.Client.PostAsJsonAsync("/api/alerts", body);
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+    }
+
+    /// <summary>Persists a scenario instant on the exercise rows (the clock's fallback when it is not started).</summary>
+    private static async Task PinScenarioTimeAsync(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
+    {
+        await using var db = host.Db(exerciseId: null);
+        foreach (var exercise in await db.Exercises.IgnoreQueryFilters().Where(x => exerciseIds.Contains(x.Id)).ToListAsync())
+        {
+            exercise.CurrentScenarioTime = scenarioTime;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private static Task<HttpResponseMessage> ClearAsync(InjectTestHost host, string id) =>

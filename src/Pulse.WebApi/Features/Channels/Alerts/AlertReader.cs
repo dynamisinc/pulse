@@ -74,7 +74,7 @@ public sealed class AlertReader
         }
 
         var time = await ReadTimeAsync(exerciseId, cancellationToken);
-        return new ActiveAlertsResponse { Alerts = await ReadActiveAsync(time.ScenarioTime, cancellationToken) };
+        return new ActiveAlertsResponse { Alerts = await ReadActiveAsync(time.KnownScenarioTime, cancellationToken) };
     }
 
     /// <summary><c>GET /api/alerts/history</c>: one page of every alert, newest first.</summary>
@@ -150,16 +150,19 @@ public sealed class AlertReader
     /// severity first, then newest. The set is small (a handful of bar entries), so the severity rank is applied after
     /// the filtered read.
     /// </summary>
-    /// <param name="scenarioNow">The exercise's current scenario instant.</param>
+    /// <param name="scenarioNow">
+    /// The exercise's current scenario instant, or null when it is unknown: expiry is then not applied, because it is
+    /// never decided against the wall clock (COR-053) — the same rule the expiry sweep follows.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The active alerts.</returns>
     internal async Task<IReadOnlyList<AlertDto>> ReadActiveAsync(
-        DateTimeOffset scenarioNow, CancellationToken cancellationToken)
+        DateTimeOffset? scenarioNow, CancellationToken cancellationToken)
     {
         var rows = await _dbContext.ChannelAlerts
             .AsNoTracking()
             .Where(alert => alert.ClearedScenarioTime == null
-                && (alert.ExpiresScenarioTime == null || alert.ExpiresScenarioTime > scenarioNow))
+                && (scenarioNow == null || alert.ExpiresScenarioTime == null || alert.ExpiresScenarioTime > scenarioNow))
             .ToListAsync(cancellationToken);
 
         return rows

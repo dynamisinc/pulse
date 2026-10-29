@@ -42,9 +42,15 @@ public static class AlertRaiseValidator
         var headlineLength = CodePoints(headline);
         // Code points are what a controller sees; the column (nvarchar) counts UTF-16 units, so a headline heavy in
         // astral characters (emoji) is also held to the stored bound rather than failing the save.
-        if (headlineLength is < 1 or > MaxHeadlineLength || headline.Length > ChannelAlert.MaxHeadlineLength)
+        if (headlineLength is < 1 or > MaxHeadlineLength)
         {
             return AlertRaiseValidation.Fail($"headline must be between 1 and {MaxHeadlineLength} characters of plain text.");
+        }
+
+        if (headline.Length > ChannelAlert.MaxHeadlineLength)
+        {
+            return AlertRaiseValidation.Fail(
+                "headline is too long to store: emoji and other symbols count double. Shorten it or use fewer symbols.");
         }
 
         if (raise.Href is not null

@@ -173,4 +173,8 @@ public static class AlertTelemetry
 /// <paramref name="ScenarioTime"/> is the wall-clock fallback. The expiry sweep never expires against it.
 /// </param>
 public sealed record AlertEventTime(
-    DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone, bool ScenarioKnown = true);
+    DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone, bool ScenarioKnown = true)
+{
+    /// <summary>The scenario instant when it is known, else null (never the wall-clock fallback).</summary>
+    public DateTimeOffset? KnownScenarioTime => ScenarioKnown ? ScenarioTime : null;
+}
