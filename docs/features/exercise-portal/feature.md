@@ -53,7 +53,7 @@ Parked: D2-002 visual directions (digital / print) and D2-003 layouts (band / gr
 | 15 | [Resources shelf](15-resources-shelf.md) | PRT-022, NFR-004 | frontend | 3 | M | F14 | Not Started | #779 |
 | 16 | [Console: portal setup](16-console-portal-setup.md) | PRT-002, PRT-003, PRT-022 | frontend (staff) | 3 | L | F17 | Not Started | #780 |
 | 17 | [Portal mount, landing and telemetry](17-portal-mount-landing.md) | PRT-001, PRT-006, PRT-020/021, XC-004 | frontend | 4 | L | F12 | Not Started | #781 |
-| 18 | [Kiosk-lite: `/portal?display=1` and the kiosk frame](18-kiosk-route-frame.md) | PRT-040 (lite), PRT-041, NFR-008 | frontend | 4 | M | PP-2 (shell 06 AC2) | Not Started | #782 |
+| 18 | [Kiosk-lite: `/portal?display=1` and the kiosk frame](18-kiosk-route-frame.md) | PRT-040 (lite), PRT-041, NFR-008 | frontend | 4 | M | PP-2 = foundation 22 (#788) | Not Started | #782 |
 | 19 | [Kiosk-lite portal board](19-kiosk-slides-player.md) | PRT-040 (lite), NFR-002 | frontend | 4 | M | F15 | Not Started | #783 |
 | 20 | [Console: display control](20-console-display-control.md) — **Deferred (post-December, Q-35)** | PRT-040, COR-052 (pairing) | frontend (staff) | — | (L) | F07, F17 | Deferred (post-December) | — (no issue) |
 | 21 | [Evergreen filler starter pack](21-evergreen-filler-pack.md) | PRT-030, PRT-031 | backend | 4 | M | F04, F05, F07 | Not Started | #784 |

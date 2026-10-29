@@ -18,7 +18,7 @@ slice is pulled forward into the demo window** (Tom, 10/15): the load-test repor
 | PDF-02 | Offline: cached feed and media | "Basic offline functionality…" | Should | Not Started | #525 | — |
 | PDF-03 | Load test, restart resilience, backup site | "Stability!"; "Stress-test with post volume" | Must | **Slice in progress** | #526 | [01 load report](01-load-test-report.md) (slice, #547); restart resilience = [demo-feedback/18](../demo-feedback/18-persist-pause-tier-and-clock.md) |
 | PDF-04 | Facebook-style second channel | "Facebook clone - basically, twitter posts go to Facebook"; 10/20: a customer also asked about other social platforms (likely a throwaway) | Could (needs a D-brief + epic number; no bump) | Not Started | #527 | — |
-| PDF-05 | NewsNow | "Probably unnecessary; embedding is preferred" | Won't (confirm demand) | Not Started | #528 | — |
+| PDF-05 | NewsNow | "Probably unnecessary; embedding is preferred" | **Superseded (10/29) by the news channel, E4** (#689, feature #693) | Closed (superseded) | #528 | — |
 | PDF-06 | Cadence ↔ Pulse integration | "The tools should share a file format" (file import done: #499/#518); 10/20: customer very interested in Cadence, wants a **live connection** | **Must** (raised from Should, 10/20); **Cadence drives Pulse** (PDF-D10, Tom 10/21) | Not Started | #529 | — |
 | PDF-07 | Implementer sheets | "capture time, recipient, and remarks" | Could | Not Started | #530 | — |
 | PDF-08 | In-app camera capture | "Maybe photo only. Would need automatic watermarking" | Could (after #524) | Not Started | #531 | — |
@@ -48,7 +48,7 @@ above. Open questions were answered by Tom on 10/21 (decisions PDF-D6..D10); onl
    (Portal E3, News outlets E4, Press Room / TV / newspaper / wire E5, Weather E6; epics `docs/03` to `docs/06`) ship
    in the **December release**. This overrides the Master PRD §4 phasing, where they are Phase 3, and makes it a
    release commitment, not a plan. Effects on this feature:
-   - **PDF-05 (NewsNow)** stays Won't: the commitment is the epic-defined E4 outlets (D3 skins), not a NewsNow clone.
+   - **PDF-05 (NewsNow)** is **superseded (10/29)** by the news channel: the commitment is the epic-defined E4 outlets (D3 skins, E4 #689 / feature #693), not a NewsNow clone. #528 is closed with a pointer to #689 and #693.
    - **PDF-01 (phones and tablets)** is a December prerequisite (new channels are mobile-first), so keep it first.
    - **PDF-09 (server-side burn-in)** stays **Should** (Tom, 10/21). Every new channel is still a surface to
      watermark (NFR-008) through the existing overlay.
@@ -73,7 +73,7 @@ above. Open questions were answered by Tom on 10/21 (decisions PDF-D6..D10); onl
 
 - GIF upload and playback already work end to end (`MediaSniffer` allowlists GIF87a/89a; `<img>` animates); PDF-10's
   remaining work is a participant-facing curated picker.
-- `docs/design/D3-news-outlets/` is an approved design for four outlet skins, relevant if PDF-05 returns.
+- `docs/design/D3-news-outlets/` is an approved design for four outlet skins, the design that superseded PDF-05.
 - PDF-04 (Facebook) has no D-brief and conflicts with the PRD's epic numbering (E3 is the Portal; "Lookbook" was
   descoped at launch); it needs an epic number and a brief before stories.
 - UAT runs on a single **B1 Basic** App Service instance with in-process SignalR and serverless SQL (GP_S_Gen5,
