@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Injects.Import;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 
 /// <summary>
 /// The MSEL import (demo-feedback story 03, DF-9/10/11): reads a Cadence MSEL export as-is (<c>.xlsx</c> or <c>.csv</c>),
@@ -137,7 +138,10 @@ public sealed class InjectImportService
             .Select(persona => new ImportPersona(persona.Id, persona.Handle, persona.DisplayName))
             .ToListAsync(cancellationToken);
 
-    /// <summary>The exercise's media library as the staff library lists it: every asset except video poster frames.</summary>
+    /// <summary>
+    /// The exercise's media library as the staff library lists it: every asset except video poster frames and
+    /// download-only documents (press-room story 02), which a post can never carry.
+    /// </summary>
     private async Task<List<ImportMedia>> ReadLibraryAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var posterIds = _dbContext.MediaAssets
@@ -146,7 +150,7 @@ public sealed class InjectImportService
 
         return await _dbContext.MediaAssets
             .AsNoTracking()
-            .Where(asset => asset.ExerciseId == exerciseId && !posterIds.Contains(asset.Id))
+            .Where(asset => asset.ExerciseId == exerciseId && !posterIds.Contains(asset.Id) && asset.Kind != MediaKinds.Document)
             .Select(asset => new ImportMedia(asset.Id, asset.OriginalFileName, asset.Kind, asset.CreatedWallClock))
             .ToListAsync(cancellationToken);
     }

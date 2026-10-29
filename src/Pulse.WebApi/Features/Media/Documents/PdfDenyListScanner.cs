@@ -48,6 +48,9 @@ public interface IDocumentScanner
 /// <summary>One in-progress, forward-only document scan. Not thread-safe; one upload owns it.</summary>
 public interface IDocumentScan
 {
+    /// <summary>Whether a deny-listed construct has already been found (the verdict can only be a rejection).</summary>
+    bool IsRejected { get; }
+
     /// <summary>Feeds the next bytes of the file, in order.</summary>
     /// <param name="bytes">The next chunk.</param>
     void Append(ReadOnlySpan<byte> bytes);
@@ -65,28 +68,36 @@ public interface IDocumentScan
 /// <para>
 /// <b>What it rejects.</b> Any PDF NAME token (ISO 32000-1 §7.3.5: a <c>/</c> followed by regular characters up to the
 /// next whitespace or delimiter) that, after <c>#xx</c> name-escape decoding, is exactly one of the deny-listed names
-/// (so <c>/J#53</c> and <c>/#4A#53</c> are <c>/JS</c>); and a file with no <c>%%EOF</c> within its last 1024 bytes
-/// (truncated, or a PDF with another payload appended — a polyglot). Names are case-sensitive, as the spec and every
+/// (so <c>/J#53</c> and <c>/#4A#53</c> are <c>/JS</c>); and a file whose last <c>%%EOF</c> is missing, more than 1024
+/// bytes from the end, or followed by anything but whitespace (truncated, or a PDF with another payload appended — a
+/// polyglot). Names are case-sensitive, as the spec and every
 /// reader treat them. Tokens are matched EVERYWHERE — inside strings, comments and stream data too — so a name a reader
 /// might act on is never skipped because the scanner thought it was "only text"; over-matching costs a false
 /// rejection, never a miss.
 /// </para>
 /// <para>
-/// <b>The one relaxation, and why.</b> Inside a stream body (entered at a <c>&gt;&gt; stream</c> keyword followed by an
-/// end-of-line, outside any comment or string; left at <c>endstream</c>) the two-character names <c>/JS</c> and
-/// <c>/AA</c> count only when they sit in a run of text (the eight bytes before the <c>/</c> and the byte after the name
-/// are printable ASCII or whitespace). Compressed stream data is effectively random, and a random three-byte
-/// <c>/JS</c>/<c>/AA</c> followed by a delimiter occurs about once every ~130 MB per name; without this rule a 20 MB
-/// photo-heavy PDF would be falsely rejected roughly one time in seven. Every longer deny-listed name is matched in
-/// stream data unconditionally.
+/// <b>The one relaxation, and why.</b> Inside a FILTERED stream body (entered at a <c>&gt;&gt; stream</c> keyword
+/// followed by an end-of-line, outside any comment or string, when a <c>/Filter</c> name appeared since the object
+/// began; left at <c>endstream</c>) the two-character names <c>/JS</c>, <c>/AA</c> and <c>/EF</c> count only when they
+/// sit in a run of text (the eight bytes before the <c>/</c> and the byte after the name are printable ASCII or
+/// whitespace). Compressed stream data is effectively random, and a random three-byte <c>/JS</c> followed by a delimiter
+/// occurs about once every ~130 MB per name; without this rule a 20 MB photo-heavy PDF would be falsely rejected roughly
+/// one time in five. An UNFILTERED stream (an uncompressed object stream, say) gets no relaxation at all, and every
+/// longer deny-listed name is matched in stream data unconditionally.
 /// </para>
 /// <para>
-/// <b>Best-effort, by decision (known misses).</b> Content inside a COMPRESSED stream — notably a compressed object
-/// stream (<c>/Type /ObjStm</c>, PDF 1.5+) holding a <c>/JS</c> action — is opaque to a byte scan and is ACCEPTED; the
-/// test corpus pins that miss so it is explicit. A <c>/JS</c> or <c>/AA</c> written into an uncompressed stream body
-/// surrounded by binary bytes is likewise missed. Those cases are the recipient's reader's problem (and a future
-/// malware-scan hook's); the scan exists to keep ordinary hostile PDFs out of a room of participants, not to be a
-/// guarantee.
+/// <b>Best-effort, by decision — friction, not a defence against a deliberate attacker.</b> Anything inside an ENCODED
+/// stream is opaque to a byte scan and is ACCEPTED: not only Flate, but any filter (<c>/ASCIIHexDecode</c>,
+/// <c>/ASCII85Decode</c>, <c>/LZWDecode</c>, <c>/RunLengthDecode</c>…). An object stream (<c>/Type /ObjStm</c>, PDF 1.5+)
+/// can hold the catalog, an <c>/OpenAction</c> and a <c>/JS</c> action, so one encoded object stream evades the scan
+/// entirely; ordinary generators that write object streams can pass too. The corpus pins a Flate and an ASCIIHex
+/// instance of that miss so it is explicit. A deliberately crafted junk <c>&lt;&lt;/Filter …&gt;&gt; stream</c> can also
+/// switch on the relaxation above for the short names. The scan keeps ordinary and naively hostile PDFs out of a room of
+/// participants; the controls that hold against a deliberate attacker are the default-deny upload authorizer (trusted
+/// uploaders only), attachment-only serving, and the recipient's own reader. Not deny-listed by decision:
+/// <c>/URI</c> (a release legitimately links out), <c>/Named</c>, <c>/Rendition</c>, <c>/Movie</c>, <c>/Sound</c>,
+/// <c>/SetOCGState</c> (no code execution on their own; a <c>/JS</c> they carry is caught), and image codecs such as
+/// <c>/JBIG2Decode</c>/<c>/JPXDecode</c> (legitimate image encodings; reader codec bugs are the reader's to patch).
 /// </para>
 /// <para>
 /// <b>Bounded.</b> One pass, O(1) state (a 32-byte name buffer and a few counters), constant work per byte; the
@@ -102,8 +113,11 @@ public sealed class PdfDenyListScanner : IDocumentScanner
     /// <summary>
     /// The deny-listed names (without the leading <c>/</c>) and the reason each maps to. <c>/JS</c>,
     /// <c>/JavaScript</c>, <c>/OpenAction</c>, <c>/AA</c>, <c>/Launch</c>, <c>/XFA</c>, <c>/SubmitForm</c>,
-    /// <c>/EmbeddedFile</c> and <c>/Encrypt</c> are the story's list; <c>/EmbeddedFiles</c> (the name-tree key),
-    /// <c>/RichMedia</c>, <c>/ImportData</c> and <c>/GoToE</c> are the same constructs under their other names.
+    /// <c>/EmbeddedFile</c> and <c>/Encrypt</c> are the story's list. The same constructs under their other names:
+    /// <c>/EmbeddedFiles</c> (the name-tree key), <c>/EF</c> (a file specification's embedded stream — <c>/Type
+    /// /EmbeddedFile</c> on it is optional), <c>/FileAttachment</c> (the annotation) and <c>/Collection</c> (a portfolio);
+    /// <c>/RichMedia</c>, <c>/ImportData</c>, <c>/GoToE</c>, and <c>/GoToR</c> (a remote go-to, whose UNC path leaks the
+    /// reader's NTLM credentials).
     /// </summary>
     public static IReadOnlyDictionary<string, string> DeniedNames { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -117,8 +131,12 @@ public sealed class PdfDenyListScanner : IDocumentScanner
         ["ImportData"] = DocumentRejectionReasons.ActiveContent,
         ["RichMedia"] = DocumentRejectionReasons.ActiveContent,
         ["GoToE"] = DocumentRejectionReasons.ActiveContent,
+        ["GoToR"] = DocumentRejectionReasons.ActiveContent,
         ["EmbeddedFile"] = DocumentRejectionReasons.EmbeddedFile,
         ["EmbeddedFiles"] = DocumentRejectionReasons.EmbeddedFile,
+        ["EF"] = DocumentRejectionReasons.EmbeddedFile,
+        ["FileAttachment"] = DocumentRejectionReasons.EmbeddedFile,
+        ["Collection"] = DocumentRejectionReasons.EmbeddedFile,
         ["Encrypt"] = DocumentRejectionReasons.Encrypted,
     };
 
@@ -168,7 +186,8 @@ internal sealed class PdfDenyListScan : IDocumentScan
     private bool _nameOverflow;
     private int _escape; // 0 = none, 1 = saw '#', 2 = saw '#' + one hex digit
     private byte _escapeHigh;
-    private bool _nameStartedInStream;
+    private bool _nameStartedInFilteredStream;
+    private bool _nameStartedInNormal;
     private int _textRunAtSlash;
     private int _textRun;
 
@@ -182,10 +201,13 @@ internal sealed class PdfDenyListScan : IDocumentScan
     private int _keywordLength;
     private bool _keywordOverflow;
     private int _endStreamMatched;
+    private bool _filterSeenInObject;
+    private bool _streamFiltered;
 
     // ---- trailer ----
     private int _eofMatched;
     private long _lastEofEnd = -1;
+    private bool _payloadAfterEof;
 
     private enum LexState
     {
@@ -211,6 +233,9 @@ internal sealed class PdfDenyListScan : IDocumentScan
     }
 
     /// <inheritdoc />
+    public bool IsRejected => _rejection is not null;
+
+    /// <inheritdoc />
     public DocumentScanResult Complete()
     {
         if (!_completed)
@@ -222,7 +247,8 @@ internal sealed class PdfDenyListScan : IDocumentScan
                 EndName(terminatorIsText: true);
             }
 
-            if (_rejection is null && (_lastEofEnd < 0 || _position - _lastEofEnd > PdfDenyListScanner.EofWindowBytes))
+            if (_rejection is null
+                && (_lastEofEnd < 0 || _payloadAfterEof || _position - _lastEofEnd > PdfDenyListScanner.EofWindowBytes))
             {
                 _rejection = DocumentRejectionReasons.Truncated;
             }
@@ -295,6 +321,12 @@ internal sealed class PdfDenyListScan : IDocumentScan
         if (_eofMatched == EofMarker.Length)
         {
             _lastEofEnd = _position;
+            _payloadAfterEof = false;
+        }
+        else if (_lastEofEnd >= 0 && !IsWhitespace(value))
+        {
+            // Anything but whitespace after the last marker is another payload (a later "%%EOF" clears it).
+            _payloadAfterEof = true;
         }
 
         if (_rejection is not null)
@@ -302,13 +334,12 @@ internal sealed class PdfDenyListScan : IDocumentScan
             return;
         }
 
-        var inStream = _state == LexState.StreamBody;
-        StepName(value, inStream);
+        StepName(value);
         StepLexer(value);
         _textRun = IsText(value) ? _textRun + 1 : 0;
     }
 
-    private void StepName(byte value, bool inStream)
+    private void StepName(byte value)
     {
         if (_inName)
         {
@@ -367,7 +398,8 @@ internal sealed class PdfDenyListScan : IDocumentScan
             _nameLength = 0;
             _nameOverflow = false;
             _escape = 0;
-            _nameStartedInStream = inStream;
+            _nameStartedInFilteredStream = _state == LexState.StreamBody && _streamFiltered;
+            _nameStartedInNormal = _state == LexState.Normal;
             _textRunAtSlash = _textRun;
         }
     }
@@ -394,6 +426,13 @@ internal sealed class PdfDenyListScan : IDocumentScan
             return;
         }
 
+        // A /Filter key in real syntax (not a comment, string or stream) marks the object's stream as encoded — the
+        // only kind of stream the short-name relaxation applies to.
+        if (_nameStartedInNormal && !_nameOverflow && _name.AsSpan(0, _nameLength).SequenceEqual("Filter"u8))
+        {
+            _filterSeenInObject = true;
+        }
+
         // Every dictionary key is a name, so most names are checked; the length gate skips the allocation for the
         // many that cannot be on the list.
         if (_nameOverflow || _nameLength < MinDeniedNameLength || _nameLength > MaxDeniedNameLength)
@@ -407,9 +446,9 @@ internal sealed class PdfDenyListScan : IDocumentScan
             return;
         }
 
-        if (_nameStartedInStream && name.Length == 2 && (_textRunAtSlash < StreamTextRun || !terminatorIsText))
+        if (_nameStartedInFilteredStream && name.Length == 2 && (_textRunAtSlash < StreamTextRun || !terminatorIsText))
         {
-            // Two-character name inside stream data with binary around it: compressed-data noise (see remarks).
+            // Two-character name inside ENCODED stream data with binary around it: compressed-data noise (see remarks).
             return;
         }
 
@@ -463,6 +502,7 @@ internal sealed class PdfDenyListScan : IDocumentScan
                     _endStreamMatched = 0;
                     _state = LexState.Normal;
                     _lastTokenWasDictionaryEnd = false;
+                    _filterSeenInObject = false;
                 }
 
                 return;
@@ -549,7 +589,14 @@ internal sealed class PdfDenyListScan : IDocumentScan
             return;
         }
 
-        var isStream = !_keywordOverflow && _keyword.AsSpan(0, _keywordLength).SequenceEqual("stream"u8);
+        var keyword = _keyword.AsSpan(0, _keywordLength);
+        var isStream = !_keywordOverflow && keyword.SequenceEqual("stream"u8);
+        if (!_keywordOverflow && (keyword.SequenceEqual("obj"u8) || keyword.SequenceEqual("endobj"u8)))
+        {
+            // A /Filter belongs to the object it appears in.
+            _filterSeenInObject = false;
+        }
+
         var opensBody = isStream && _lastTokenWasDictionaryEnd && terminator is 0x0A or 0x0D;
         _keywordLength = 0;
         _keywordOverflow = false;
@@ -559,6 +606,7 @@ internal sealed class PdfDenyListScan : IDocumentScan
         {
             _state = LexState.StreamBody;
             _endStreamMatched = 0;
+            _streamFiltered = _filterSeenInObject;
         }
     }
 }

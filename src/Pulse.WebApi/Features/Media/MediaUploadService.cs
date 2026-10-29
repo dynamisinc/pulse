@@ -547,7 +547,21 @@ public sealed partial class MediaUploadService
             content = new ScanningReadStream(content, scan);
         }
 
-        var bytes = await _store.SaveAsync(blobName, sniffed.ContentType, content, maxBytes, cancellationToken);
+        long bytes;
+        try
+        {
+            bytes = await _store.SaveAsync(blobName, sniffed.ContentType, content, maxBytes, cancellationToken);
+        }
+        catch (Exception exception) when (scan is not null && scan.IsRejected && DocumentRejectedException.IsIn(exception))
+        {
+            // The scan stopped the stream at the first deny-listed token; the store has deleted its own partial
+            // (IMediaStore contract), so nothing is ours to clean up. Only the reason code leaves this method.
+            var rejected = scan.Complete().Reason!;
+            var rejectingAccount = AccountKey();
+            LogDocumentRejected(exerciseId, rejectingAccount, rejected);
+            return MediaUploadResult.Rejected(rejected);
+        }
+
         upload.Stored = new StoredFile(assetId, blobName, bytes);
 
         if (scan is not null && scan.Complete() is { Accepted: false, Reason: { } reason })

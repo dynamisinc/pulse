@@ -26,7 +26,9 @@ public interface IDocumentUploadAuthorizer
 
 /// <summary>
 /// The default <see cref="IDocumentUploadAuthorizer"/>: DENY. Until a feature registers its own rule, no participant
-/// can upload a document (registered with <c>TryAdd</c>, so a feature's registration wins in any order).
+/// can upload a document. It is registered with <c>TryAddScoped</c>, so a feature replaces it with a plain
+/// <c>AddScoped</c> (or <c>Replace</c>) in any order; a feature that also used <c>TryAdd</c> after the media slice would
+/// silently stay deny-all (fail closed), so its wiring test must assert the resolved type.
 /// </summary>
 public sealed class DenyAllDocumentUploadAuthorizer : IDocumentUploadAuthorizer
 {
@@ -82,7 +84,7 @@ public sealed class ScanningReadStream : Stream
     public override int Read(Span<byte> buffer)
     {
         var read = _inner.Read(buffer);
-        _scan.Append(buffer[..read]);
+        Inspect(buffer[..read]);
         return read;
     }
 
@@ -94,7 +96,7 @@ public sealed class ScanningReadStream : Stream
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         var read = await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-        _scan.Append(buffer.Span[..read]);
+        Inspect(buffer.Span[..read]);
         return read;
     }
 
@@ -111,6 +113,72 @@ public sealed class ScanningReadStream : Stream
 
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    /// <summary>
+    /// Feeds the scan and, the moment it can only reject, THROWS instead of handing the bytes on — so a hostile file
+    /// stops streaming at the first deny-listed token and the store deletes its own partial (the
+    /// <see cref="MaxLengthReadStream"/> pattern).
+    /// </summary>
+    private void Inspect(ReadOnlySpan<byte> bytes)
+    {
+        _scan.Append(bytes);
+        if (_scan.IsRejected)
+        {
+            throw new DocumentRejectedException();
+        }
+    }
+}
+
+/// <summary>
+/// Thrown by <see cref="ScanningReadStream"/> once its scan has found a deny-listed construct. Carries no detail: the
+/// upload pipeline reads the reason code from the scan itself.
+/// </summary>
+public sealed class DocumentRejectedException : Exception
+{
+    /// <summary>Creates the exception.</summary>
+    public DocumentRejectedException()
+        : base("The document was rejected by the structural scan.")
+    {
+    }
+
+    /// <summary>Creates the exception with a message.</summary>
+    /// <param name="message">The message.</param>
+    public DocumentRejectedException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates the exception with a message and inner exception.</summary>
+    /// <param name="message">The message.</param>
+    /// <param name="innerException">The inner exception.</param>
+    public DocumentRejectedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>
+    /// Whether <paramref name="exception"/> is, or wraps, a <see cref="DocumentRejectedException"/> — a store's SDK may
+    /// surface the stream's exception wrapped (parallel block staging).
+    /// </summary>
+    /// <param name="exception">The caught exception.</param>
+    /// <returns><c>true</c> when the scan aborted the stream.</returns>
+    public static bool IsIn(Exception? exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is DocumentRejectedException)
+            {
+                return true;
+            }
+
+            if (current is AggregateException aggregate && aggregate.InnerExceptions.Any(IsIn))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
 /// <summary>

@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
@@ -54,8 +55,17 @@ public sealed class DocumentScanCorpusTests
         ["polyglot-html-trailer-with-js.pdf"] = DocumentRejectionReasons.ActiveContent,
         ["polyglot-html-prefix.pdf"] = NotAPdf,
 
-        // KNOWN MISS (documented on PdfDenyListScanner): /OpenAction + a /JS action inside a FlateDecode /ObjStm.
+        ["ef-without-type.pdf"] = DocumentRejectionReasons.EmbeddedFile,
+        ["fileattachment-annotation.pdf"] = DocumentRejectionReasons.EmbeddedFile,
+        ["gotor-unc.pdf"] = DocumentRejectionReasons.ActiveContent,
+        ["polyglot-small-trailer.pdf"] = DocumentRejectionReasons.Truncated,
+        ["aa-after-binary-in-unfiltered-objstm.pdf"] = DocumentRejectionReasons.ActiveContent,
+
+        // KNOWN MISSES (documented on PdfDenyListScanner): /OpenAction + a /JS action inside an ENCODED /ObjStm (any
+        // filter), and an unreferenced junk "<</Filter/X>> stream" switching the short-name relaxation on for an /AA.
         ["known-miss-objstm-js.pdf"] = Accepted,
+        ["known-miss-objstm-asciihex-js.pdf"] = Accepted,
+        ["known-miss-filter-junk-desync-aa.pdf"] = Accepted,
     };
 
     private static string CorpusDirectory => Path.Combine(AppContext.BaseDirectory, "Features", "Media", "Documents", "Corpus");
@@ -123,17 +133,21 @@ public sealed class DocumentScanCorpusTests
         }
     }
 
-    [Fact]
-    public void TheKnownMiss_IsAcceptedBecauseItsTokensAreOnlyInsideCompressedData()
+    [Theory]
+    [InlineData("known-miss-objstm-js.pdf", "/FlateDecode")]
+    [InlineData("known-miss-objstm-asciihex-js.pdf", "/ASCIIHexDecode")]
+    public void TheEncodedObjectStreamMisses_AreAcceptedBecauseTheirTokensAreOnlyInsideEncodedData(string fileName, string filter)
     {
-        // Pins WHY the known miss is accepted: no deny-listed name appears in the raw bytes at all — the /JS action and
-        // the /OpenAction are inside the FlateDecode object stream. If this ever starts failing, the fixture changed.
-        var raw = Encoding.Latin1.GetString(File.ReadAllBytes(Path.Combine(CorpusDirectory, "known-miss-objstm-js.pdf")));
+        // Pins WHY these misses are accepted: no deny-listed name appears in the raw bytes as a token (followed by ANY
+        // delimiter, whitespace or the end) — the /JS action and the /OpenAction are inside the encoded object stream.
+        // If this ever starts failing, the fixture changed.
+        var raw = Encoding.Latin1.GetString(File.ReadAllBytes(Path.Combine(CorpusDirectory, fileName)));
 
-        raw.Should().Contain("/Type /ObjStm").And.Contain("/FlateDecode");
+        raw.Should().Contain("/Type /ObjStm").And.Contain(filter);
         foreach (var name in PdfDenyListScanner.DeniedNames.Keys)
         {
-            raw.Should().NotContain("/" + name + " ", "the deny-listed tokens exist only in compressed form");
+            Regex.IsMatch(raw, "/" + name + @"(?=[\s\x00()<>\[\]{}/%]|$)").Should().BeFalse(
+                "/{0} must exist only in encoded form in {1}", name, fileName);
         }
     }
 }

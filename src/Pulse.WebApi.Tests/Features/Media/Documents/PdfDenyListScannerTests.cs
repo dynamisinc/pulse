@@ -31,6 +31,10 @@ public sealed class PdfDenyListScannerTests
     [InlineData("/ImportData")]
     [InlineData("/RichMedia")]
     [InlineData("/GoToE")]
+    [InlineData("/GoToR")]
+    [InlineData("/EF")]
+    [InlineData("/FileAttachment")]
+    [InlineData("/Collection")]
     public void EveryDeniedName_IsRejected_InADictionary(string name) =>
         Scan($"1 0 obj << /Type /Catalog {name} 2 0 R >> endobj").Accepted.Should().BeFalse("{0} is on the deny list", name);
 
@@ -101,6 +105,36 @@ public sealed class PdfDenyListScannerTests
     }
 
     [Fact]
+    public void InsideAnUnfilteredStream_AShortNameSurroundedByBinary_IsStillRejected()
+    {
+        // An unencoded stream (an uncompressed object stream, say) is parsed as syntax by readers: no relaxation.
+        var binary = new string('\x9C', 16);
+        var fragment = "1 0 obj << /Length 40 >>\nstream\n" + binary + "/AA\0" + binary + "\nendstream\nendobj";
+
+        Scan(fragment).Accepted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AFilterInAnEarlierObject_DoesNotRelaxALaterUnfilteredStream()
+    {
+        var binary = new string('\x9C', 16);
+        var fragment = "1 0 obj << /Filter /FlateDecode >> endobj\n2 0 obj << /Length 40 >>\nstream\n" + binary + "/JS\0"
+            + "\nendstream\nendobj";
+
+        Scan(fragment).Accepted.Should().BeFalse("a /Filter belongs to the object it appears in");
+    }
+
+    [Fact]
+    public void AFilterInACommentOrString_DoesNotRelaxTheStream()
+    {
+        var binary = new string('\x9C', 16);
+        // The comment sits INSIDE the dictionary, so ">> stream" still opens a body — only the /Filter is not real syntax.
+        var fragment = "1 0 obj << /T (/Filter) % /Filter\n /Length 40 >>\nstream\n" + binary + "/JS\0" + "\nendstream\nendobj";
+
+        Scan(fragment).Accepted.Should().BeFalse();
+    }
+
+    [Fact]
     public void InsideStreamData_AShortNameInText_IsStillRejected()
     {
         var fragment = "<< /Length 40 >>\nstream\n7 0 obj << /S /Rendition /JS (app.alert(1)) >>\nendstream";
@@ -112,7 +146,7 @@ public sealed class PdfDenyListScannerTests
     public void InsideStreamData_ALongNameIsRejectedEvenAmongBinary()
     {
         var binary = new string('\x9C', 16);
-        var fragment = "<< /Length 40 >>\nstream\n" + binary + "/OpenAction\0" + binary + "\nendstream";
+        var fragment = "<< /Length 40 /Filter /FlateDecode >>\nstream\n" + binary + "/OpenAction\0" + binary + "\nendstream";
 
         Scan(fragment).Accepted.Should().BeFalse("only /JS and /AA get the binary-context relaxation");
     }
@@ -121,7 +155,7 @@ public sealed class PdfDenyListScannerTests
     public void AfterEndstream_TheRelaxationEnds()
     {
         var binary = new string('\x9C', 16);
-        var fragment = "<< /Length 4 >>\nstream\nabcd\nendstream\n" + binary + "/JS\0";
+        var fragment = "<< /Length 4 /Filter /FlateDecode >>\nstream\nabcd\nendstream\n" + binary + "/JS\0";
 
         Scan(fragment).Accepted.Should().BeFalse("outside a stream body every deny-listed name counts");
     }
@@ -171,6 +205,36 @@ public sealed class PdfDenyListScannerTests
             .Should().Be(DocumentScanResult.Pass, "readers tolerate trailing bytes within 1024 of the end");
         PdfDenyListScanner.Scan(Encoding.Latin1.GetBytes(pdf + new string(' ', PdfDenyListScanner.EofWindowBytes + 1)))
             .Should().Be(DocumentScanResult.Reject(DocumentRejectionReasons.Truncated), "an appended payload is a polyglot");
+    }
+
+    [Theory]
+    [InlineData("<html></html>")]
+    [InlineData("PK")]
+    [InlineData("x")]
+    public void AnythingButWhitespaceAfterTheLastEofMarker_IsATrailingPayload(string payload)
+    {
+        var pdf = "%PDF-1.7\n1 0 obj << >> endobj" + Trailer;
+
+        PdfDenyListScanner.Scan(Encoding.Latin1.GetBytes(pdf + payload))
+            .Should().Be(DocumentScanResult.Reject(DocumentRejectionReasons.Truncated), "a short appended payload is a polyglot too");
+    }
+
+    [Fact]
+    public void AnIncrementalUpdate_EndsAtItsOwnEofMarker_AndIsAccepted()
+    {
+        var pdf = "%PDF-1.7\n1 0 obj << >> endobj" + Trailer + "2 0 obj << >> endobj" + Trailer + "\r\n\0\0";
+
+        PdfDenyListScanner.Scan(Encoding.Latin1.GetBytes(pdf)).Should().Be(DocumentScanResult.Pass);
+    }
+
+    [Fact]
+    public void IsRejected_TurnsTrueAtTheFirstDeniedToken_BeforeTheFileEnds()
+    {
+        var scan = new PdfDenyListScanner().Begin();
+
+        scan.Append(Encoding.Latin1.GetBytes("%PDF-1.7\n<< /OpenAction "));
+
+        scan.IsRejected.Should().BeTrue("the upload can stop streaming here");
     }
 
     [Fact]

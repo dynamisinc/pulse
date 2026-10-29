@@ -15,7 +15,7 @@ using Xunit;
 /// bytes only, the 20 MB cap (413 before anything is kept), the deny-list scan (422 with a reason code, blob deleted,
 /// no row), the default-deny participant authorizer (checked before the body is read), the staff rule, and the
 /// <c>{ mediaId, fileName, sizeBytes }</c> response. The HTTP, header and real-SQL halves live in
-/// <see cref="DocumentEndpointTests"/> and <c>MediaIsolationTests</c>.
+/// <see cref="DocumentEndpointTests"/>; the read path's isolation case is in the standing <c>MediaIsolationTests</c>.
 /// </summary>
 public sealed class DocumentUploadServiceTests
 {
@@ -94,6 +94,23 @@ public sealed class DocumentUploadServiceTests
         harness.Recording.SaveAttempts.Should().ContainSingle("the file was scanned while it streamed");
         harness.Recording.Deletes.Should().Equal(harness.Recording.SaveAttempts, "the streamed blob is deleted");
         harness.Recording.Blobs.Should().BeEmpty();
+        harness.AllAssets().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AHostilePdf_StopsStreamingAtTheFirstDeniedToken()
+    {
+        // 4 MiB of padding after an early /OpenAction: the scan aborts the stream there instead of storing it all.
+        var hostile = MediaTestFiles.JavaScriptPdf().Concat(Enumerable.Repeat((byte)' ', 4 * 1024 * 1024)).ToArray();
+        var store = new CountingStore();
+        using var harness = new UploadHarness(staffUserId: Guid.NewGuid(), store: store);
+
+        var result = await harness.UploadDocumentAsync(MediaTestFiles.Form(hostile, "release.pdf"));
+
+        result.Outcome.Should().Be(MediaUploadOutcome.Rejected);
+        result.Reason.Should().Be(DocumentRejectionReasons.ActiveContent);
+        store.BytesWritten.Should().BeLessThan(1024 * 1024, "the store never received the rest of the file");
+        store.DeletedOwnPartial.Should().BeTrue("the store cleans up its own partial, per the IMediaStore contract");
         harness.AllAssets().Should().BeEmpty();
     }
 
@@ -205,5 +222,39 @@ public sealed class DocumentUploadServiceTests
         result.Outcome.Should().Be(MediaUploadOutcome.Created, result.Error);
         result.Document!.FileName.Should().Be(stored, "a PDF/executable polyglot can never be saved under an executable name");
         harness.AllAssets().Single().OriginalFileName.Should().Be(stored);
+    }
+
+    /// <summary>A store that counts what it was handed and records whether it deleted its own partial.</summary>
+    private sealed class CountingStore : IMediaStore
+    {
+        public bool IsConfigured => true;
+
+        public long BytesWritten { get; private set; }
+
+        public bool DeletedOwnPartial { get; private set; }
+
+        public async Task<long> SaveAsync(
+            string blobName, string contentType, System.IO.Stream content, long maxBytes, System.Threading.CancellationToken cancellationToken)
+        {
+            var buffer = new byte[16 * 1024];
+            var limited = new MaxLengthReadStream(content, maxBytes);
+            try
+            {
+                int read;
+                while ((read = await limited.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    BytesWritten += read;
+                }
+            }
+            catch
+            {
+                DeletedOwnPartial = true;
+                throw;
+            }
+
+            return limited.BytesRead;
+        }
+
+        public Task DeleteAsync(string blobName, System.Threading.CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
