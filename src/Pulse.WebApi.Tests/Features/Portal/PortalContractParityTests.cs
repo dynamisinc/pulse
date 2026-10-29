@@ -111,7 +111,7 @@ public partial class PortalContractParityTests
         var context = new NullabilityInfoContext();
         return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => Nullable.GetUnderlyingType(p.PropertyType) is not null
-                || context.Create(p).WriteState == NullabilityState.Nullable)
+                || context.Create(p).ReadState == NullabilityState.Nullable)
             .ToList();
     }
 
@@ -148,7 +148,8 @@ public partial class PortalContractParityTests
         // The check can fail: the staff config carries `version`, and a type naming any forbidden pattern trips it.
         ForbiddenMembers(typeof(PortalConfigStaffDto)).Should().Contain("PortalConfigStaffDto.Version");
         ForbiddenMembers(typeof(LeakyProbe)).Should().HaveCount(6);
-        ForbiddenMembers(typeof(HarmlessProbe)).Should().BeEmpty("only whole words count, so hashtags is not a hash");
+        ForbiddenMembers(typeof(HarmlessProbe)).Should().BeEmpty("only the allowlisted words are exempt");
+        ForbiddenMembers(typeof(InflectedLeakProbe)).Should().HaveCount(4, "inflections and unbroken names still leak");
         ForbiddenMembers(typeof(NestedLeakProbe)).Should().HaveCount(6, "the walk looks inside arrays too");
     }
 
@@ -320,6 +321,8 @@ public partial class PortalContractParityTests
 
     private static IReadOnlyList<string> ForbiddenPatterns => GoldenStrings(Golden.Value["participantForbiddenKeyPatterns"]);
 
+    private static IReadOnlyList<string> AllowedWords => GoldenStrings(Golden.Value["participantAllowedWords"]);
+
     /// <summary>Every property in <paramref name="root"/>'s record graph whose CLR or wire name matches a forbidden pattern.</summary>
     private static List<string> ForbiddenMembers(Type root)
     {
@@ -354,27 +357,20 @@ public partial class PortalContractParityTests
     }
 
     /// <summary>
-    /// Whether a run of the name's whole words (camelCase / PascalCase / snake_case) spells a forbidden pattern,
-    /// optionally pluralised, so <c>TokenHash</c> and <c>LastSeenAt</c> trip it and <c>Hashtags</c> does not.
-    /// Mirrors <c>isForbiddenKey</c> in <c>forbiddenKeys.ts</c>.
+    /// FAIL-SAFE: whether the lowercase name CONTAINS a forbidden pattern once the golden
+    /// <c>participantAllowedWords</c> are removed (<c>hashtag</c>, <c>conversation</c>), so <c>TokenHash</c>,
+    /// <c>HashedPassword</c> and <c>accesstoken</c> trip it and <c>Hashtags</c> does not. Mirrors
+    /// <c>isForbiddenKey</c> in <c>forbiddenKeys.ts</c>.
     /// </summary>
     private static bool IsForbiddenMemberName(string name)
     {
-        var words = WordBoundary().Split(name).Where(w => w.Length > 0).Select(w => w.ToLowerInvariant()).ToArray();
-        for (var start = 0; start < words.Length; start++)
+        var normalized = Separators().Replace(name.ToLowerInvariant(), string.Empty);
+        foreach (var word in AllowedWords)
         {
-            var run = string.Empty;
-            for (var end = start; end < words.Length; end++)
-            {
-                run += words[end];
-                if (ForbiddenPatterns.Any(p => run == p || run == p + "s"))
-                {
-                    return true;
-                }
-            }
+            normalized = normalized.Replace(word, "|", StringComparison.Ordinal);
         }
 
-        return false;
+        return ForbiddenPatterns.Any(p => normalized.Contains(p, StringComparison.Ordinal));
     }
 
     /// <summary>The element type of an array or any generic collection (dictionaries: the value), else the type itself.</summary>
@@ -405,8 +401,8 @@ public partial class PortalContractParityTests
             : element;
     }
 
-    [GeneratedRegex(@"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|[_\-\s]+", RegexOptions.CultureInvariant)]
-    private static partial Regex WordBoundary();
+    [GeneratedRegex(@"[_\-\s]", RegexOptions.CultureInvariant)]
+    private static partial Regex Separators();
 
     private static string[] GoldenStrings(JsonNode? node) =>
         node!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
@@ -510,6 +506,13 @@ public partial class PortalContractParityTests
 
     /// <summary>Names that contain a pattern only as part of a longer word.</summary>
     private sealed record HarmlessProbe(IReadOnlyList<string> Hashtags, string Conversation, string SkinOverrides);
+
+    /// <summary>Leaks a whole-word matcher would miss: inflections and names with no word breaks.</summary>
+    private sealed record InflectedLeakProbe(
+        [property: JsonPropertyName("hashes")] string Hashes,
+        [property: JsonPropertyName("hashedpassword")] string Hashedpassword,
+        [property: JsonPropertyName("accesstoken")] string Accesstoken,
+        [property: JsonPropertyName("lastseenat")] string Lastseenat);
 
     /// <summary>A leak one level down, behind an array.</summary>
     private sealed record NestedLeakProbe(LeakyProbe[] Items);

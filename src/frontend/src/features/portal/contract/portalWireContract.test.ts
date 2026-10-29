@@ -20,7 +20,7 @@ function shapeKeys(name: string): readonly string[] {
 }
 
 function isForbidden(key: string): boolean {
-  return isForbiddenKey(key, wire.participantForbiddenKeyPatterns)
+  return isForbiddenKey(key, wire.participantForbiddenKeyPatterns, wire.participantAllowedWords)
 }
 
 /**
@@ -91,8 +91,10 @@ describe('portal wire contract (PC-1 / PC-3 / PC-6)', () => {
     it.each([
       ['tokenHash', true], ['displayToken', true], ['accessTokens', true], ['actingHumanId', true],
       ['lastSeenAt', true], ['createdWallClock', true], ['exerciseId', true], ['version', true],
-      ['last_seen', true], ['hashtags', false], ['skinOverrides', false], ['title', false],
-    ] as const)('matches whole words only: %s -> %s', (key, expected) => {
+      ['last_seen', true], ['hashes', true], ['hashedPassword', true], ['accesstoken', true],
+      ['lastseenat', true], ['hashtagTokenCount', true],
+      ['hashtags', false], ['conversation', false], ['skinOverrides', false], ['title', false],
+    ] as const)('fails safe, allowing only listed words: %s -> %s', (key, expected) => {
       expect(isForbidden(key)).toBe(expected)
     })
 

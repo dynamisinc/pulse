@@ -46,5 +46,6 @@
     "PortalResourceReorderRequest": ["orderedIds"]
   },
   "participantShapes": ["PortalDto", "PortalMastheadDto", "PortalModuleDto", "PortalResourceDto"],
-  "participantForbiddenKeyPatterns": ["token", "hash", "version", "actinghumanid", "lastseen", "wallclock", "exerciseid"]
+  "participantForbiddenKeyPatterns": ["token", "hash", "version", "actinghumanid", "lastseen", "wallclock", "exerciseid"],
+  "participantAllowedWords": ["hashtag", "conversation"]
 }

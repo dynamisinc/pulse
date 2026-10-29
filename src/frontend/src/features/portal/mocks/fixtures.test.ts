@@ -203,7 +203,7 @@ describe('portal fixtures', () => {
 
   it.each(scenarios)('$key: no participant-visible key looks staff-only (XC-002)', scenario => {
     const leaks = keys(scenario).filter(key =>
-      isForbiddenKey(key, wire.participantForbiddenKeyPatterns),
+      isForbiddenKey(key, wire.participantForbiddenKeyPatterns, wire.participantAllowedWords),
     )
     expect(leaks).toEqual([])
   })
