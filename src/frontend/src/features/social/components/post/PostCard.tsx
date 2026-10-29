@@ -117,7 +117,11 @@ export function PostCard({
   // Read-only embed: `PostActions` (which seeds the "Edited" overlay store) is absent, so
   // the card seeds it, in a layout effect like the row does, so "Edited" shows in one paint.
   useLayoutEffect(() => {
-    if (readOnly) editedPostsStore.noteBase(post.id, post.edited, post.text)
+    // Only a summary is noted: an embed holding an older, never-edited copy must not clear
+    // the base a fresher feed card of the same post already set.
+    if (readOnly && post.edited != null) {
+      editedPostsStore.noteBase(post.id, post.edited, post.text)
+    }
   }, [readOnly, post.id, post.edited, post.text])
 
   return (

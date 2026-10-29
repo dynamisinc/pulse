@@ -15,7 +15,9 @@
  * renders it INSIDE its page, so it lives in the shell's content region and its stacking
  * context: it can never draw above the shell's overlay layer, banners or alert bar (D7).
  * `isOpen` lets the host mark its own content `inert` while the dialog is up, as
- * `SocialChannel` does.
+ * `SocialChannel` does. The dialog's backdrop is `position: fixed`, so a host must not put
+ * it under an ancestor with `transform` / `filter` / `contain` (that would clip it to the
+ * ancestor's box); mount `composer` at the page root, beside the outlet skin, not inside it.
  *
  * A NORMAL POST. Nothing about the publish is special: the dialog's composer is the normal
  * one (`useComposePost`), so the result is a normal `post` event and its link card is
@@ -46,7 +48,8 @@ import styles from './useComposeWithLink.module.css'
 export interface UseComposeWithLinkResult {
   /**
    * Opens the composer pre-filled with `permalink`. Returns `true` when it opened, `false`
-   * when it did not (a rejected permalink, or a session that cannot post).
+   * when it did not (a rejected permalink, a session that cannot post, or the dialog is
+   * already open).
    */
   readonly openComposerWithLink: (permalink: string) => boolean
   /** The dialog while open, else `null`. Render it inside the host page. */
@@ -86,10 +89,13 @@ export function useComposeWithLink(): UseComposeWithLinkResult {
   const openComposerWithLink = useCallback(
     (link: string): boolean => {
       if (!canCompose || !isHostRelativePermalink(link)) return false
+      // Already open: the draft is the author's now (`initialText` is read once), so a
+      // second link is refused rather than silently dropped or replacing their text.
+      if (permalink !== undefined) return false
       setPermalink(link)
       return true
     },
-    [canCompose],
+    [canCompose, permalink],
   )
   const close = useCallback(() => setPermalink(undefined), [])
 

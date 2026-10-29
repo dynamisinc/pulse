@@ -24,7 +24,8 @@
  * store's posts do) other than the session's is treated as unknown too.
  *
  * TAKEDOWN. A post a controller takes down while it is embedded (the session's
- * `removedPosts` store) turns `unavailable` at once, without a reload.
+ * `removedPosts` store) turns `unavailable` at once, without a reload. Otherwise the answer
+ * is the read's snapshot: a later edit or count change shows on the next mount, not live.
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react'

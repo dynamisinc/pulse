@@ -13,7 +13,9 @@
  * feed read is already top-level and visible-only, and the arrival source is top-level
  * only; this filter is the hook's own guarantee on top of both, since an arrival is held
  * as delivered and may carry a removal marker. Social has no direct messages on the feed
- * read, so none can appear.
+ * read, so none can appear. There is no future-dated filter (unlike Trending's tolerance):
+ * a post reaches the feed only once published, stamped by the server's exercise clock, so a
+ * pre-staged inject is not in the baseline before it fires.
  *
  * NO SECOND READ OR CONNECTION. It reads the SHARED Explore baseline
  * (`useExploreBaseline`): the one ref-counted feed read and arrival subscription that

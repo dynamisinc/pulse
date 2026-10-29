@@ -158,6 +158,19 @@ describe('useComposeWithLink', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('a second link while the dialog is open is refused, never silently dropped', async () => {
+    const user = userEvent.setup()
+    const results = renderHost(PERMALINK)
+    await share(user)
+    const dialog = await screen.findByRole('dialog')
+
+    // The host page is inert behind the dialog, so call the button's handler directly.
+    fireEvent.click(screen.getByRole('button', { name: 'Share to Pulse', hidden: true }))
+
+    expect(results).toEqual([true, false])
+    expect(within(dialog).getByRole('textbox', { name: 'Post text' })).toHaveValue(PERMALINK)
+  })
+
   it('an observer (read-only) mount returns false and opens nothing', async () => {
     const user = userEvent.setup()
     const results = renderHost(PERMALINK, 'readOnly')

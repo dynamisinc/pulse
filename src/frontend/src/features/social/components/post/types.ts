@@ -69,7 +69,10 @@ export interface PostView {
 
 export interface PostCardProps {
   post: PostView
-  /** `'readOnly'` = observer session (COR-015): controls absent, counts inert. */
+  /**
+   * `'readOnly'` = observer session (COR-015): controls absent, counts inert. Not the
+   * embed mode: a card shown inside another channel uses the `readOnly` PROP below.
+   */
   variant?: PostCardVariant
   /**
    * The EMBEDDED read-only card (channels-foundation 21, COR-015): the whole engagement
@@ -78,7 +81,8 @@ export interface PostCardProps {
    * post inside its own page (the portal stream, a news embed). The author, time, body,
    * media, link card and "Edited" marker are unchanged, and `onOpen` / `onOpenProfile` /
    * `onHashtagOpen` still work when supplied. Omitted (the default): the card renders
-   * exactly as before.
+   * exactly as before. Omitting the callbacks does NOT make a card read-only, and the
+   * observer `variant="readOnly"` is a different mode (it keeps the counts, as inert text).
    */
   readOnly?: boolean
   /** Fires when the card body (header/text/media — not the action row) is activated. */
