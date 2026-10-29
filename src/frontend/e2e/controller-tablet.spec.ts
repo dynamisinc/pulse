@@ -441,6 +441,24 @@ test.describe('command band at 1180x820 (dev versus production)', () => {
     expect(prod.band.x + prod.band.width).toBeLessThanOrEqual(1180)
     await expect(page.getByTestId('lifecycle-end')).toBeVisible()
   })
+
+  // Accepted (Tom, 2026-10-29): a safety banner (provider degraded, swamped mode ON) may wrap
+  // the band to a second row at 1180, for leads too; the banners stay full text (NFR-001).
+  // What must hold: End exercise stays visible, on-screen and tappable, and nothing scrolls
+  // sideways. Degraded is the alarm state the mock can reach (the dev simulate button).
+  test('a safety banner may wrap the band, but End exercise stays on-screen and tappable', async ({ page }) => {
+    await openControllerConsole(page, false)
+    await page.getByTestId('engine-degraded-simulate').click()
+    await expect(page.getByText('PROVIDER DEGRADED', { exact: false })).toBeVisible()
+    await page.addStyleTag({ content: HIDE_DEV_BUTTON_CSS })
+
+    const { band, end } = await measureBand(page)
+    expect(end.x + end.width, 'End exercise ends inside the viewport').toBeLessThanOrEqual(1180)
+    expect(end.y + end.height, 'End exercise sits inside the band').toBeLessThanOrEqual(band.y + band.height)
+    await expect(page.getByTestId('lifecycle-end')).toBeVisible()
+    await expectTouchTarget(page.getByTestId('lifecycle-end'))
+    await expectNoHorizontalScroll(page)
+  })
 })
 
 for (const viewport of [{ width: 1180, height: 820 }, { width: 1024, height: 768 }]) {
