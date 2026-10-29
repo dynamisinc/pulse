@@ -12,7 +12,7 @@ using Pulse.WebApi.Data;
 namespace Pulse.WebApi.Data.Migrations
 {
     [DbContext(typeof(PulseDbContext))]
-    [Migration("20261029165136_Channels_M1_ContentFoundation")]
+    [Migration("20261029174012_Channels_M1_ContentFoundation")]
     partial class Channels_M1_ContentFoundation
     {
         /// <inheritdoc />
@@ -306,7 +306,7 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasIndex("ExerciseId", "HeroMediaId");
 
-                    b.HasIndex("ScheduledScenarioTime", "ExerciseId")
+                    b.HasIndex("ExerciseId", "ScheduledScenarioTime")
                         .HasFilter("[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
                     b.HasIndex("ExerciseId", "ExternalSource", "ExternalRef")

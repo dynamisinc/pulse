@@ -227,7 +227,7 @@ public class IdempotentMigrationScriptTests
 
         // M1's filtered indexes reach the batch inside EXEC(N'…') (#413).
         script.Should().Contain("EXEC(N'CREATE UNIQUE INDEX [IX_ContentItems_ExerciseId_ExternalSource_ExternalRef]")
-            .And.Contain("EXEC(N'CREATE INDEX [IX_ContentItems_ScheduledScenarioTime_ExerciseId]");
+            .And.Contain("EXEC(N'CREATE INDEX [IX_ContentItems_ExerciseId_ScheduledScenarioTime]");
 
         await database.ApplyScriptAsync(script);
 

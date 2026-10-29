@@ -331,9 +331,9 @@ namespace Pulse.WebApi.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ContentItems_ScheduledScenarioTime_ExerciseId",
+                name: "IX_ContentItems_ExerciseId_ScheduledScenarioTime",
                 table: "ContentItems",
-                columns: new[] { "ScheduledScenarioTime", "ExerciseId" },
+                columns: new[] { "ExerciseId", "ScheduledScenarioTime" },
                 filter: "[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
             migrationBuilder.CreateIndex(

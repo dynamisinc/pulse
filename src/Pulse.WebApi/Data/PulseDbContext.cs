@@ -1192,7 +1192,7 @@ public class PulseDbContext : DbContext
 
             // The participant list read (newest-first per channel) and the scheduler's due-item sweep (story 05).
             entity.HasIndex(e => new { e.ExerciseId, e.ChannelId, e.Status, e.PublishedScenarioTime });
-            entity.HasIndex(e => new { e.ScheduledScenarioTime, e.ExerciseId })
+            entity.HasIndex(e => new { e.ExerciseId, e.ScheduledScenarioTime })
                 .HasFilter("[Status] = N'scheduled' AND [DeletedAt] IS NULL");
 
             // The outlet reference also carries ChannelId, so an item can only be filed under an outlet of its OWN
@@ -1439,10 +1439,17 @@ public class PulseDbContext : DbContext
                 continue;
             }
 
-            // Unchanged + ONE modified property, never State = Modified: Modified would write every column, so a
-            // delete-by-stub (`Remove(new X { Id = id, ... })`) would blank the row it meant to retain. ExerciseId and
-            // Version (concurrency tokens on these entities) keep the UPDATE confined to the row as it was read.
+            // Unchanged + only the properties that were ACTUALLY modified, plus DeletedAt — never State = Modified, which
+            // would write every column, so a delete-by-stub (`Remove(new X { Id = id, ... })`) would blank the row it
+            // meant to retain. Edits made to a tracked row before Remove (a Version bump, a retraction stamp) are kept.
+            // ExerciseId and Version (concurrency tokens here) keep the UPDATE confined to the row as it was read.
+            var modified = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToList();
             entry.State = EntityState.Unchanged;
+            foreach (var name in modified)
+            {
+                entry.Property(name).IsModified = true;
+            }
+
             entry.Entity.DeletedAt ??= DateTimeOffset.UtcNow;
             entry.Property(nameof(ISoftDeletable.DeletedAt)).IsModified = true;
         }

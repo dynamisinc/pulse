@@ -291,6 +291,31 @@ public class ChannelsIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task ASoftDeleteOfATrackedRow_KeepsTheEditsMadeBeforeRemove()
+    {
+        var exerciseId = Guid.NewGuid();
+        var (_, item) = await ChannelRows.SeedOutletAndItemAsync(_fixture, exerciseId);
+
+        await using (var delete = _fixture.CreateContext(ScopeFor(exerciseId)))
+        {
+            var tracked = await delete.ContentItems.SingleAsync(c => c.Id == item.Id);
+            tracked.Status = "retracted";
+            tracked.RetractedScenarioTime = ChannelRows.ScenarioTime;
+            tracked.Version++;
+            delete.Remove(tracked);
+            await delete.SaveChangesAsync();
+        }
+
+        await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
+        var row = await read.IncludingSoftDeleted<ContentItem>().SingleAsync(c => c.Id == item.Id);
+        row.DeletedAt.Should().NotBeNull();
+        row.Status.Should().Be("retracted", "an edit made before Remove is saved with the soft delete, not dropped");
+        row.RetractedScenarioTime.Should().Be(ChannelRows.ScenarioTime);
+        row.Version.Should().Be(item.Version + 1);
+        row.Headline.Should().Be(item.Headline, "untouched columns are not rewritten");
+    }
+
+    [RequiresDockerFact]
     public async Task ARowsExercise_CannotBeChangedAfterInsert()
     {
         var exerciseId = Guid.NewGuid();
