@@ -12,12 +12,7 @@
  * World: both. No React, no MUI.
  */
 
-import {
-  isChannelContentDto,
-  isHostRelativePath,
-  isIsoScenarioTime,
-  isSlug,
-} from '@/features/channels/contract'
+import { isChannelContentDto, isIsoScenarioTime, isSlug } from '@/features/channels/contract'
 import type {
   ForecastCurrent,
   ForecastDto,
@@ -49,6 +44,19 @@ function isText(value: unknown, max: number): value is string {
 
 function isNullableText(value: unknown, max: number): value is string | null {
   return value === null || isText(value, max)
+}
+
+/** Exactly `/weather/{outlet}/{content}`, as the server derives it (no dot segments, no query). */
+function isWeatherPermalink(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const segments = value.split('/')
+  return (
+    segments.length === 4 &&
+    segments[0] === '' &&
+    segments[1] === 'weather' &&
+    isSlug(segments[2]) &&
+    isSlug(segments[3])
+  )
 }
 
 function isWholeNumber(value: unknown, min: number, max: number): value is number {
@@ -109,7 +117,7 @@ export function isWeatherProductProjection(value: unknown): value is WeatherProd
   // A `new` product supersedes nothing; the others carry the server-derived link (or null).
   const supersedes = c.supersedesPermalink
   const supersedesOk =
-    c.action === 'new' ? supersedes === null : supersedes === null || isHostRelativePath(supersedes)
+    c.action === 'new' ? supersedes === null : supersedes === null || isWeatherPermalink(supersedes)
   // The IBW block is required on a warning (WX-010).
   const ibwOk = c.ibw === null ? c.productType !== 'warning' : isWeatherIbw(c.ibw)
   return supersedesOk && ibwOk

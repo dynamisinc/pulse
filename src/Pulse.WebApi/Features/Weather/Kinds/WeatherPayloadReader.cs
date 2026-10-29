@@ -62,11 +62,11 @@ internal static partial class WeatherPayloadReader
         if (fromStore)
         {
             supersedesPermalink = r.OptionalString(payload, "supersedesPermalink", 512, multiline: false);
-            if (supersedesPermalink is not null
-                && (!ChannelVocabulary.IsHostRelativePath(supersedesPermalink)
-                    || !supersedesPermalink.StartsWith("/" + ChannelVocabulary.Weather + "/", StringComparison.Ordinal)))
+            // Only an exact /weather/{outlet}/{content} permalink is echoed (FC-9.3), and only on a superseding action (a
+            // stray link on a `new` product would make the client guard reject the whole product); anything else is dropped.
+            var superseding = action is not null && WeatherVocabulary.SupersedingActions.Contains(action, StringComparer.Ordinal);
+            if (supersedesPermalink is not null && (!superseding || !IsWeatherPermalink(supersedesPermalink)))
             {
-                // Only a host-relative WEATHER permalink is ever echoed (FC-9.3); anything else is dropped.
                 supersedesPermalink = null;
             }
         }
@@ -287,6 +287,14 @@ internal static partial class WeatherPayloadReader
         }
 
         return ok ? periods : null;
+    }
+
+    /// <summary>Whether <paramref name="value"/> is exactly <c>/weather/{slug}/{slug}</c> (no dot segments, no query).</summary>
+    private static bool IsWeatherPermalink(string value)
+    {
+        var segments = value.Split('/');
+        return segments.Length == 4 && segments[0].Length == 0 && segments[1] == ChannelVocabulary.Weather
+               && ChannelVocabulary.IsSlug(segments[2]) && ChannelVocabulary.IsSlug(segments[3]);
     }
 
     // The wire convention for every *ScenarioTime (mirrors isIsoScenarioTime in channels guards.ts): ISO-8601 with an offset.

@@ -128,7 +128,20 @@ public sealed class WeatherProductDescriptor(IWeatherDeliveryPlanner? planner = 
         }
 
         var product = WeatherPayloadReader.ReadProduct(stored, fromStore: true, []);
-        return product is null ? null : planner.Plan(item, product);
+        if (product is null)
+        {
+            return null;
+        }
+
+        // The stored read is lenient (projection must never blank), so the "a warning always raises its alert" guarantee is
+        // re-asserted here, where it matters: a non-cancel warning publishes with its alert, whatever the row says.
+        if (product.ProductType == WeatherVocabulary.ProductWarning && product.Action != WeatherVocabulary.ActionCancel
+            && !product.Delivery.RaiseAlert)
+        {
+            product = product with { Delivery = product.Delivery with { RaiseAlert = true } };
+        }
+
+        return planner.Plan(item, product);
     }
 
     private static async Task<string?> ResolveSupersededAsync(

@@ -82,10 +82,12 @@ describe('isWeatherProductProjection (fails closed)', () => {
     expect(isWeatherProductProjection(withKey(warning, 'ibw', ibw))).toBe(false)
   })
 
-  it('accepts a superseding product with no resolved link, but never an absolute or protocol-relative one', () => {
+  it('accepts a superseding product with no link or a weather permalink, never anything else', () => {
     expect(isWeatherProductProjection(withKey(warning, 'supersedesPermalink', null))).toBe(true)
     expect(isWeatherProductProjection(withKey(warning, 'supersedesPermalink', 'https://evil.test/x'))).toBe(false)
     expect(isWeatherProductProjection(withKey(warning, 'supersedesPermalink', '//evil.test/x'))).toBe(false)
+    expect(isWeatherProductProjection(withKey(warning, 'supersedesPermalink', '/social/posts/1'))).toBe(false)
+    expect(isWeatherProductProjection(withKey(warning, 'supersedesPermalink', '/weather/../social/x'))).toBe(false)
   })
 
   it('rejects anything that is not an object', () => {

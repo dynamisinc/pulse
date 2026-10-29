@@ -482,6 +482,18 @@ public sealed class WeatherProductDescriptorTests : IDisposable
     }
 
     [Fact]
+    public void ResolvePublishOptions_ReassertsTheWarningAlert_EvenIfTheStoredRowSwitchedItOff()
+    {
+        var planner = new RecordingPlanner();
+        var stored = WeatherPayloads.Warning();
+        stored["delivery"]!["raiseAlert"] = false;
+
+        new WeatherProductDescriptor(planner).ResolvePublishOptions(Item(stored));
+
+        planner.Payload!.Delivery.RaiseAlert.Should().BeTrue("a non-cancel warning always publishes with its alert");
+    }
+
+    [Fact]
     public void ResolvePublishOptions_ForAnUnreadablePayloadOrAnotherKind_IsNull()
     {
         var descriptor = new WeatherProductDescriptor(new RecordingPlanner());

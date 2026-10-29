@@ -169,6 +169,12 @@ public sealed partial class WeatherSanitizerAndProjectionTests : IDisposable
         _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull();
         stored["supersedesPermalink"] = "/social/posts/123";
         _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull("only a weather permalink is echoed");
+        stored["supersedesPermalink"] = "/weather/../social/x";
+        _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull("dot segments are not a permalink");
+        stored["supersedesPermalink"] = "/weather/weather-desk/tornado-watch-1";
+        _products.ProjectPayload(stored)["supersedesPermalink"]!.GetValue<string>().Should().Be("/weather/weather-desk/tornado-watch-1");
+        stored["action"] = "new";
+        _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull("a new product supersedes nothing");
     }
 
     [Fact]
