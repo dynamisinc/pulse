@@ -4,12 +4,16 @@ using System;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Tests.Data;
 using Xunit;
 
 /// <summary>
@@ -189,10 +193,16 @@ public sealed class ContentPublishServiceTests
         var draft = await harness.CreateAsync();
 
         using var scope = harness.InA();
-        var result = await scope.Funnel.ScheduleAsync(Guid.Parse(draft.Id), "soon", null, FunnelHarness.Controller);
+        foreach (var value in new[] { "soon", "12:30", "Jan 5 2033", "2033-09-04T10:00:00" })
+        {
+            var result = await scope.Funnel.ScheduleAsync(Guid.Parse(draft.Id), value, null, FunnelHarness.Controller);
 
-        result.Outcome.Should().Be(ContentPublishOutcome.Invalid);
-        result.Errors.Single().Should().Contain("ISO-8601");
+            result.Outcome.Should().Be(ContentPublishOutcome.Invalid, "'{0}' is not an ISO instant with an offset", value);
+            result.Errors.Single().Should().Contain("ISO-8601");
+        }
+
+        (await scope.Funnel.ScheduleAsync(Guid.Parse(draft.Id), "2033-09-04T10:00:00.123-04:00", null, FunnelHarness.Controller))
+            .Outcome.Should().Be(ContentPublishOutcome.Ok);
     }
 
     // ---- Sanitization and validation (NFR-004) --------------------------------------------------------------------
@@ -258,8 +268,8 @@ public sealed class ContentPublishServiceTests
         Guid document;
         using (var seed = harness.InA())
         {
-            var asset = Pulse.WebApi.Tests.Data.ChannelRows.MediaAsset(harness.ExerciseId);
-            var pdf = Pulse.WebApi.Tests.Data.ChannelRows.MediaAsset(harness.ExerciseId);
+            var asset = ChannelRows.MediaAsset(harness.ExerciseId);
+            var pdf = ChannelRows.MediaAsset(harness.ExerciseId);
             pdf.Kind = MediaKinds.Document;
             seed.Db.MediaAssets.AddRange(asset, pdf);
             await seed.Db.SaveChangesAsync();
@@ -277,6 +287,9 @@ public sealed class ContentPublishServiceTests
         var pdfRefused = await scope.Funnel.CreateDraftAsync(
             harness.Request() with { Media = [new ContentMediaWriteRequest { MediaId = document.ToString(), Alt = "Order" }] },
             FunnelHarness.Controller);
+        var heroWithoutEntry = await scope.Funnel.CreateDraftAsync(
+            harness.Request() with { HeroMediaId = image.ToString() }, FunnelHarness.Controller);
+        heroWithoutEntry.Errors.Should().Equal("heroMediaId must also be listed in media, with alt text.");
         var noAlt = await scope.Funnel.CreateDraftAsync(
             harness.Request() with { Media = [new ContentMediaWriteRequest { MediaId = image.ToString() }] },
             FunnelHarness.Controller);
@@ -532,6 +545,10 @@ public sealed class ContentPublishServiceTests
         (await scope.Funnel.UpdateDraftAsync(id, harness.Request("Engine rewrite") with { Version = 1 }, FunnelHarness.Engine))
             .Outcome.Should().Be(ContentPublishOutcome.Ok, "the engine may keep editing its draft");
 
+        var staffDraft = await harness.CreateAsync();
+        (await scope.Funnel.UpdateDraftAsync(Guid.Parse(staffDraft.Id), harness.Request() with { Version = 1 }, FunnelHarness.Engine))
+            .Errors.Should().Equal(new[] { ContentPublishService.EngineDraftOnlyMessage }, "the engine edits only its own drafts");
+
         var staff = await scope.Funnel.PublishAsync(id, null, FunnelHarness.Controller);
         staff.Outcome.Should().Be(ContentPublishOutcome.Ok);
         staff.Item!.Origin.Should().Be("engine", "provenance stays the drafter's");
@@ -563,6 +580,8 @@ public sealed class ContentPublishServiceTests
         events.Should().OnlyContain(e => e.Channel == "news" && e.Target!.EntityType == "content_item" && e.Target.EntityId == draft.Id);
         events.Should().OnlyContain(e => e.Actor.ActingHumanId == "human-ctl" && e.Actor.Kind == "system");
 
+        events.Where((_, i) => i != 1).Should().OnlyContain(
+            e => e.Origin == null, "a controller action has no v0 envelope origin (controller is not in the union)");
         var publish = events[1];
         publish.Origin.Should().Be("inject");
         publish.InjectId.Should().Be(injectId.ToString());
@@ -627,7 +646,7 @@ public sealed class ContentPublishServiceTests
     {
         var defaults = new DefaultOnlyObserver();
         using var harness = FunnelHarness.Create(services =>
-            Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<IContentPublishedObserver>(services, defaults));
+            services.AddSingleton<IContentPublishedObserver>(defaults));
         var published = await harness.CreatePublishedAsync();
 
         using var scope = harness.InA();
@@ -756,5 +775,108 @@ public sealed class ContentPublishServiceTests
 
         harness.AlertRaiser!.Raised.Should().BeEmpty("the call's options replace the persisted ones entirely");
         harness.PairedPoster!.Posts.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TheEngine_CannotEditItsDraftOnceStaffScheduledIt()
+    {
+        using var harness = FunnelHarness.Create();
+        var engineDraft = await harness.CreateAsync(FunnelHarness.Engine);
+        var id = Guid.Parse(engineDraft.Id);
+
+        using var scope = harness.InA();
+        var scheduled = await scope.Funnel.ScheduleAsync(id, "2033-09-04T10:00:00Z", null, FunnelHarness.Controller);
+        var edit = await scope.Funnel.UpdateDraftAsync(
+            id, harness.Request("Engine rewrite") with { Version = scheduled.Item!.Version }, FunnelHarness.Engine);
+
+        edit.Errors.Should().Equal(ContentPublishService.EngineDraftOnlyMessage);
+    }
+
+    [Fact]
+    public async Task AParticipantCallersPublishOptions_AreIgnored_AndNeverPersisted()
+    {
+        using var harness = FunnelHarness.Create();
+        var release = await harness.CreateAsync(FunnelHarness.Participant, harness.Request(kind: "release"));
+        var id = Guid.Parse(release.Id);
+        var options = new PublishOptions { Alert = new PublishAlertOptions { Severity = "emergency" }, PairedPost = new PairedPostOptions() };
+
+        using var scope = harness.InA();
+        await scope.Funnel.ScheduleAsync(id, "2033-09-04T10:00:00Z", options, FunnelHarness.Participant);
+        (await harness.ItemAsync(release.Id)).PublishOptionsJson.Should().BeNull();
+        await scope.Funnel.PublishAsync(id, options, FunnelHarness.Participant);
+
+        harness.AlertRaiser!.Raised.Should().BeEmpty("raising the alert bar is a staff lever");
+        harness.PairedPoster!.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ScheduleWithNullOptions_KeepsPersistedOnes_AndAnEmptyOptionsObjectMeansNone()
+    {
+        using var harness = FunnelHarness.Create();
+        var first = await harness.CreateAsync();
+        var second = await harness.CreateAsync();
+        var attached = new PublishOptions { Alert = new PublishAlertOptions { Severity = "advisory" } };
+
+        using var scope = harness.InA();
+        await scope.Funnel.ScheduleAsync(Guid.Parse(first.Id), "2033-09-04T10:00:00Z", attached, FunnelHarness.Controller);
+        await scope.Funnel.UnscheduleAsync(Guid.Parse(first.Id), FunnelHarness.Controller);
+        await scope.Funnel.ScheduleAsync(Guid.Parse(first.Id), "2033-09-04T11:00:00Z", null, FunnelHarness.Controller);
+        await scope.Funnel.PublishAsync(Guid.Parse(first.Id), null, FunnelHarness.Controller);
+
+        await scope.Funnel.ScheduleAsync(Guid.Parse(second.Id), "2033-09-04T10:00:00Z", attached, FunnelHarness.Controller);
+        await scope.Funnel.UnscheduleAsync(Guid.Parse(second.Id), FunnelHarness.Controller);
+        await scope.Funnel.ScheduleAsync(Guid.Parse(second.Id), "2033-09-04T11:00:00Z", new PublishOptions(), FunnelHarness.Controller);
+        await scope.Funnel.PublishAsync(Guid.Parse(second.Id), null, FunnelHarness.Controller);
+
+        harness.AlertRaiser!.Raised.Should().ContainSingle("a dialog-less reschedule keeps the attached alert; {} clears it")
+            .Which.Raise.SourceContentId.Should().Be(Guid.Parse(first.Id));
+    }
+
+    [Fact]
+    public async Task AStaffEdit_ThatOmitsTheExternalReference_KeepsIt()
+    {
+        using var harness = FunnelHarness.Create();
+        var pushed = await harness.CreateAsync(request: harness.Request() with { ExternalSource = "cadence", ExternalRef = "inj-42" });
+
+        using var scope = harness.InA();
+        var edited = await scope.Funnel.UpdateDraftAsync(
+            Guid.Parse(pushed.Id), harness.Request("Edited") with { Version = 1 }, FunnelHarness.Controller);
+
+        edited.Item!.ExternalSource.Should().Be("cadence");
+        edited.Item.ExternalRef.Should().Be("inj-42", "the Cadence idempotency key survives a form that does not round-trip it");
+    }
+
+    [Fact]
+    public async Task ASideEffectThatThrowsAfterWriting_LeavesNoHalfMadeRowsBehind()
+    {
+        using var harness = FunnelHarness.Create(services => services.AddScoped<IAlertRaiser>(
+            provider => new HalfWritingAlertRaiser(provider.GetRequiredService<PulseDbContext>())));
+        var draft = await harness.CreateAsync();
+
+        using var scope = harness.InA();
+        var result = await scope.Funnel.PublishAsync(
+            Guid.Parse(draft.Id),
+            new PublishOptions { Alert = new PublishAlertOptions(), PairedPost = new PairedPostOptions() },
+            FunnelHarness.Controller);
+
+        result.Outcome.Should().Be(ContentPublishOutcome.Ok);
+        result.SideEffectWarnings.Should().Equal(ContentPublishService.AlertFailedMessage);
+        result.Item!.PairedPostId.Should().NotBeNull("the paired post's id was still recorded");
+        using var read = harness.InA();
+        (await read.Db.Outlets.CountAsync(o => o.Slug == "half-made")).Should().Be(0);
+    }
+
+    /// <summary>Adds a row to the shared unit of work, then fails before saving it.</summary>
+    private sealed class HalfWritingAlertRaiser(PulseDbContext db) : IAlertRaiser
+    {
+        public Task<AlertDto> RaiseAsync(AlertRaise raise, ContentCaller caller, CancellationToken cancellationToken = default)
+        {
+            var exerciseId = db.ContentItems.Single(item => item.Id == raise.SourceContentId).ExerciseId;
+            db.Outlets.Add(ChannelRows.Outlet(exerciseId, slug: "half-made"));
+            throw new InvalidOperationException("failed after writing");
+        }
+
+        public Task<bool> ClearAsync(Guid id, ContentCaller caller, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
     }
 }

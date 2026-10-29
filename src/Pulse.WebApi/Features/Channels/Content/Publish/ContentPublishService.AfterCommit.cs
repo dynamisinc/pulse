@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Channels.Content.Publish;
 
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Contracts;
@@ -143,6 +144,7 @@ public sealed partial class ContentPublishService
                 catch (Exception ex)
                 {
                     LogSideEffectFailed(ex, "alert", item.Id);
+                    DiscardPendingWritesExcept(item);
                     warnings.Add(AlertFailedMessage);
                 }
 #pragma warning restore CA1031
@@ -174,6 +176,7 @@ public sealed partial class ContentPublishService
                 catch (Exception ex)
                 {
                     LogSideEffectFailed(ex, "paired post", item.Id);
+                    DiscardPendingWritesExcept(item);
                     warnings.Add(PairedPostFailedMessage);
                 }
 #pragma warning restore CA1031
@@ -191,11 +194,40 @@ public sealed partial class ContentPublishService
             {
                 LogSideEffectFailed(ex, "id recording", item.Id);
                 warnings.Add(SideEffectIdsNotRecordedMessage);
+
+                // The result must not report ids that were never stored: put the item back as the database has it.
+                try
+                {
+                    await _db.Entry(item).ReloadAsync(CancellationToken.None);
+                }
+                catch (Exception reloadEx)
+                {
+                    LogSideEffectFailed(reloadEx, "reload after id recording", item.Id);
+                    item.AlertId = null;
+                    item.PairedPostId = null;
+                }
             }
 #pragma warning restore CA1031
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// A side effect shares the request's unit of work; if it threw after adding or changing rows, those half-made
+    /// writes must not ride along on the next save (another side effect's, or the id recording). Everything pending
+    /// except the funnel's own item is detached.
+    /// </summary>
+    private void DiscardPendingWritesExcept(ContentItem item)
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().ToList())
+        {
+            if (!ReferenceEquals(entry.Entity, item)
+                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
     }
 
     [LoggerMessage(

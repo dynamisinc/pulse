@@ -115,7 +115,12 @@ public sealed class ContentPublishIsolationTests
         var refused = await scope.Funnel.CreateDraftAsync(
             harness.Request() with { HeroMediaId = someoneElses.ToString() }, FunnelHarness.Participant);
         var allowed = await scope.Funnel.CreateDraftAsync(
-            harness.Request() with { HeroMediaId = theirs.ToString() }, FunnelHarness.Participant);
+            harness.Request() with
+            {
+                HeroMediaId = theirs.ToString(),
+                Media = [new ContentMediaWriteRequest { MediaId = theirs.ToString(), Role = "hero", Alt = "My photo" }],
+            },
+            FunnelHarness.Participant);
 
         refused.Errors.Should().Equal(ContentPublishService.MediaNotFoundMessage);
         allowed.Outcome.Should().Be(ContentPublishOutcome.Ok);

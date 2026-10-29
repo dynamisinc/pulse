@@ -62,6 +62,12 @@ public static partial class ContentSanitizer
         "style", "srcdoc", "formaction", "action", "srcset", "ping", "xmlns", "is",
     };
 
+    /// <summary>
+    /// The deepest element nesting the output may carry. A start tag beyond it is dropped (its text kept), which bounds
+    /// both the work per close tag and the DOM depth participants' browsers render.
+    /// </summary>
+    public const int MaxNestingDepth = 64;
+
     /// <summary>Void elements: emitted without a close tag and never pushed onto the open stack.</summary>
     private static readonly IReadOnlySet<string> VoidElements = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -101,7 +107,14 @@ public static partial class ContentSanitizer
         }
 
         var match = SchemePattern().Match(url);
-        return match.Success && profile.AllowedUrlSchemes.Contains(match.Groups["scheme"].Value);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        // Schemes are case-insensitive (RFC 3986): compare lower-cased, whatever comparer the profile's set uses.
+        var scheme = match.Groups["scheme"].Value.ToLowerInvariant();
+        return profile.AllowedUrlSchemes.Any(allowed => string.Equals(allowed, scheme, StringComparison.OrdinalIgnoreCase));
     }
 
     [GeneratedRegex(@"\A(?<scheme>[A-Za-z][A-Za-z0-9+.\-]*):", RegexOptions.CultureInvariant)]
@@ -117,6 +130,7 @@ public static partial class ContentSanitizer
         private readonly SanitizerProfile _profile;
         private readonly StringBuilder _output;
         private readonly List<string> _open = [];
+        private readonly Dictionary<string, int> _openCounts = new(StringComparer.Ordinal);
 
         // The last '>' and quote of each kind: a tag or quoted value that starts after them can never close, so it is
         // refused without scanning to the end again (keeps a run of unclosed openers linear).
@@ -182,6 +196,13 @@ public static partial class ContentSanitizer
         private int ReadMarkup(int index)
         {
             var next = index + 1 < _input.Length ? _input[index + 1] : '\0';
+            if (index > _lastGreaterThan)
+            {
+                // No '>' follows, so nothing from here can be a complete tag: a comment or declaration runs to the end
+                // (as a browser reads it); anything else is a literal '<'. Answered without scanning, so a run of
+                // unclosed openers ("</a</a</a…", "<b<b<b…") stays linear.
+                return next is '!' or '?' ? _input.Length : Literal(index);
+            }
 
             if (string.CompareOrdinal(_input, index, "<!--", 0, 4) == 0)
             {
@@ -197,12 +218,8 @@ public static partial class ContentSanitizer
 
             if (next == '/' && index + 2 < _input.Length && char.IsAsciiLetter(_input[index + 2]))
             {
+                // A '>' is known to follow (the guard above), so this search always succeeds.
                 var end = _input.IndexOf('>', index + 2);
-                if (end < 0)
-                {
-                    return Literal(index);
-                }
-
                 var name = ReadName(index + 2, out _).ToLowerInvariant();
                 Close(name);
                 return end + 1;
@@ -227,7 +244,9 @@ public static partial class ContentSanitizer
                 return SkipElementWithContent(tag.Name, tag.End + 1);
             }
 
-            if (_profile.AllowedElements.Contains(tag.Name) && !ForbiddenElements.Contains(tag.Name))
+            if (_profile.AllowedElements.Contains(tag.Name)
+                && !ForbiddenElements.Contains(tag.Name)
+                && (VoidElements.Contains(tag.Name) || _open.Count < MaxNestingDepth))
             {
                 Emit(tag);
             }
@@ -307,21 +326,25 @@ public static partial class ContentSanitizer
             if (!VoidElements.Contains(tag.Name))
             {
                 _open.Add(tag.Name);
+                _openCounts[tag.Name] = _openCounts.GetValueOrDefault(tag.Name) + 1;
             }
         }
 
         /// <summary>Closes <paramref name="name"/> if open (and everything opened inside it); a stray close is dropped.</summary>
         private void Close(string name)
         {
-            var at = _open.LastIndexOf(name);
-            if (at < 0)
+            // O(1) for a stray close (the common attack shape); the stack scan only runs when the element IS open, and
+            // the stack is at most MaxNestingDepth deep.
+            if (_openCounts.GetValueOrDefault(name) == 0)
             {
                 return;
             }
 
+            var at = _open.LastIndexOf(name);
             for (var k = _open.Count - 1; k >= at; k--)
             {
                 _output.Append("</").Append(_open[k]).Append('>');
+                _openCounts[_open[k]]--;
             }
 
             _open.RemoveRange(at, _open.Count - at);

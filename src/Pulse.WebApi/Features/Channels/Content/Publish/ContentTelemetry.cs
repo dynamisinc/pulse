@@ -19,7 +19,7 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// </para>
 /// <para>
 /// <b>Envelope.</b> <c>channel</c> = the item's channel; <c>origin</c> and <c>injectId</c> = the CALLER's (the publish
-/// call, not whoever drafted the item); <c>actor.actingHumanId</c> = the human behind the call (COR-018). The actor kind
+/// call, not whoever drafted the item), with <c>origin</c> mapped onto the v0 union (<see cref="TelemetryOriginOf"/>); <c>actor.actingHumanId</c> = the human behind the call (COR-018). The actor kind
 /// follows the origin: <c>participant</c> (with <c>participantId</c> = the acting human, which the write guard requires),
 /// <c>engine</c>, or <c>system</c> for a controller or inject action (the <c>InjectTelemetry</c> convention). Target is
 /// <c>{ entityType: content_item, entityId }</c>.
@@ -105,7 +105,7 @@ public static class ContentTelemetry
             EventType = EventTypeFor(action, item, caller),
             Channel = item.ChannelId,
             Actor = actor,
-            Origin = caller.Origin,
+            Origin = TelemetryOriginOf(caller.Origin),
             InjectId = caller.InjectId?.ToString(),
             WallClockTime = time.WallClock,
             ScenarioTime = time.ScenarioTime,
@@ -116,6 +116,20 @@ public static class ContentTelemetry
             EmittedAt = time.WallClock,
         };
     }
+
+    /// <summary>
+    /// The envelope <c>origin</c> for a content caller. The v0 origin union (<c>participant | controller-as-persona |
+    /// engine | inject | noise</c>) is a different vocabulary from <c>ContentOrigin</c>: <c>participant</c>, <c>engine</c>
+    /// and <c>inject</c> carry over as-is; a <c>controller</c> action has NO envelope origin (it is not content posted as
+    /// a persona), exactly like <c>InjectTelemetry</c>'s staff actions — the <c>system</c> actor with its
+    /// <c>actingHumanId</c> already says a staff member did it.
+    /// </summary>
+    /// <param name="contentOrigin">The caller's content origin.</param>
+    /// <returns>The v0 envelope origin, or null.</returns>
+    public static string? TelemetryOriginOf(string contentOrigin) =>
+        contentOrigin is ChannelVocabulary.OriginParticipant or ChannelVocabulary.OriginEngine or ChannelVocabulary.OriginInject
+            ? contentOrigin
+            : null;
 
     /// <summary>The opaque payload — camelCase by explicit names; no body, no headline (nothing participant-authored).</summary>
     private sealed record ContentEventPayload(

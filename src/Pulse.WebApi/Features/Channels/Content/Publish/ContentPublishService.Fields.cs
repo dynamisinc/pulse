@@ -117,6 +117,14 @@ public sealed partial class ContentPublishService
             externalSource = string.IsNullOrWhiteSpace(request.ExternalSource) ? null : request.ExternalSource.Trim();
             externalRef = string.IsNullOrWhiteSpace(request.ExternalRef) ? null : request.ExternalRef.Trim();
 
+            // The Cadence idempotency key (PDF-06) survives an edit from a form that does not round-trip it: omitting
+            // BOTH keeps the stored pair. (background / featuredRank are PUT-replace like every other field.)
+            if (externalSource is null && externalRef is null && existing is not null)
+            {
+                externalSource = existing.ExternalSource;
+                externalRef = existing.ExternalRef;
+            }
+
             if (featuredRank is < 1)
             {
                 errors.Add("featuredRank must be 1 or more.");
@@ -333,6 +341,11 @@ public sealed partial class ContentPublishService
             if (kind is not (MediaKinds.Image or MediaKinds.Video) || !descriptor.AllowedMediaKinds.Contains(kind))
             {
                 errors.Add($"heroMediaId must name an image or video a {descriptor.Kind} may carry.");
+            }
+            else if (!media.Any(item => item.AssetId == heroAsset && item.Alt is not null))
+            {
+                // NFR-001: the hero carries alt text too, and its alt lives on its media entry.
+                errors.Add("heroMediaId must also be listed in media, with alt text.");
             }
         }
 

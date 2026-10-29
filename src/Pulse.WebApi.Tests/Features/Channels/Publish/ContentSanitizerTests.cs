@@ -128,21 +128,52 @@ public sealed class ContentSanitizerTests
     [Fact]
     public void PathologicalInput_IsSanitizedInLinearTime()
     {
+        // Each is at most MaxRawBodyLength (400k) and shaped after a review finding: unclosed openers, unterminated
+        // quotes, unclosed raw-text blocks, rebuilt tags, deep nesting followed by stray closes, and "</a" with no '>'.
         var inputs = new[]
         {
             string.Concat(Enumerable.Repeat("<a b ", 40_000)),
             string.Concat(Enumerable.Repeat("<p x='", 40_000)) + ">",
             string.Concat(Enumerable.Repeat("<script>", 40_000)),
             string.Concat(Enumerable.Repeat("<<b>", 40_000)),
+            string.Concat(Enumerable.Repeat("<em>", 50_000)) + string.Concat(Enumerable.Repeat("</p>", 50_000)),
+            string.Concat(Enumerable.Repeat("</a", 133_000)),
+            string.Concat(Enumerable.Repeat("<!", 100_000)),
         };
 
-        var stopwatch = Stopwatch.StartNew();
         foreach (var input in inputs)
         {
+            var stopwatch = Stopwatch.StartNew();
             Registry.Sanitize(ISanitizerProfileRegistry.RichTables, input);
+            stopwatch.Elapsed.Should().BeLessThan(
+                TimeSpan.FromMilliseconds(500), "a linear pass over {0} characters starting {1}", input.Length, input[..8]);
         }
+    }
 
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3), "every pass is linear in its input");
+    [Fact]
+    public void Nesting_IsCappedAtMaxDepth_AndTheTextIsKept()
+    {
+        var input = string.Concat(Enumerable.Repeat("<em>", 200)) + "deep";
+
+        var output = Registry.Sanitize(ISanitizerProfileRegistry.RichBasic, input);
+
+        Regex.Matches(output, "<em>").Count.Should().Be(ContentSanitizer.MaxNestingDepth);
+        output.Should().Contain("deep");
+        Regex.Matches(output, "</em>").Count.Should().Be(ContentSanitizer.MaxNestingDepth, "everything opened is closed");
+    }
+
+    [Fact]
+    public void UrlSchemes_MatchCaseInsensitively_WhateverTheProfilesComparer()
+    {
+        var registry = new SanitizerProfileRegistry();
+        registry.Register("links", new SanitizerProfile
+        {
+            AllowedElements = new HashSet<string> { "a" },
+            AllowedAttributes = new Dictionary<string, IReadOnlySet<string>> { ["a"] = new HashSet<string> { "href" } },
+            AllowedUrlSchemes = new HashSet<string>(StringComparer.Ordinal) { "https" },
+        });
+
+        registry.Sanitize("links", "<a href=\"HTTPS://example.org\">x</a>").Should().Contain("href=\"HTTPS://example.org\"");
     }
 
     [Fact]

@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Channels.Content.Publish;
 
 using System.Globalization;
+using System.Text.RegularExpressions;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,6 +10,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.Injects;
 using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
@@ -65,6 +68,10 @@ public sealed partial class ContentPublishService : IContentPublishService
     public const string EngineItemNeedsStaffMessage = "An engine draft can only be published or scheduled by staff.";
 
     private const string FallbackTimeZone = "UTC";
+
+    private const int DuplicateKeyErrorNumber = 2601;
+
+    private const int UniqueConstraintErrorNumber = 2627;
 
     private readonly PulseDbContext _db;
     private readonly IExerciseContext _exerciseContext;
@@ -287,8 +294,11 @@ public sealed partial class ContentPublishService : IContentPublishService
             return held;
         }
 
-        // FC-7a: decided BEFORE the state change, from the item as it stands (the runner and inject fire pass null).
-        var (resolved, _) = PublishOptionsResolver.Resolve(options, item, descriptor);
+        // FC-7a: decided BEFORE the state change, from the item as it stands (the runner and inject fire pass null). The
+        // alert and the persona post are staff levers: a participant caller's own options are ignored (the persisted
+        // and kind-derived steps still apply), as the funnel already ignores a participant's staff-only fields.
+        var callOptions = caller.Origin == ChannelVocabulary.OriginParticipant ? null : options;
+        var (resolved, _) = PublishOptionsResolver.Resolve(callOptions, item, descriptor);
 
         var time = await ClockAsync(exerciseId, cancellationToken);
         item.Status = ChannelVocabulary.StatusPublished;
@@ -329,8 +339,7 @@ public sealed partial class ContentPublishService : IContentPublishService
 
         var (item, _, exerciseId) = (load.Item!, load.Descriptor!, load.ExerciseId);
 
-        if (!DateTimeOffset.TryParse(
-                scenarioTime, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var scheduledAt))
+        if (!TryParseIsoInstant(scenarioTime, out var scheduledAt))
         {
             return Invalid("scenarioTime must be an ISO-8601 instant.");
         }
@@ -345,8 +354,14 @@ public sealed partial class ContentPublishService : IContentPublishService
         item.Status = ChannelVocabulary.StatusScheduled;
         item.ScheduledScenarioTime = scheduledAt;
 
-        // FC-7a: what the caller chose is what the runner replays — null clears a previously persisted choice.
-        item.PublishOptionsJson = PublishOptionsResolver.Serialize(options);
+        // FC-7a: explicit options are what the runner replays. Null keeps whatever is already persisted (an inject attach
+        // or an earlier schedule), so a dialog-less schedule never wipes a delivery decision; an explicitly empty
+        // PublishOptions ({}) is how a caller says "no side effects". A participant caller never sets them (staff lever).
+        if (options is not null && caller.Origin != ChannelVocabulary.OriginParticipant)
+        {
+            item.PublishOptionsJson = PublishOptionsResolver.Serialize(options);
+        }
+
         item.LastError = null;
         item.Version++;
         _db.TelemetryEvents.Add(ContentTelemetry.Build(ContentTransitions.Schedule, item, caller, time));
@@ -617,8 +632,13 @@ public sealed partial class ContentPublishService : IContentPublishService
         }
 
         // NWS-022: the engine only drafts; an engine draft goes live only through a staff-attributed call.
-        if (caller.Origin == ChannelVocabulary.OriginEngine && action is not ContentTransitions.Edit)
+        if (caller.Origin == ChannelVocabulary.OriginEngine
+            && (action is not ContentTransitions.Edit
+                || item.Origin != ChannelVocabulary.OriginEngine
+                || item.Status != ChannelVocabulary.StatusDraft))
         {
+            // The engine edits only its OWN drafts: never a staff item, and never one already scheduled (the runner would
+            // publish engine-written text nobody reviewed).
             return new LoadResult(Invalid(EngineDraftOnlyMessage));
         }
 
@@ -708,12 +728,38 @@ public sealed partial class ContentPublishService : IContentPublishService
         {
             return await ConflictAfterLostRaceAsync(itemId, StaleVersionMessage, cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             return await ConflictAfterLostRaceAsync(
                 itemId, "The item conflicts with another (its slug or external reference is taken). Try again.", cancellationToken);
         }
+        catch (DbUpdateException ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            // A deadlock victim or lock timeout rolled back: a lost race like any other, never a 500.
+            return await ConflictAfterLostRaceAsync(itemId, StaleVersionMessage, cancellationToken);
+        }
     }
+
+    /// <summary>Whether a save failed on a unique index (SQL Server 2601 duplicate key, 2627 unique constraint).</summary>
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: DuplicateKeyErrorNumber or UniqueConstraintErrorNumber };
+
+    /// <summary>
+    /// A strict ISO-8601 instant with an explicit offset or <c>Z</c> (a bare time or a locale date is refused, never read
+    /// as "today"). A time already past is accepted: the runner publishes a due item on its next tick.
+    /// </summary>
+    private static bool TryParseIsoInstant(string? value, out DateTimeOffset instant)
+    {
+        instant = default;
+        return value is not null
+            && IsoInstant().IsMatch(value)
+            && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out instant);
+    }
+
+    [GeneratedRegex(
+        @"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?(Z|[+-]\d{2}:\d{2})\z",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex IsoInstant();
 
     private async Task<ContentPublishResult> ConflictAfterLostRaceAsync(Guid itemId, string message, CancellationToken cancellationToken)
     {
