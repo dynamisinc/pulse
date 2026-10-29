@@ -22,14 +22,15 @@ This story makes the subdomain the normal way an exercise is addressed, with no 
       then `exercise-a.<env-host>` resolves to that exercise with no manual DNS or certificate step (wildcard DNS record
       and wildcard certificate for `*.<env-host>`, served by **Azure Front Door**; one cert, not one binding per exercise. Front Door managed certificates do not
       cover wildcard domains, so the certificate is a wildcard cert held in Key Vault and referenced by Front Door; the
-      story names its issuer and an automated renewal owner, and provisioning is fully automatic, so no per-exercise lead time).
+      issuer and an automated renewal owner are named before build, and provisioning is fully automatic, so no per-exercise lead time).
 - [ ] Given a wildcard cert and DNS in place, when an exercise is created, then the host name is validated (DNS-label
       rules, reserved names blocked such as `www`, `api`, `staff`, `admin`; unique per environment) and stored on
       `Exercise.Hostname`; the host lifecycle is decided (Tom, 10/21): kept while the exercise is
       archived, freed when it is deleted, and changing an exercise's host name ("rename" means the host name, not the
       display name, which never affects routing) keeps the old host as an alias that still resolves to the same exercise.
-      Aliases count toward uniqueness and the reserved-name list, and are deleted with the exercise. A freed host (or alias)
-      is held for a quarantine period before another exercise may claim it (proposed default 30 days; confirm with Tom), so a stale link or QR card never lands a participant
+      **Proposed, to confirm with Tom (not decided):** aliases count toward uniqueness and the reserved-name list and are
+      deleted with the exercise; "freed" means released from that exercise, after which the host (or alias) is held for a
+      quarantine period (proposed 30 days) before another exercise may claim it, so a stale link or QR card never lands a participant
       in a different exercise (XC-001).
 - [ ] Given a request on an unknown or deleted exercise subdomain, when it reaches the API, then scope stays unset
       (fail closed, zero rows; an archived exercise's host still resolves and keeps its existing archived behavior) and the participant sees a neutral "exercise not found" page with no exercise list and no

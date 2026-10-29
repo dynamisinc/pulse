@@ -27,7 +27,7 @@ slice is pulled forward into the demo window** (Tom, 10/15): the load-test repor
 | PDF-11 | Subdomain per exercise (host-resolved, automated DNS + cert) | 10/20 demo: customer "really liked" `exercise-a.<env-host>` | **Must** | Not Started | #679 | [02](02-subdomain-per-exercise.md) |
 | PDF-12 | Section 508 attestation (ACR/VPAT, a11y gate, AT audit) | 10/20: we must attest/prove 508 compliance | **Must** | Not Started | #680 | [03](03-section-508-attestation.md) |
 | PDF-13 | Back-pocket injects (loaded, held in reserve, fired at discretion) | 10/20 demo ask | **Must** (December) | Not Started | #681 | [04](04-back-pocket-injects.md) |
-| PDF-BUG | New-posts pill shows nothing on load (fixed) | 10/20: with white noise on, the "N new posts" pill disappears on click but no new posts show | **Must** | **Fixed** (PR #678, merged 10/29); no issue (Tom, 10/21) | — | — |
+| PDF-BUG | New-posts pill shows nothing on load (fixed) | 10/20: with white noise on, the "N new posts" pill disappears on click but no new posts show | **Must** | **Fixed** (PR #678, merged 10/29); no issue (orchestrator's call, 10/29; tracked by PR #678) | — | — |
 
 ### Due-outs from the 10/20 demo (tracked tasks, not build stories)
 
@@ -67,7 +67,7 @@ above. Open questions were answered by Tom on 10/21 (decisions PDF-D6..D10); onl
 4. **508 attestation:** PDF-12, Must.
 5. **Back-pocket injects:** PDF-13, Must, December.
 6. **Due-outs:** PDF-DO1..DO3, tracked tasks.
-7. **Bug:** PDF-BUG, Must. **Fixed by PR #678** (merged 10/29); no issue (Tom, 10/21). Root cause: noise posts were stamped by the server clock (frozen during a Freeze) while other posts used the browser wall clock, so feeds sorted noise below the top. Fix: every live post is stamped with the server clock, browsers sync to it, and the Live World cap and the unknown-author pill path are hardened.
+7. **Bug:** PDF-BUG, Must. **Fixed by PR #678** (merged 10/29); no issue (orchestrator's call, 10/29; tracked by PR #678). Root cause: noise posts were stamped by the server clock (frozen during a Freeze) while other posts used the browser wall clock, so feeds sorted noise below the top. Fix: every live post is stamped with the server clock, browsers sync to it, and the Live World cap and the unknown-author pill path are hardened.
 
 ## Notes from the 10/15 analysis
 
