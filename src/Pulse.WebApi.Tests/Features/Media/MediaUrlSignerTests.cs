@@ -56,6 +56,74 @@ public sealed class MediaUrlSignerTests
         SasUrl.Time(sas["ske"]).Should().BeOnOrAfter(expiresOn, "the delegation key outlives the SAS it signs");
     }
 
+    /// <summary>
+    /// press-room story 02 AC "Download-only serve": a document's SAS pins <c>application/pdf</c> and an
+    /// <c>attachment</c> disposition with its download name. Both are inside the signature, so a client asking for
+    /// <c>inline</c> (editing <c>rscd</c>) only breaks the URL — there is no inline variant to ask for.
+    /// </summary>
+    [Fact]
+    public async Task ADocumentsSas_PinsApplicationPdfAndAnAttachmentDisposition_NeverInline()
+    {
+        var harness = new SignerHarness();
+        var document = harness.Asset("pdf");
+        document.OriginalFileName = "Fulton \"County\" Release.pdf";
+
+        var sas = SasUrl.Query(await harness.Signer.GetReadUrlAsync(document, CancellationToken.None));
+
+        sas["rsct"].Should().Be("application/pdf");
+        sas["rscd"].Should().StartWith("attachment;", "a document is download-only, never rendered in a browser");
+        sas["rscd"].Should().NotContain("inline");
+        sas["rscd"].Should().Contain("filename*=UTF-8''Fulton%20%22County%22%20Release.pdf", "the RFC 5987 download name");
+        sas["sp"].Should().Be("r");
+    }
+
+    [Fact]
+    public async Task AnImageNextToADocumentInOneBatch_StaysInline()
+    {
+        var harness = new SignerHarness();
+        var image = harness.Asset("png");
+        var document = harness.Asset("pdf");
+
+        var urls = await harness.Signer.GetReadUrlsAsync([image, document], CancellationToken.None);
+
+        SasUrl.Query(urls[image.Id])["rscd"].Should().Be("inline", "existing image/video behavior is unchanged");
+        SasUrl.Query(urls[document.Id])["rscd"].Should().StartWith("attachment;");
+    }
+
+    [Fact]
+    public async Task ADocumentFromAnotherExercise_IsNeverSigned()
+    {
+        var harness = new SignerHarness();
+        var foreign = harness.Asset("pdf", exerciseId: Guid.NewGuid());
+
+        var sign = () => harness.Signer.GetReadUrlAsync(foreign, CancellationToken.None);
+
+        await sign.Should().ThrowAsync<ExerciseScopeViolationException>();
+    }
+
+    [Theory]
+    [InlineData("0f0e0d0c0b0a09080706050403020100.pdf", true)]
+    [InlineData("0f0e0d0c0b0a09080706050403020100.png", false)]
+    public void TheDevelopmentStaticMapping_ServesADocumentAsASandboxedAttachment(string fileName, bool isDocument)
+    {
+        var context = new DefaultHttpContext();
+
+        DevMediaStartupFilter.PrepareResponse(context.Response, fileName);
+
+        context.Response.Headers.XContentTypeOptions.ToString().Should().Be("nosniff");
+        if (isDocument)
+        {
+            // /dev-media is served from the API's OWN origin, so the document must not render there.
+            context.Response.Headers.ContentDisposition.ToString().Should().StartWith("attachment;");
+            context.Response.Headers.ContentSecurityPolicy.ToString().Should().Be("sandbox");
+        }
+        else
+        {
+            context.Response.Headers.ContentDisposition.Should().BeEmpty("images/videos keep their existing headers");
+            context.Response.Headers.ContentSecurityPolicy.Should().BeEmpty();
+        }
+    }
+
     [Fact]
     public async Task TwoMintsInOneBucket_ReturnIdenticalUrls_AndANewBucketChangesTheExpiry()
     {
@@ -295,9 +363,15 @@ public sealed class MediaUrlSignerTests
     {
         Id = id,
         ExerciseId = exerciseId,
-        Kind = extension is "mp4" or "webm" ? MediaKinds.Video : MediaKinds.Image,
+        Kind = extension switch
+        {
+            "mp4" or "webm" => MediaKinds.Video,
+            "pdf" => MediaKinds.Document,
+            _ => MediaKinds.Image,
+        },
         ContentType = extension switch
         {
+            "pdf" => "application/pdf",
             "png" => "image/png",
             "jpg" => "image/jpeg",
             "mp4" => "video/mp4",

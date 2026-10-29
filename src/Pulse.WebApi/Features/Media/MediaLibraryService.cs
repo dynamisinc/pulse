@@ -112,9 +112,9 @@ public sealed partial class MediaLibraryService
 
         var exerciseId = scope.Value;
 
-        if (!string.IsNullOrEmpty(kind) && kind != MediaKinds.Image && kind != MediaKinds.Video)
+        if (!string.IsNullOrEmpty(kind) && kind != MediaKinds.Image && kind != MediaKinds.Video && kind != MediaKinds.Document)
         {
-            return MediaLibraryResult.Failed(MediaLibraryOutcome.Invalid, "kind must be 'image' or 'video'.");
+            return MediaLibraryResult.Failed(MediaLibraryOutcome.Invalid, "kind must be 'image', 'video' or 'document'.");
         }
 
         var pageSize = DefaultTake;
@@ -134,10 +134,11 @@ public sealed partial class MediaLibraryService
             .AsNoTracking()
             .Where(asset => asset.ExerciseId == exerciseId && !posterIds.Contains(asset.Id));
 
-        if (!string.IsNullOrEmpty(kind))
-        {
-            query = query.Where(asset => asset.Kind == kind);
-        }
+        // press-room story 02: documents are listed only when asked for (kind=document), so the image/video pickers
+        // that read the unfiltered library never see a download-only PDF.
+        query = string.IsNullOrEmpty(kind)
+            ? query.Where(asset => asset.Kind != MediaKinds.Document)
+            : query.Where(asset => asset.Kind == kind);
 
         // Newest first by the WALL clock — the authoritative upload order. CreatedScenarioTime may come from three
         // different time bases (running clock / persisted scenario time / wall clock: the DP-18a staff-metadata

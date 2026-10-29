@@ -38,7 +38,7 @@ public static partial class MediaBlobNames
     public static bool IsValid(string? blobName) => blobName is not null && BlobNameRegex().IsMatch(blobName);
 
     [GeneratedRegex(
-        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\\.(jpg|png|gif|webp|mp4|webm)$",
+        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\\.(jpg|png|gif|webp|mp4|webm|pdf)$",
         RegexOptions.CultureInvariant)]
     private static partial Regex BlobNameRegex();
 }
