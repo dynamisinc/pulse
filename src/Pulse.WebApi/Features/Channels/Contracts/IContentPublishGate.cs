@@ -8,6 +8,12 @@ using Pulse.WebApi.Data.Entities;
 /// is a 409 <c>held</c> with state unchanged. A channel gate that needs a participant paper trail (press's
 /// <c>IReleaseApprovalGate</c>) stays channel-owned and calls the funnel only after it passes.
 /// </summary>
+/// <remarks>
+/// Zero or more gates may be registered. The funnel evaluates them in registration order; the FIRST
+/// <see cref="ContentPublishGateDecision.Hold"/> wins (later gates are not asked), and when all allow, every non-null
+/// <see cref="ContentPublishGateDecision.AuditNote"/> is kept, in order, in <c>payload.gateNote</c>. The <c>item</c> is
+/// the funnel's tracked instance: read-only.
+/// </remarks>
 public interface IContentPublishGate
 {
     /// <summary>Decides whether the action may proceed.</summary>

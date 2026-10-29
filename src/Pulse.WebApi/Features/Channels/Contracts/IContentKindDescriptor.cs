@@ -59,6 +59,7 @@ public interface IContentKindDescriptor
     /// </summary>
     /// <param name="item">The item being published.</param>
     /// <returns>The options, or null (the default) for none.</returns>
+    /// <remarks>A default interface member: the funnel calls it through <see cref="IContentKindDescriptor"/>.</remarks>
     PublishOptions? ResolvePublishOptions(ContentItem item) => null;
 }
 

@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.Channels;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
@@ -54,18 +55,41 @@ public class ChannelSeamContractTests
         method.GetParameters().Select(p => p.ParameterType).Should().Equal(typeof(ContentItem));
     }
 
+    public static TheoryData<Type, string, Type[], Type> EntitySeams() => new()
+    {
+        {
+            typeof(IContentPublishGate), nameof(IContentPublishGate.EvaluateAsync),
+            [typeof(ContentItem), typeof(PublishContext), typeof(CancellationToken)],
+            typeof(Task<ContentPublishGateDecision>)
+        },
+        {
+            typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnPublishedAsync),
+            [typeof(ContentItem), typeof(CancellationToken)], typeof(Task)
+        },
+        {
+            typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRevisedAsync),
+            [typeof(ContentItem), typeof(CancellationToken)], typeof(Task)
+        },
+        {
+            typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRetractedAsync),
+            [typeof(ContentItem), typeof(CancellationToken)], typeof(Task)
+        },
+        {
+            typeof(IPairedSocialPoster), nameof(IPairedSocialPoster.PostLinkCardAsync),
+            [typeof(ContentItem), typeof(string), typeof(ContentCaller), typeof(CancellationToken)],
+            typeof(Task<Guid?>)
+        },
+    };
+
     [Theory]
-    [InlineData(typeof(IContentPublishGate), nameof(IContentPublishGate.EvaluateAsync))]
-    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnPublishedAsync))]
-    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRevisedAsync))]
-    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRetractedAsync))]
-    [InlineData(typeof(IPairedSocialPoster), nameof(IPairedSocialPoster.PostLinkCardAsync))]
-    public void EntitySeam_TakesTheF01ContentItemFirst(Type seam, string member)
+    [MemberData(nameof(EntitySeams))]
+    public void EntitySeam_HasTheFrozenSignature(Type seam, string member, Type[] parameters, Type returns)
     {
         var method = seam.GetMethod(member)!;
 
-        method.GetParameters()[0].ParameterType.Should().Be(typeof(ContentItem), "FC-7 types these seams on the entity");
-        typeof(Task).IsAssignableFrom(method.ReturnType).Should().BeTrue("every FC-7 entity seam is async");
+        method.GetParameters().Select(p => p.ParameterType).Should().Equal(
+            parameters, "FC-7 types these seams on the F01 entity; downstream stories implement this exact shape");
+        method.ReturnType.Should().Be(returns);
     }
 
     [Fact]

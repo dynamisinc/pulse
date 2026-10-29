@@ -21,6 +21,9 @@ FC-8). This story turns that document into code on both sides so a drift is a co
 > **Build note (F02, #794; orchestrator option B):** the four FC-7 members typed on F01's `ContentItem` entity
 > (`IContentKindDescriptor.ResolvePublishOptions`, `IContentPublishGate`, `IContentPublishedObserver`,
 > `IPairedSocialPoster`) landed in their own commit on the same PR after F01 (#697, PR #796) merged.
+> `IPairedSocialPoster.PostLinkCardAsync` takes a `ContentCaller` beyond FC-7's `(ContentItem, text?)` summary
+> (press FU-8 needs the publish call's acting human); the funnel and `IAlertRaiser` methods take it too.
+> Orchestrator to fold into FC-7 at the next contract pass.
 
 ## Out of Scope
 Implementations of any seam; endpoints; the broadcaster implementation (story 09); skin token values (story 13 / E4); kind-specific payload shapes (each channel's descriptor).

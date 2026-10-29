@@ -8,6 +8,11 @@ using Pulse.WebApi.Data.Entities;
 /// acting human is the PUBLISH CALL's (<see cref="ContentCaller.ActingHumanId"/>), never the persona's owner
 /// (press FU-8). A failure never blocks the publish; the funnel reports it as a side-effect warning.
 /// </summary>
+/// <remarks>
+/// FC-7 summarizes this as <c>PostLinkCardAsync(ContentItem, text?) → postId</c>. The built signature adds the
+/// <see cref="ContentCaller"/> because press FU-8 needs the publish call's acting human and nothing else carries it;
+/// the post id is a <c>Guid?</c> (null when the outlet has no paired persona).
+/// </remarks>
 public interface IPairedSocialPoster
 {
     /// <summary>Posts the link card.</summary>
