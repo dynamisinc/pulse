@@ -3,7 +3,6 @@ namespace Pulse.WebApi.Tests.Features.Identity.EasyLogin;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
@@ -96,7 +95,7 @@ public sealed class EasyLoginWireTests
         var previousUi = CultureInfo.CurrentUICulture;
         try
         {
-            var culture = WithItsOwnCalendar(name);
+            var culture = WithExplicitCalendar(name);
             CultureInfo.CurrentCulture = culture;
             CultureInfo.CurrentUICulture = culture;
             action();
@@ -109,21 +108,38 @@ public sealed class EasyLoginWireTests
     }
 
     /// <summary>
-    /// <paramref name="name"/>'s culture, with its own non-Gregorian calendar selected when its DEFAULT is Gregorian.
-    /// The hazard this suite proves must not depend on the runner's culture data: newer ICU/CLDR data makes Gregorian
-    /// the default for ar-SA, which silently turned the Umm al-Qura case into a Gregorian one (the precondition test
-    /// caught it on CI, 2026-10-29). The calendar is chosen from the culture's OWN optional calendars, so it is always
-    /// valid for it; a culture with no non-Gregorian calendar (en-US, tr-TR) is left exactly as it is.
+    /// Builds <paramref name="name"/> with its non-Gregorian calendar pinned rather than inherited, because the default is
+    /// ICU/CLDR data, not .NET: the CI runner's ICU began defaulting ar-SA to Gregorian (10/2026), which silently turned
+    /// the hazard precondition (and every ar-SA case here) into a Gregorian no-op. Fails loudly if the platform does not
+    /// offer the calendar at all, rather than quietly testing nothing.
     /// </summary>
-    private static CultureInfo WithItsOwnCalendar(string name)
+    private static CultureInfo WithExplicitCalendar(string name)
     {
-        var culture = new CultureInfo(name);
-        if (culture.DateTimeFormat.Calendar is GregorianCalendar
-            && culture.OptionalCalendars.FirstOrDefault(calendar => calendar is not GregorianCalendar) is { } own)
+        var culture = new CultureInfo(name, useUserOverride: false);
+        var wanted = name switch
         {
-            culture.DateTimeFormat.Calendar = own;
+            "ar-SA" => new[] { typeof(UmAlQuraCalendar), typeof(HijriCalendar) },
+            "th-TH" => new[] { typeof(ThaiBuddhistCalendar) },
+            "fa-IR" => new[] { typeof(PersianCalendar) },
+            _ => [],
+        };
+        if (wanted.Length == 0)
+        {
+            return culture;
         }
 
-        return culture;
+        foreach (var type in wanted)
+        {
+            var calendar = Array.Find(culture.OptionalCalendars, c => c.GetType() == type);
+            if (calendar is not null)
+            {
+                culture.DateTimeFormat.Calendar = calendar;
+                return culture;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"{name} offers none of [{string.Join(", ", Array.ConvertAll(wanted, t => t.Name))}] on this platform; "
+            + $"its calendars are [{string.Join(", ", Array.ConvertAll(culture.OptionalCalendars, c => c.GetType().Name))}].");
     }
 }
