@@ -144,6 +144,22 @@ describe('PostCard readOnly (embedded)', () => {
   })
 })
 
+describe('PostCard readOnly never clears a fresher "Edited" marker', () => {
+  it('a stale, never-edited embed beside an edited feed card keeps the marker', async () => {
+    const edited = { count: 1, scenarioTime: '2033-09-04T14:05:00.000Z' }
+    await renderCards(
+      <>
+        <div data-testid="feed"><PostCard post={buildPost({ edited })} /></div>
+        <div data-testid="embed"><PostCard post={buildPost()} readOnly /></div>
+      </>,
+    )
+
+    expect(editedPostsStore.get('post-embed-1').edited).toEqual(edited)
+    const feed = screen.getByTestId('feed')
+    expect(within(feed).getByRole('button', { name: 'Edited, view edit history' })).toBeInTheDocument()
+  })
+})
+
 describe('PostCard default rendering is unchanged', () => {
   it('omitting readOnly and readOnly={false} render byte-identical markup, row included', async () => {
     const post = buildPost()
