@@ -29,7 +29,7 @@ Load/burst testing of the wire (the foundation's NFR-002 coverage); weather/news
 Files: `Pulse.WebApi.Tests/Press/**`, `features/press/testing/**`, `e2e/press/**`. Uses F20 helpers (`channelConformance()`), corpora from stories 02/04. Bench threshold documented in the test, not a magic number.
 
 ## Dependencies
-All E5 stories (01–14) and foundation F20. Last in the DAG.
+All in-scope E5 stories (01–02, 04–14; 03 is Deferred) and foundation F20. Last in the DAG.
 
 ## Tests
 This story is the tests.

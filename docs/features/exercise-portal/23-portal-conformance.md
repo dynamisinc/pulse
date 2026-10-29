@@ -27,4 +27,4 @@ Manual AT audit with NVDA/JAWS/VoiceOver (a #680 deliverable, scheduled outside 
 Files: `Pulse.WebApi.Tests/Portal/**`, `features/portal/testing/**`, `e2e/portal/**`. Use F20's `channelConformance()` helpers and the existing Playwright setup (#606). Fixtures come from 02.
 
 ## Dependencies
-All E3 stories, F20. Runs last (Wave 5).
+All in-scope E3 stories (all but the Deferred 05, 08, 20), F20. Runs last (Wave 5).
