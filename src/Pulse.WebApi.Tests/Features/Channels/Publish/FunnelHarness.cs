@@ -75,6 +75,8 @@ internal sealed class FunnelHarness : IDisposable
 
     public FakePairedPoster? PairedPoster { get; set; }
 
+    public FailingSaveInterceptor Saves { get; } = new();
+
     public static FunnelHarness Create(
         Action<IServiceCollection>? configure = null, bool withAlertRaiser = true, bool withPairedPoster = true)
     {
@@ -90,7 +92,7 @@ internal sealed class FunnelHarness : IDisposable
         services.AddScoped<ExerciseContext>();
         services.AddScoped<IExerciseContext>(provider => provider.GetRequiredService<ExerciseContext>());
         services.AddScoped<IOrganizationContext>(_ => new OrganizationContext { CurrentOrganizationId = OrganizationId });
-        services.AddDbContext<PulseDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddDbContext<PulseDbContext>(options => options.UseInMemoryDatabase(dbName).AddInterceptors(harness!.Saves));
         services.AddSingleton<IFeedBroadcaster>(_ => harness!.Broadcaster);
         services.AddScoped<IContentKindDescriptor>(_ => harness!.Article);
         services.AddScoped<IContentKindDescriptor>(_ => harness!.Release);
@@ -357,10 +359,33 @@ internal sealed class FakePairedPoster : IPairedSocialPoster
 
     public Guid? Returns { get; set; } = Guid.NewGuid();
 
+    public Action? OnPost { get; set; }
+
     public Task<Guid?> PostLinkCardAsync(ContentItem item, string? text, ContentCaller caller, CancellationToken cancellationToken = default)
     {
         Posts.Add((item.Id, text, caller));
+        OnPost?.Invoke();
         return Task.FromResult(Returns);
+    }
+}
+
+/// <summary>Fails the next SaveChanges once armed (to drive the funnel's post-commit failure paths).</summary>
+internal sealed class FailingSaveInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+{
+    public bool FailNext { get; set; }
+
+    public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+        Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+        Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        if (FailNext)
+        {
+            FailNext = false;
+            throw new InvalidOperationException("save failed");
+        }
+
+        return base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 }
 

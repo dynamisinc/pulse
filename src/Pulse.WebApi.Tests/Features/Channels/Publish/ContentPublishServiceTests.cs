@@ -879,4 +879,24 @@ public sealed class ContentPublishServiceTests
         public Task<bool> ClearAsync(Guid id, ContentCaller caller, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
     }
+
+    [Fact]
+    public async Task WhenRecordingTheSideEffectIds_Fails_TheResultReportsNoUnsavedIds()
+    {
+        using var harness = FunnelHarness.Create();
+        harness.PairedPoster = new FakePairedPoster { OnPost = () => harness.Saves.FailNext = true };
+        var draft = await harness.CreateAsync();
+
+        using var scope = harness.InA();
+        var result = await scope.Funnel.PublishAsync(
+            Guid.Parse(draft.Id),
+            new PublishOptions { Alert = new PublishAlertOptions(), PairedPost = new PairedPostOptions() },
+            FunnelHarness.Controller);
+
+        result.Outcome.Should().Be(ContentPublishOutcome.Ok);
+        result.SideEffectWarnings.Should().Equal(ContentPublishService.SideEffectIdsNotRecordedMessage);
+        result.Item!.AlertId.Should().BeNull("the id never reached the database");
+        result.Item.PairedPostId.Should().BeNull();
+        result.Item.Status.Should().Be("published");
+    }
 }

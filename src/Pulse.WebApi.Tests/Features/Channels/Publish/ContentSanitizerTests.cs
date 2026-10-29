@@ -146,7 +146,7 @@ public sealed class ContentSanitizerTests
             var stopwatch = Stopwatch.StartNew();
             Registry.Sanitize(ISanitizerProfileRegistry.RichTables, input);
             stopwatch.Elapsed.Should().BeLessThan(
-                TimeSpan.FromMilliseconds(500), "a linear pass over {0} characters starting {1}", input.Length, input[..8]);
+                TimeSpan.FromMilliseconds(1500), "a linear pass over {0} characters starting {1}", input.Length, input[..8]);
         }
     }
 

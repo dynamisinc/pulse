@@ -58,6 +58,9 @@ public sealed partial class ContentPublishService : IContentPublishService
     /// <summary>The readable 409 for a stale <c>version</c>.</summary>
     public const string StaleVersionMessage = "Changed by someone else. Refresh to see the latest version.";
 
+    /// <summary>The readable 409 when the save lost a database lock race (deadlock victim or lock timeout).</summary>
+    public const string LockConflictMessage = "Another change to this item got there first. Try again.";
+
     /// <summary>The 404 message (unknown, cross-exercise, soft-deleted, or no scope: identical).</summary>
     public const string NotFoundMessage = "Content item not found.";
 
@@ -354,7 +357,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         item.Status = ChannelVocabulary.StatusScheduled;
         item.ScheduledScenarioTime = scheduledAt;
 
-        // FC-7a: explicit options are what the runner replays. Null keeps whatever is already persisted (an inject attach
+        // FC-7a (this funnel's reading; the frozen interface doc predates it): explicit options are what the runner replays. Null keeps whatever is already persisted (an inject attach
         // or an earlier schedule), so a dialog-less schedule never wipes a delivery decision; an explicitly empty
         // PublishOptions ({}) is how a caller says "no side effects". A participant caller never sets them (staff lever).
         if (options is not null && caller.Origin != ChannelVocabulary.OriginParticipant)
@@ -736,7 +739,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         catch (DbUpdateException ex) when (InjectLockConflicts.IsLockConflict(ex))
         {
             // A deadlock victim or lock timeout rolled back: a lost race like any other, never a 500.
-            return await ConflictAfterLostRaceAsync(itemId, StaleVersionMessage, cancellationToken);
+            return await ConflictAfterLostRaceAsync(itemId, LockConflictMessage, cancellationToken);
         }
     }
 
@@ -757,7 +760,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     }
 
     [GeneratedRegex(
-        @"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?(Z|[+-]\d{2}:\d{2})\z",
+        @"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]{1,7})?)?(Z|[+-][0-9]{2}:[0-9]{2})\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex IsoInstant();
 

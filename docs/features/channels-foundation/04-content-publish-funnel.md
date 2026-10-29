@@ -42,9 +42,13 @@ Docker-only `ContentPublishSqlTests` race). Decisions where the contracts were s
   omitted (the actor is `system` with `actingHumanId`). Several gate notes are joined with `; ` into one `gateNote`.
 - **FC-7a.** `ScheduleAsync(.., null)` keeps the persisted options (inject attach), and an explicit empty `PublishOptions`
   means none. A participant caller's call options are ignored and never persisted (the alert and the persona post are
-  staff levers).
+  staff levers). Persisted options belong to the item: unschedule and publish never clear them (inject-attached options
+  must survive), so a staff publish that wants different side effects passes explicit options. The frozen
+  `IContentPublishService.ScheduleAsync` doc ("the options to persist, or null") predates this reading; FC-7a should say
+  "null keeps, `{}` = none".
 - **Callers.** The engine edits only its own drafts. A participant cannot set `background`, `featuredRank` or
-  `externalSource`/`externalRef`. A staff edit that omits both external fields keeps them. A hero image or video must
+  `externalSource`/`externalRef`. A staff edit that omits both external fields keeps them (so the pair cannot be cleared
+  through an edit; the Cadence key is meant to be stable). A hero image or video must
   also appear in `media[]` with alt text.
 - **Timestamps.** Restore keeps `RetractedScenarioTime` (it is the *last* retraction, FC-2), so readers key off `Status`.
   Publish keeps `ScheduledScenarioTime`. A soft-deleted scheduled item keeps `Status = scheduled`, and the runner (05)

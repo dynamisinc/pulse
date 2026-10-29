@@ -114,6 +114,7 @@ public sealed partial class ContentPublishService
         var recorded = false;
         if (options.Alert is { } alert)
         {
+            var before = PendingEntities();
             if (_alertRaiser is null)
             {
                 warnings.Add(NoAlertSourceMessage);
@@ -144,7 +145,7 @@ public sealed partial class ContentPublishService
                 catch (Exception ex)
                 {
                     LogSideEffectFailed(ex, "alert", item.Id);
-                    DiscardPendingWritesExcept(item);
+                    DiscardPendingWritesSince(before, item);
                     warnings.Add(AlertFailedMessage);
                 }
 #pragma warning restore CA1031
@@ -153,6 +154,7 @@ public sealed partial class ContentPublishService
 
         if (options.PairedPost is { } paired)
         {
+            var before = PendingEntities();
             if (_pairedPoster is null)
             {
                 warnings.Add(NoPairedPosterMessage);
@@ -176,7 +178,7 @@ public sealed partial class ContentPublishService
                 catch (Exception ex)
                 {
                     LogSideEffectFailed(ex, "paired post", item.Id);
-                    DiscardPendingWritesExcept(item);
+                    DiscardPendingWritesSince(before, item);
                     warnings.Add(PairedPostFailedMessage);
                 }
 #pragma warning restore CA1031
@@ -213,16 +215,24 @@ public sealed partial class ContentPublishService
         return warnings;
     }
 
+    /// <summary>The entities with a pending write right now (taken before a side effect runs).</summary>
+    private HashSet<object> PendingEntities() =>
+        _db.ChangeTracker.Entries()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .Select(entry => entry.Entity)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+
     /// <summary>
     /// A side effect shares the request's unit of work; if it threw after adding or changing rows, those half-made
-    /// writes must not ride along on the next save (another side effect's, or the id recording). Everything pending
-    /// except the funnel's own item is detached.
+    /// writes must not ride along on the next save. Only what became pending DURING that side effect is detached, so an
+    /// earlier side effect's writes (and the funnel's own item) are untouched.
     /// </summary>
-    private void DiscardPendingWritesExcept(ContentItem item)
+    private void DiscardPendingWritesSince(HashSet<object> before, ContentItem item)
     {
         foreach (var entry in _db.ChangeTracker.Entries().ToList())
         {
             if (!ReferenceEquals(entry.Entity, item)
+                && !before.Contains(entry.Entity)
                 && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             {
                 entry.State = EntityState.Detached;
