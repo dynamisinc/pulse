@@ -46,6 +46,10 @@ public static class PortalDataQueries
     /// <summary>
     /// How many live resources the current exercise has: the count <see cref="PortalLimits.CheckResourceCount"/> takes.
     /// </summary>
+    /// <remarks>
+    /// Count-then-insert is not atomic: two concurrent adds at 24 can both pass. The resources service (story 04) does the
+    /// count and the insert in one serializable transaction if the cap must be exact; otherwise it is a soft cap.
+    /// </remarks>
     /// <param name="db">The exercise-scoped context.</param>
     /// <param name="cancellationToken">Cancels the query.</param>
     /// <returns>The count of resources not deleted.</returns>

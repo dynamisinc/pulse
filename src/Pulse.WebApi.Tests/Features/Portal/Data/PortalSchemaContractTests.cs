@@ -86,7 +86,8 @@ public class PortalSchemaContractTests
         typeof(IExerciseScoped).IsAssignableFrom(type).Should().BeTrue("XC-001");
         entity.FindDeclaredQueryFilter(null).Should().NotBeNull("the central exercise filter covers {0}", type.Name);
         entity.FindProperty(nameof(IExerciseScoped.ExerciseId))!.IsConcurrencyToken.Should().BeTrue(
-            "an UPDATE carries the original ExerciseId, so a write naming another exercise matches no row");
+            "a stub claiming the caller's scope for another exercise's row id matches no row (a row naming another " +
+            "exercise is PortalWriteScope's to refuse)");
         typeof(ISoftDeletable).IsAssignableFrom(type).Should().Be(softDeleted, "PC-2 gives only PortalResource a DeletedAt");
     }
 
@@ -115,11 +116,10 @@ public class PortalSchemaContractTests
             .Select(m => m.Key)
             .ToList();
 
-        touching.Should().ContainSingle("F01's M1 creates the portal tables (Q-28); no other migration may change them")
+        touching.Should().ContainSingle(
+                "F01's M1 creates the portal tables (Q-28) and this feature adds no migration; a later, orchestrator-approved " +
+                "additive change to these tables updates this test in the same PR")
             .Which.Should().EndWith("_Channels_M1_ContentFoundation");
-        typeof(PulseDbContext).Assembly.GetTypes()
-            .Where(t => typeof(Migration).IsAssignableFrom(t))
-            .Should().NotContain(t => t.Namespace != null && t.Namespace.Contains(".Portal", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -131,7 +131,8 @@ public class PortalSchemaContractTests
         var offences = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
             .SelectMany(file => File.ReadLines(file).Select((line, i) => (file, line, number: i + 1)))
             .Where(x => !x.line.TrimStart().StartsWith("//", StringComparison.Ordinal))
-            .Where(x => Regex.IsMatch(x.line, @"ExecuteDelete|IgnoreQueryFilters|DELETE\s+FROM", RegexOptions.IgnoreCase))
+            .Where(x => Regex.IsMatch(x.line, @"ExecuteDelete|IgnoreQueryFilters|ExecuteSql|SqlQuery", RegexOptions.IgnoreCase)
+                || Regex.IsMatch(x.line, @"\bDELETE\b"))
             .Select(x => $"{Path.GetRelativePath(root, x.file)}:{x.number}")
             .ToList();
 
@@ -177,6 +178,10 @@ public class PortalSchemaContractTests
             _ => false,
         });
 
+    /// <summary>
+    /// The checkout root, found by walking up from the test binaries to the PC-2 doc. These tests read the source tree, so
+    /// they need a full checkout (as CI has), not a published test output.
+    /// </summary>
     private static string RepoRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

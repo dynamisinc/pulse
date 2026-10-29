@@ -6,8 +6,9 @@ using Pulse.WebApi.Data.Entities;
 /// <summary>
 /// The PC-1 portal limits (exercise-portal story 01): a masthead name of at most 60 characters, a <c>ModulesJson</c> /
 /// <c>SkinOverridesJson</c> of at most 4 KB each, and at most 25 live resources per exercise. The config and resources
-/// services (stories 03/04) and the setup surface's API (16) call these before writing, so an over-cap input is refused
-/// with a readable reason instead of failing at the database.
+/// services (stories 03/04) and the setup surface's API (16) call these before writing, so input over a PC-1 cap is refused
+/// with a readable reason. The other columns' lengths (<c>CityName</c>, <c>Tagline</c>, a resource's <c>Title</c> and
+/// <c>Summary</c>) are bounded by F01's entity constants, which those services validate against themselves.
 /// </summary>
 /// <remarks>
 /// <para>

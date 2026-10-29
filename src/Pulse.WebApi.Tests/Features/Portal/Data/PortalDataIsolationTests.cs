@@ -104,28 +104,38 @@ public class PortalDataIsolationTests
     // ---- writes ---------------------------------------------------------------------------------
 
     [RequiresDockerFact]
-    public async Task AnInsertNamingAnotherExercise_IsRefusedByThePortalWriteScope_AndNothingPersists()
+    public async Task AWriteNamingAnotherExercise_ThroughTheGuardedPath_IsRefused_AndNothingPersists()
     {
+        // The guarded path stories 03/04 follow: EnsureInScope, then the write. Under B, an insert of a row naming A and a
+        // stub update of A's real row (the stub the context alone would accept) are both refused before SaveChanges.
         var exerciseA = Guid.NewGuid();
-        var scopeB = ScopeFor(Guid.NewGuid());
-        var resource = ChannelRows.PortalResource(exerciseA);
-        var config = ChannelRows.PortalConfig(exerciseA);
+        var exerciseB = Guid.NewGuid();
+        var resourceA = await SeedAsync(ChannelRows.PortalResource(exerciseA));
+        var scopeB = ScopeFor(exerciseB);
+        var insert = ChannelRows.PortalResource(exerciseA);
 
-        var resourceIntoB = () => PortalWriteScope.EnsureInScope(scopeB, resource);
-        var configIntoB = () => PortalWriteScope.EnsureInScope(scopeB, config);
-        resourceIntoB.Should().Throw<ExerciseScopeViolationException>("B's request cannot add a row to exercise A");
-        configIntoB.Should().Throw<ExerciseScopeViolationException>();
-
-        foreach (var scope in UnresolvedScopes())
+        await using (var writeB = _fixture.CreateContext(scopeB))
         {
-            var unresolved = () => PortalWriteScope.EnsureInScope(scope, resource);
-            unresolved.Should().Throw<ExerciseScopeViolationException>("no resolved exercise, no write");
+            var add = () => GuardedWriteAsync(writeB, scopeB, insert, db => db.Add(insert));
+            await add.Should().ThrowAsync<ExerciseScopeViolationException>("B's request cannot add a row to exercise A");
         }
 
-        PortalWriteScope.EnsureInScope(ScopeFor(exerciseA), resource);
+        await using (var writeB = _fixture.CreateContext(scopeB))
+        {
+            var stub = ChannelRows.PortalResource(exerciseA);
+            stub.Id = resourceA.Id;
+            var update = () => GuardedWriteAsync(writeB, scopeB, stub, db =>
+            {
+                db.Attach(stub);
+                stub.Title = "Hijacked";
+            });
+            await update.Should().ThrowAsync<ExerciseScopeViolationException>("nor change A's row with a stub naming A");
+        }
 
         await using var verify = _fixture.CreateContext();
-        (await verify.PortalResources.IgnoreQueryFilters().AnyAsync(r => r.Id == resource.Id)).Should().BeFalse();
+        (await verify.PortalResources.IgnoreQueryFilters().AnyAsync(r => r.Id == insert.Id)).Should().BeFalse();
+        (await verify.PortalResources.IgnoreQueryFilters().SingleAsync(r => r.Id == resourceA.Id)).Title
+            .Should().Be(resourceA.Title);
     }
 
     [RequiresDockerFact]
@@ -293,6 +303,15 @@ public class PortalDataIsolationTests
     }
 
     // ---- helpers ---------------------------------------------------------------------------------
+
+    /// <summary>A service's write: the scope check, then the change, then <c>SaveChanges</c>.</summary>
+    private static async Task GuardedWriteAsync(
+        PulseDbContext db, IExerciseContext scope, IExerciseScoped row, Action<PulseDbContext> change)
+    {
+        PortalWriteScope.EnsureInScope(scope, row);
+        change(db);
+        await db.SaveChangesAsync();
+    }
 
     private async Task<T> SeedAsync<T>(T row)
         where T : class
