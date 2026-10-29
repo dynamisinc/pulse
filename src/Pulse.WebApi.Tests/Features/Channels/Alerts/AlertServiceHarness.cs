@@ -54,6 +54,7 @@ internal sealed class AlertServiceHarness : IDisposable
             Options.Create(new ChannelAlertOptions { PlatformNotificationBridgeEnabled = bridgeEnabled }));
         services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(
             StaffUserId is { } staff ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staff } : null));
+        services.AddSingleton<AlertAnnouncementGate>();
         services.AddScoped<AlertReader>();
         services.AddScoped<AlertService>();
         services.AddSingleton<AlertExpirySweeper>();

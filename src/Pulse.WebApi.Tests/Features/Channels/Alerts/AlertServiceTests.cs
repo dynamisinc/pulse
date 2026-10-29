@@ -174,6 +174,21 @@ public sealed class AlertServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Raise_ByAParticipantCaller_CarriesTheParticipantIdTheV0SchemaRequires()
+    {
+        var exercise = _host.StartExercise();
+        var caller = new ContentCaller { Origin = ChannelVocabulary.OriginParticipant, ActingHumanId = "p-7" };
+
+        await _host.InAsync(exercise, (alerts, _) => alerts.RaiseAsync(AlertServiceHarness.Raise(), caller));
+
+        await using var db = _host.Db(exercise);
+        var evt = await db.TelemetryEvents.SingleAsync();
+        evt.Actor.Kind.Should().Be("participant");
+        evt.Actor.ParticipantId.Should().Be("p-7");
+        evt.Origin.Should().Be("participant");
+    }
+
+    [Fact]
     public async Task AlertDto_NeverCarriesWhoRaisedIt()
     {
         var names = typeof(AlertDto).GetProperties().Select(p => p.Name).ToList();
@@ -318,6 +333,30 @@ public sealed class AlertServiceTests : IDisposable
 
         (await _host.Sweeper.SweepAsync()).Should().Be(0, "an expired alert is stamped once");
         _host.Broadcaster.Frames.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Sweep_NeverExpiresAgainstTheWallClock_WhenNoScenarioTimeIsKnown()
+    {
+        var exercise = Guid.NewGuid(); // clock never started and no exercise row: scenario time is unknown
+        var expires = _host.Time.GetUtcNow().AddMinutes(5).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        await RaiseAsync(exercise, AlertServiceHarness.Raise(expires: expires));
+        _host.Time.Advance(TimeSpan.FromHours(1));
+
+        (await _host.Sweeper.SweepAsync()).Should().Be(0, "an expiry is never decided against the wall clock (COR-053)");
+
+        await using var db = _host.Db(exercise);
+        (await db.ChannelAlerts.SingleAsync()).ClearedScenarioTime.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Raise_ByACallerWithAnOverlongActingHuman_IsAnArgumentError_NotASaveFailure()
+    {
+        var exercise = _host.StartExercise();
+
+        var act = () => RaiseAsync(exercise, AlertServiceHarness.Raise(), human: new string('h', 257));
+
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*ActingHumanId*");
     }
 
     [Fact]

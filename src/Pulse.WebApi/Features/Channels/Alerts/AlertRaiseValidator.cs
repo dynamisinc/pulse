@@ -40,7 +40,9 @@ public static class AlertRaiseValidator
 
         var headline = raise.Headline is null ? string.Empty : PostSanitizer.Sanitize(raise.Headline).Trim();
         var headlineLength = CodePoints(headline);
-        if (headlineLength is < 1 or > MaxHeadlineLength)
+        // Code points are what a controller sees; the column (nvarchar) counts UTF-16 units, so a headline heavy in
+        // astral characters (emoji) is also held to the stored bound rather than failing the save.
+        if (headlineLength is < 1 or > MaxHeadlineLength || headline.Length > ChannelAlert.MaxHeadlineLength)
         {
             return AlertRaiseValidation.Fail($"headline must be between 1 and {MaxHeadlineLength} characters of plain text.");
         }
@@ -103,7 +105,19 @@ public static class AlertRaiseValidator
             return "caller.Origin must be one of controller, participant, engine or inject.";
         }
 
-        return string.IsNullOrWhiteSpace(caller.ActingHumanId) ? "caller.ActingHumanId is required." : null;
+        if (string.IsNullOrWhiteSpace(caller.ActingHumanId))
+        {
+            return "caller.ActingHumanId is required.";
+        }
+
+        if (caller.Origin == ChannelVocabulary.OriginInject && caller.InjectId is null)
+        {
+            return "caller.InjectId is required when caller.Origin is inject.";
+        }
+
+        return caller.ActingHumanId.Length > ContentItem.MaxActingHumanIdLength
+            ? $"caller.ActingHumanId must be at most {ContentItem.MaxActingHumanIdLength} characters."
+            : null;
     }
 
     /// <summary>

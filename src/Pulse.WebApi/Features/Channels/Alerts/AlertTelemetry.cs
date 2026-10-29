@@ -114,6 +114,10 @@ public static class AlertTelemetry
             _ => ActorSystem,
         },
         ActingHumanId = caller.ActingHumanId,
+
+        // The v0 schema requires participantId for a participant actor; a participant caller's acting human IS the
+        // participant (COR-018).
+        ParticipantId = caller.Origin == ChannelVocabulary.OriginParticipant ? caller.ActingHumanId : null,
     };
 
     private static string? TelemetryOrigin(string origin) => origin switch
@@ -164,4 +168,9 @@ public static class AlertTelemetry
 /// <param name="WallClock">The server wall-clock instant.</param>
 /// <param name="ScenarioTime">The exercise scenario instant.</param>
 /// <param name="TimeZone">The exercise IANA time zone.</param>
-public sealed record AlertEventTime(DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone);
+/// <param name="ScenarioKnown">
+/// False when neither the exercise clock nor the persisted scenario instant was available, so
+/// <paramref name="ScenarioTime"/> is the wall-clock fallback. The expiry sweep never expires against it.
+/// </param>
+public sealed record AlertEventTime(
+    DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone, bool ScenarioKnown = true);

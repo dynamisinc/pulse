@@ -142,6 +142,75 @@ public sealed class AlertEndpointsTests
     }
 
     [RequiresDockerFact]
+    public async Task Raise_AnEmojiHeavyHeadlineAtTheBound_SavesOnRealSql_AndOneOverIs400_Not500()
+    {
+        await using var host = await StartAsync();
+        var exercise = await host.SeedExerciseAsync();
+        host.ActAs(exercise.ExerciseId, exercise.StaffUserId);
+
+        await RaiseOkAsync(host, new { severity = "emergency", headline = string.Concat(Enumerable.Repeat("🌪", 150)) });
+        (await host.Client.PostAsJsonAsync(
+                "/api/alerts", new { severity = "emergency", headline = string.Concat(Enumerable.Repeat("🌪", 151)) }))
+            .StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [RequiresDockerFact]
+    public async Task Sweep_ExpiresEachExerciseInItsOwnScope_OnRealSql()
+    {
+        await using var host = await StartAsync();
+        var a = await host.SeedExerciseAsync();
+        var b = await host.SeedExerciseAsync();
+        var expires = host.Time.GetUtcNow().AddMinutes(10).ToString("O", CultureInfo.InvariantCulture);
+        host.ActAs(a.ExerciseId, a.StaffUserId);
+        var aId = await RaiseOkAsync(host, new { severity = "emergency", headline = "A", expiresScenarioTime = expires });
+        host.ActAs(b.ExerciseId, b.StaffUserId);
+        var bId = await RaiseOkAsync(host, new { severity = "emergency", headline = "B", expiresScenarioTime = expires });
+
+        // The exercise clocks are not started here, so pin a persisted scenario instant: the sweep never expires on wall time.
+        await using (var db = host.Db(exerciseId: null))
+        {
+            foreach (var exercise in await db.Exercises.IgnoreQueryFilters()
+                         .Where(x => x.Id == a.ExerciseId || x.Id == b.ExerciseId).ToListAsync())
+            {
+                exercise.CurrentScenarioTime = host.Time.GetUtcNow().AddMinutes(11);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var sweeper = ActivatorUtilities.CreateInstance<AlertExpirySweeper>(host.Services);
+        (await sweeper.SweepAsync()).Should().BeGreaterThanOrEqualTo(2, "other tests' exercises may share the database");
+
+        await using var check = host.Db(exerciseId: null);
+        var rows = await check.ChannelAlerts.IgnoreQueryFilters()
+            .Where(x => x.Id == Guid.Parse(aId) || x.Id == Guid.Parse(bId)).ToListAsync();
+        rows.Should().HaveCount(2).And.OnlyContain(x => x.ClearedScenarioTime == x.ExpiresScenarioTime);
+        var events = await check.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.EventType == "alert_cleared" && (e.Target!.EntityId == aId || e.Target.EntityId == bId))
+            .ToListAsync();
+        events.Should().HaveCount(2);
+        events.Single(e => e.Target!.EntityId == aId).ExerciseId.Should().Be(a.ExerciseId, "each expiry is written in its own scope");
+        events.Single(e => e.Target!.EntityId == bId).ExerciseId.Should().Be(b.ExerciseId);
+    }
+
+    [RequiresDockerFact]
+    public async Task ConcurrentClears_ExactlyOneWins_AndOneAlertClearedIsWritten()
+    {
+        await using var host = await StartAsync();
+        var exercise = await host.SeedExerciseAsync();
+        host.ActAs(exercise.ExerciseId, exercise.StaffUserId);
+        var id = await RaiseOkAsync(host, new { severity = "emergency", headline = "Race" });
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ClearAsync(host, id)));
+
+        responses.Count(r => r.StatusCode == HttpStatusCode.NoContent).Should().Be(1);
+        responses.Count(r => r.StatusCode == HttpStatusCode.NotFound).Should().Be(5,
+            "a losing clear (stale Version, or already cleared) is the no-op 404, never a 500");
+        await using var db = host.Db(exercise.ExerciseId);
+        (await db.TelemetryEvents.CountAsync(e => e.EventType == "alert_cleared")).Should().Be(1);
+    }
+
+    [RequiresDockerFact]
     public async Task Raise_Validation_Is400_WithAReadableDetail()
     {
         await using var host = await StartAsync();

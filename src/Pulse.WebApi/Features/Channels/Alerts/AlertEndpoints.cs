@@ -45,6 +45,7 @@ public static class AlertEndpoints
         services.AddExerciseClock();
         services.AddOptions<ChannelAlertOptions>().BindConfiguration(ChannelAlertOptions.SectionName);
         services.TryAddSingleton<IPlatformAlertNotifier, NullPlatformAlertNotifier>();
+        services.TryAddSingleton<AlertAnnouncementGate>();
         services.TryAddScoped<AlertReader>();
         services.TryAddScoped<AlertService>();
         services.TryAddScoped<IAlertRaiser>(provider => provider.GetRequiredService<AlertService>());

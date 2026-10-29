@@ -110,7 +110,10 @@ public sealed class AlertReader
         // Keyset on IssuedScenarioTime, newest first. Scenario time can stand still (a frozen clock), so many alerts can
         // share one instant: within an instant the order is the database's Id order, and the cursor carries how many of
         // that instant's rows were already served. Guid comparisons are not translatable, so this is an offset WITHIN
-        // the tie only, never across the whole history.
+        // the tie only, never across the whole history. Best effort inside a tie: an alert raised at that same frozen
+        // instant between two page reads can shift the offset by one (a duplicate or a skip within the tie); a late joiner
+        // still gets it from GET /api/alerts and AlertsChanged. A stable tie-breaker needs a sequence column, which the
+        // frozen M1 schema does not have.
         var query = _dbContext.ChannelAlerts.AsNoTracking();
         if (position is { } at)
         {
@@ -186,9 +189,9 @@ public sealed class AlertReader
             .FirstOrDefaultAsync(cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
-        var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? row?.CurrentScenarioTime ?? now;
+        var known = _exerciseClock.CurrentScenarioTime(exerciseId) ?? row?.CurrentScenarioTime;
         var timeZone = string.IsNullOrWhiteSpace(row?.TimeZone) ? FallbackTimeZone : row.TimeZone;
-        return new AlertEventTime(now, scenario, timeZone);
+        return new AlertEventTime(now, known ?? now, timeZone, ScenarioKnown: known is not null);
     }
 
     /// <summary>The resolved exercise, or null (fail closed).</summary>

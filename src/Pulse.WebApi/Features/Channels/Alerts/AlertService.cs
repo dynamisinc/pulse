@@ -38,6 +38,7 @@ public sealed partial class AlertService : IAlertRaiser
     private readonly ICurrentStaffSessionAccessor _staffSession;
     private readonly IFeedBroadcaster _broadcaster;
     private readonly IPlatformAlertNotifier _platformNotifier;
+    private readonly AlertAnnouncementGate _announcementGate;
     private readonly ChannelAlertOptions _options;
     private readonly ILogger<AlertService> _logger;
 
@@ -47,6 +48,7 @@ public sealed partial class AlertService : IAlertRaiser
     /// <param name="staffSession">The server-side staff session — the staff routes' only source of the acting human.</param>
     /// <param name="broadcaster">The realtime fan-out (<c>AlertsChanged</c>, FC-5).</param>
     /// <param name="platformNotifier">The SOC-072 bridge.</param>
+    /// <param name="announcementGate">Orders each exercise's <c>AlertsChanged</c> frames.</param>
     /// <param name="options">The alert source options.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public AlertService(
@@ -55,6 +57,7 @@ public sealed partial class AlertService : IAlertRaiser
         ICurrentStaffSessionAccessor staffSession,
         IFeedBroadcaster broadcaster,
         IPlatformAlertNotifier platformNotifier,
+        AlertAnnouncementGate announcementGate,
         IOptions<ChannelAlertOptions> options,
         ILogger<AlertService> logger)
     {
@@ -63,6 +66,7 @@ public sealed partial class AlertService : IAlertRaiser
         ArgumentNullException.ThrowIfNull(staffSession);
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(platformNotifier);
+        ArgumentNullException.ThrowIfNull(announcementGate);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -71,6 +75,7 @@ public sealed partial class AlertService : IAlertRaiser
         _staffSession = staffSession;
         _broadcaster = broadcaster;
         _platformNotifier = platformNotifier;
+        _announcementGate = announcementGate;
         _options = options.Value;
         _logger = logger;
     }
@@ -155,8 +160,8 @@ public sealed partial class AlertService : IAlertRaiser
 
         var raise = new AlertRaise
         {
-            Severity = request.Severity!,
-            Headline = request.Headline!,
+            Severity = request.Severity ?? string.Empty,
+            Headline = request.Headline ?? string.Empty,
             Href = request.Href,
             SourceChannel = ChannelVocabulary.AlertSourceSystem,
             ExpiresScenarioTime = request.ExpiresScenarioTime,
@@ -196,6 +201,13 @@ public sealed partial class AlertService : IAlertRaiser
         }
 
         var time = await _reader.ReadTimeAsync(exerciseId, cancellationToken);
+        if (!time.ScenarioKnown)
+        {
+            // No clock and no persisted scenario instant (not started, or the exercise row is gone): never expire against
+            // the wall clock (COR-053). The sweep retries once scenario time is known again.
+            return 0;
+        }
+
         var scenarioNow = time.ScenarioTime;
         var due = await _dbContext.ChannelAlerts
             .Where(alert => alert.ClearedScenarioTime == null
@@ -281,9 +293,16 @@ public sealed partial class AlertService : IAlertRaiser
     /// After a commit: broadcast the full active set, then feed the SOC-072 bridge. No request token (a client that
     /// disconnects must not cancel the fan-out of a committed change) and no throw (logged instead).
     /// </summary>
+    /// <remarks>
+    /// The read and the broadcast run under the exercise's <see cref="AlertAnnouncementGate"/>, so two changes that
+    /// commit close together cannot send their frames out of order: the frame that goes last was read last, after both
+    /// commits, and carries the newest set (per host instance).
+    /// </remarks>
     private async Task AnnounceAsync(
         Guid exerciseId, DateTimeOffset scenarioNow, AlertDto? raised, IReadOnlyList<Guid> clearedIds)
     {
+        var gate = _announcementGate.For(exerciseId);
+        await gate.WaitAsync(CancellationToken.None);
         try
         {
             var active = await _reader.ReadActiveAsync(scenarioNow, CancellationToken.None);
@@ -296,6 +315,10 @@ public sealed partial class AlertService : IAlertRaiser
             LogBroadcastFailed(ex, exerciseId);
         }
 #pragma warning restore CA1031
+        finally
+        {
+            gate.Release();
+        }
 
         if (!_options.PlatformNotificationBridgeEnabled)
         {

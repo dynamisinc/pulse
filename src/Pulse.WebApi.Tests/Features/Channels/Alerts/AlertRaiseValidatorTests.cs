@@ -72,11 +72,23 @@ public sealed class AlertRaiseValidatorTests
     [Fact]
     public void Headline_LengthIsCountedInCodePoints_Bounded200()
     {
-        var emoji = string.Concat(Enumerable.Repeat("🌪", AlertRaiseValidator.MaxHeadlineLength));
-        AlertRaiseValidator.Validate(Raise() with { Headline = emoji }, Now).Error.Should().BeNull("an emoji counts once");
+        var mixed = string.Concat(Enumerable.Repeat("🌪", 100)) + new string('a', 100);
+        AlertRaiseValidator.Validate(Raise() with { Headline = mixed }, Now).Error
+            .Should().BeNull("200 code points; an emoji counts once");
 
         AlertRaiseValidator.Validate(Raise() with { Headline = new string('a', 201) }, Now).Error
             .Should().Contain("headline");
+    }
+
+    [Fact]
+    public void Headline_IsAlsoHeldToTheStoredUtf16Bound()
+    {
+        // 151 emoji = 151 code points (under 200) but 302 UTF-16 units (over the nvarchar(300) column).
+        var emoji = string.Concat(Enumerable.Repeat("🌪", 151));
+
+        AlertRaiseValidator.Validate(Raise() with { Headline = emoji }, Now).Error.Should().Contain("headline");
+        AlertRaiseValidator.Validate(Raise() with { Headline = string.Concat(Enumerable.Repeat("🌪", 150)) }, Now)
+            .Error.Should().BeNull();
     }
 
     [Theory]
@@ -166,6 +178,9 @@ public sealed class AlertRaiseValidatorTests
         AlertRaiseValidator.ValidateCaller(null).Should().NotBeNull();
         AlertRaiseValidator.ValidateCaller(Caller() with { Origin = "system" }).Should().Contain("Origin");
         AlertRaiseValidator.ValidateCaller(Caller() with { ActingHumanId = " " }).Should().Contain("ActingHumanId");
+        AlertRaiseValidator.ValidateCaller(Caller() with { Origin = "inject" }).Should().Contain("InjectId",
+            "the v0 schema requires injectId whenever origin is inject");
+        AlertRaiseValidator.ValidateCaller(Caller() with { Origin = "inject", InjectId = Guid.NewGuid() }).Should().BeNull();
     }
 
     [Fact]
