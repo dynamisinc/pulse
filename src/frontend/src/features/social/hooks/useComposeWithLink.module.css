@@ -1,0 +1,13 @@
+/*
+ * features/social/hooks/useComposeWithLink.module.css
+ * ---------------------------------------------------------------------------
+ * The compose-with-link dialog's palette root (channels-foundation 21). Outside the
+ * Social channel nothing declares the `--pc-*` palette the dialog reads, so this
+ * wrapper composes the shared `.tokens` slice. `display: contents` keeps it out of
+ * the host page's box tree; custom properties still inherit through it. No COBRA / MUI.
+ */
+
+.palette {
+  composes: tokens from '../theme/social.module.css';
+  display: contents;
+}
