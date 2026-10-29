@@ -319,6 +319,9 @@ builder.Services.AddCors(options =>
 
 // Reads APPLICATIONINSIGHTS_CONNECTION_STRING from configuration; a missing/absent connection string
 // (local development) is a documented no-throw no-op here, never a startup failure.
+// The SDK also swallows its OWN registration failures: 2.22.0 hit keyed services from the live generation
+// provider's resilience handler and silently registered nothing (UAT blackout from 2026-10-19).
+// ApplicationInsightsRegistrationTests pins this call against the live provider config; keep it green.
 builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
