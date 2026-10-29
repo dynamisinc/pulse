@@ -68,6 +68,10 @@ function isNullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
 function isArrayOf<T>(value: unknown, guard: (item: unknown) => item is T): value is readonly T[] {
   return Array.isArray(value) && value.every(guard)
 }
@@ -86,10 +90,15 @@ function isNullableIsoScenarioTime(value: unknown): value is string | null {
   return value === null || isIsoScenarioTime(value)
 }
 
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
+
 /**
  * Whether `value` is a host-relative path: starts with a single `/`, carries
  * no scheme and no host (FC-9.3, COR-008). `//host/x` is protocol-relative,
- * so it is rejected too.
+ * so it is rejected too, as is any control character: URL parsers strip
+ * tab/CR/LF, so `"/\t/evil.test"` would otherwise resolve as `//evil.test`.
+ * Mirrors the server's `ChannelVocabulary.IsHostRelativePath`.
  */
 export function isHostRelativePath(value: unknown): value is string {
   return (
@@ -97,7 +106,8 @@ export function isHostRelativePath(value: unknown): value is string {
     value.startsWith('/') &&
     !value.startsWith('//') &&
     !value.includes('://') &&
-    !value.includes('\\')
+    !value.includes('\\') &&
+    !CONTROL_CHARACTER.test(value)
   )
 }
 
@@ -278,9 +288,9 @@ export function isChannelContentStaffDto(value: unknown): value is ChannelConten
     isNullableString(c.injectId) &&
     isNullableString(c.externalSource) &&
     isNullableString(c.externalRef) &&
-    typeof c.revisionCount === 'number' &&
+    isCount(c.revisionCount) &&
     isArrayOf(c.revisionLog, isContentRevisionLogEntryDto) &&
-    typeof c.version === 'number'
+    isCount(c.version)
   )
 }
 

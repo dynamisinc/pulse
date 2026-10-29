@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Channels;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -8,7 +9,9 @@ using Pulse.WebApi.Features.Channels.Contracts;
 
 /// <summary>
 /// Channels-foundation story 02 (#698), AC "Seams declared": the FC-7 interfaces exist under their frozen names, with
-/// the shapes downstream stories build against. Reflection only: implementations are the owning stories'.
+/// the shapes downstream stories build against. Reflection only: implementations are the owning stories'. The four
+/// ContentItem-typed seams (ResolvePublishOptions, IContentPublishGate, IContentPublishedObserver, IPairedSocialPoster)
+/// are pending F01 (#697) and get their tests with them.
 /// </summary>
 public class ChannelSeamContractTests
 {
@@ -16,10 +19,7 @@ public class ChannelSeamContractTests
     [InlineData(typeof(IContentPublishService))]
     [InlineData(typeof(IContentKindDescriptor))]
     [InlineData(typeof(ISanitizerProfileRegistry))]
-    [InlineData(typeof(IContentPublishGate))]
-    [InlineData(typeof(IContentPublishedObserver))]
     [InlineData(typeof(IAlertRaiser))]
-    [InlineData(typeof(IPairedSocialPoster))]
     [InlineData(typeof(IInSimLinkResolver))]
     [InlineData(typeof(IContentPermalinks))]
     [InlineData(typeof(ISkinOverridesValidator))]
@@ -39,16 +39,6 @@ public class ChannelSeamContractTests
         validate.Should().ContainSingle().Which.Name.Should().Be("ValidatePayloadAsync");
         validate[0].ReturnType.Should().Be(typeof(Task<PayloadValidationResult>));
         validate[0].GetParameters().Select(p => p.ParameterType).Should().Contain(typeof(PayloadValidationContext));
-    }
-
-    [Fact]
-    public void KindDescriptor_ResolvePublishOptions_DefaultsToNull()
-    {
-        var method = typeof(IContentKindDescriptor).GetMethod(nameof(IContentKindDescriptor.ResolvePublishOptions));
-
-        method.Should().NotBeNull();
-        method!.IsAbstract.Should().BeFalse("ResolvePublishOptions is a default (null) member, FC-7a");
-        method.ReturnType.Should().Be(typeof(PublishOptions));
     }
 
     [Fact]
@@ -94,6 +84,22 @@ public class ChannelSeamContractTests
         allow.AuditNote.Should().Be("controller bypass");
         hold.Allowed.Should().BeFalse();
         hold.Reason.Should().Be("awaiting approval");
+    }
+
+    [Fact]
+    public void PayloadValidationResult_InvalidIsNeverValid()
+    {
+        PayloadValidationResult.Invalid("zone not found").IsValid.Should().BeFalse();
+        PayloadValidationResult.Valid.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SanitizerProfile_DefaultSchemesExcludeScriptCapableOnes()
+    {
+        var profile = new SanitizerProfile { AllowedElements = new HashSet<string> { "a" } };
+
+        profile.AllowedUrlSchemes.Should().BeEquivalentTo(["https", "http", "mailto"]);
+        profile.AllowedUrlSchemes.Should().NotContain(["javascript", "data", "vbscript"]);
     }
 
     [Fact]

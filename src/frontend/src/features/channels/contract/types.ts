@@ -258,6 +258,7 @@ export const CONTENT_WRITE_KEYS = wireKeys<ContentWriteRequest>()([
 export interface AlertDto extends Alert {
   /** Host-relative "Details" target, or null. */
   readonly href: string | null
+  /** A channel id, or null for a console (`system`) alert; `system` never reaches the wire. */
   readonly sourceChannel: ChannelId | null
   readonly contentId: string | null
   readonly expiresScenarioTime: string | null

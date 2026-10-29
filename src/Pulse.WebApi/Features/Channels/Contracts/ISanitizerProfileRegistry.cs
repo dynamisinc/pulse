@@ -53,4 +53,13 @@ public sealed record SanitizerProfile
 
     /// <summary>The <c>rel</c> value forced onto every surviving <c>a</c>.</summary>
     public string ForcedLinkRel { get; init; } = "noopener noreferrer nofollow";
+
+    /// <summary>
+    /// The URL schemes a surviving <c>href</c> / <c>src</c> may use; host-relative paths
+    /// (<see cref="ChannelVocabulary.IsHostRelativePath"/>) are always allowed. Any other value, including
+    /// <c>javascript:</c>, <c>data:</c> and <c>vbscript:</c>, removes the attribute (NFR-004). A profile may narrow this
+    /// set; the registry refuses a profile that adds a script-capable scheme.
+    /// </summary>
+    public IReadOnlySet<string> AllowedUrlSchemes { get; init; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "https", "http", "mailto" };
 }

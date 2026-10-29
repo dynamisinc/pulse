@@ -4,7 +4,8 @@
  * Canned FC-3 data for the channels mock seam (channels-foundation story 02,
  * #698): one outlet per content channel, a published article, a retracted
  * release, a revised weather product, and two alerts. Every fixture is typed
- * against the contract AND must pass its runtime guard (fixtures.test.ts), so
+ * against the contract AND must pass its runtime guard (guards.test.ts,
+ * channelsMock.test.ts), so
  * the mock can never serve a shape the live endpoint would be rejected for.
  *
  * DEMO CONFIG, not product copy (the `brandTokens.ts` status): the outlet

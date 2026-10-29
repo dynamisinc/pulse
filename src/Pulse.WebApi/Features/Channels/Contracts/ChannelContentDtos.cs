@@ -219,9 +219,12 @@ public sealed record ChannelContentSummaryDto
     [JsonPropertyName("permalink")]
     public required string Permalink { get; init; }
 
-    /// <summary>Always <c>published</c> on a summary: lists and pushes never carry a retracted row.</summary>
+    /// <summary>
+    /// Always <c>published</c> on a summary: lists and pushes never carry a retracted row. Get-only, so no mapper can
+    /// put a draft or scheduled state on a participant DTO (XC-002).
+    /// </summary>
     [JsonPropertyName("state")]
-    public string State { get; init; } = ChannelVocabulary.StatusPublished;
+    public string State => ChannelVocabulary.StatusPublished;
 
     /// <summary>The headline.</summary>
     [JsonPropertyName("headline")]
@@ -286,9 +289,9 @@ public sealed record ChannelContentDto
     [JsonPropertyName("permalink")]
     public required string Permalink { get; init; }
 
-    /// <summary>Always <c>published</c> on this shape.</summary>
+    /// <summary>Always <c>published</c> on this shape (get-only, XC-002).</summary>
     [JsonPropertyName("state")]
-    public string State { get; init; } = ChannelVocabulary.StatusPublished;
+    public string State => ChannelVocabulary.StatusPublished;
 
     /// <summary>The headline.</summary>
     [JsonPropertyName("headline")]
@@ -334,7 +337,11 @@ public sealed record ChannelContentDto
     [JsonPropertyName("media")]
     public IReadOnlyList<ContentMediaDto> Media { get; init; } = [];
 
-    /// <summary>The participant-visible revisions (<c>update</c> / <c>correction</c> only).</summary>
+    /// <summary>
+    /// The participant-visible revisions: <c>update</c> / <c>correction</c> ONLY. The projector filters with
+    /// <see cref="ChannelVocabulary.ParticipantRevisionKinds"/>; an <c>edit</c> or <c>silent_rewrite</c> here fails the
+    /// client guard and blanks the read.
+    /// </summary>
     [JsonPropertyName("revisions")]
     public IReadOnlyList<ContentRevisionDto> Revisions { get; init; } = [];
 
@@ -381,9 +388,9 @@ public sealed record ChannelContentTombstoneDto
     [JsonPropertyName("permalink")]
     public required string Permalink { get; init; }
 
-    /// <summary>Always <c>retracted</c> on this shape.</summary>
+    /// <summary>Always <c>retracted</c> on this shape (get-only).</summary>
     [JsonPropertyName("state")]
-    public string State { get; init; } = ChannelVocabulary.StatusRetracted;
+    public string State => ChannelVocabulary.StatusRetracted;
 
     /// <summary>The scenario-time retraction instant.</summary>
     [JsonPropertyName("retractedScenarioTime")]
@@ -571,7 +578,9 @@ public sealed record ContentMediaWriteRequest
 
 /// <summary>
 /// <c>POST</c> / <c>PUT /api/content-items</c> body (staff world). <c>PUT</c> carries <see cref="Version"/>;
-/// a stale version is a 409. <c>origin</c> and <c>actingHumanId</c> are deliberately ABSENT: they come from
+/// a stale version is a 409. Binding is lenient (an explicit JSON <c>null</c> for <see cref="Payload"/> or
+/// <see cref="Media"/> binds null despite the annotation), so the endpoint validates nulls into a 400.
+/// <c>origin</c> and <c>actingHumanId</c> are deliberately ABSENT: they come from
 /// the caller's authenticated session, never a request body (FC-7).
 /// </summary>
 public sealed record ContentWriteRequest
@@ -644,7 +653,10 @@ public sealed record ContentWriteRequest
     [JsonPropertyName("externalRef")]
     public string? ExternalRef { get; init; }
 
-    /// <summary>The concurrency token the client last read (0 on create).</summary>
+    /// <summary>
+    /// The concurrency token the client last read (0 on create). An omitted key also reads as 0, so the PUT endpoint
+    /// (story 07) treats 0 against an existing item as stale (409), never as a first write.
+    /// </summary>
     [JsonPropertyName("version")]
     public int Version { get; init; }
 }

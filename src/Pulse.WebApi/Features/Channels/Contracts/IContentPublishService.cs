@@ -11,7 +11,7 @@ namespace Pulse.WebApi.Features.Channels.Contracts;
 /// body sanitization by the kind's named <c>BodyPolicy</c>, payload validation
 /// (<see cref="IContentKindDescriptor.ValidatePayloadAsync"/>), exercise scoping, scenario-time stamping from
 /// <c>IExerciseClock</c>, revisions, telemetry (<see cref="ChannelTelemetryEventTypes"/>), the
-/// <see cref="IContentPublishGate"/>, the broadcast (<c>IFeedBroadcaster</c>), observers, and the FC-7a
+/// <c>IContentPublishGate</c>, the broadcast (<c>IFeedBroadcaster</c>), observers, and the FC-7a
 /// publish-options resolution. Authorization stays with the calling endpoint.
 /// </para>
 /// <para>
@@ -123,7 +123,7 @@ public enum ContentPublishOutcome
     /// <summary>Field or payload validation failed (400); see <see cref="ContentPublishResult.Errors"/>.</summary>
     Invalid,
 
-    /// <summary>An <see cref="IContentPublishGate"/> held the publish (409 <c>held</c>); state unchanged.</summary>
+    /// <summary>An <c>IContentPublishGate</c> held the publish (409 <c>held</c>); state unchanged.</summary>
     Held,
 }
 

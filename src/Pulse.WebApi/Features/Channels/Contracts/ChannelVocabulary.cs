@@ -176,7 +176,23 @@ public static partial class ChannelVocabulary
     /// <returns><c>true</c> when the value is a channel id.</returns>
     public static bool IsChannelId(string? value) => value is not null && ChannelIds.Contains(value, StringComparer.Ordinal);
 
-    [GeneratedRegex("^[a-z0-9-]{1,80}$", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// Whether <paramref name="value"/> is a host-relative path (FC-9.3, COR-008): a single leading <c>/</c>, no
+    /// scheme, no host, no backslash and no control character (URL parsers strip tab/CR/LF, so a tab between two
+    /// slashes would otherwise resolve as protocol-relative). Mirrors <c>isHostRelativePath</c> in <c>guards.ts</c>.
+    /// </summary>
+    /// <param name="value">The candidate path.</param>
+    /// <returns><c>true</c> when the value is safe to emit as an in-sim link.</returns>
+    public static bool IsHostRelativePath(string? value) =>
+        value is not null
+        && value.StartsWith('/')
+        && !value.StartsWith("//", StringComparison.Ordinal)
+        && !value.Contains("://", StringComparison.Ordinal)
+        && !value.Contains('\\')
+        && !value.Any(char.IsControl);
+
+    // \A and \z, not ^ and $: in .NET `$` also matches before a trailing newline, which would let "a\n" through.
+    [GeneratedRegex(@"\A[a-z0-9-]{1,80}\z", RegexOptions.CultureInvariant)]
     private static partial Regex SlugPattern();
 }
 

@@ -79,8 +79,10 @@ describe('channels wire contract (FC-1 / FC-3 / FC-5 / FC-6b)', () => {
 
   it('KNOWN_TELEMETRY_EVENT_TYPES gains exactly the FC-6b entries', () => {
     const known: readonly string[] = KNOWN_TELEMETRY_EVENT_TYPES
-    const fc6b = known.slice(known.indexOf('steering_action') + 1)
-    expect(fc6b).toEqual(wire.telemetryEventTypes)
+    // Every FC-6b name is registered, in FC-6b order, exactly once (later,
+    // unrelated additions to the list do not break this).
+    const registered = known.filter(t => wire.telemetryEventTypes.includes(t))
+    expect(registered).toEqual(wire.telemetryEventTypes)
     expect(new Set(known).size).toBe(known.length)
   })
 })

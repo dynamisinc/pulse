@@ -76,6 +76,12 @@ describe('channels mock adapter (through the shared axios client)', () => {
     expect(bySlug.data).toEqual(MOCK_OUTLETS[2])
   })
 
+  it('returns copies, so mutating a response never changes the fixtures', async () => {
+    const response = await api.get('/outlets/newsline-7', mock)
+    response.data.name = 'Changed'
+    expect(MOCK_OUTLETS[0]?.name).toBe('Newsline 7')
+  })
+
   it('serves a channel list of summaries (no body)', async () => {
     const response = await api.get('/channels/news/content', mock)
     expect(isChannelContentListDto(response.data)).toBe(true)

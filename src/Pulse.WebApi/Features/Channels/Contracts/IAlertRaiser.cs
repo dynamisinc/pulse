@@ -32,10 +32,17 @@ public sealed record AlertRaise
     /// <summary>The headline, shown verbatim as the alert <c>message</c>.</summary>
     public required string Headline { get; init; }
 
-    /// <summary>The host-relative "Details" target (never absolute, FC-9.3), or null.</summary>
+    /// <summary>
+    /// The host-relative "Details" target, or null. <see cref="IAlertRaiser.RaiseAsync"/> rejects a value that fails
+    /// <see cref="ChannelVocabulary.IsHostRelativePath"/> (FC-9.3): a controller-typed absolute URL is an error at raise
+    /// time, never a frame that fails every client's guard.
+    /// </summary>
     public string? Href { get; init; }
 
-    /// <summary>The source channel id, or <see cref="ChannelVocabulary.AlertSourceSystem"/>.</summary>
+    /// <summary>
+    /// The source channel id, or <see cref="ChannelVocabulary.AlertSourceSystem"/> (stored as-is; it reaches the wire as
+    /// null through <see cref="AlertDto.WireSourceChannel"/>).
+    /// </summary>
     public required string SourceChannel { get; init; }
 
     /// <summary>The content item that raised it, or null.</summary>

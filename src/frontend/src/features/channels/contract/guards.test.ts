@@ -70,7 +70,10 @@ describe('isIsoScenarioTime', () => {
 describe('isHostRelativePath', () => {
   it('accepts a path', () => expect(isHostRelativePath('/news/newsline-7/a')).toBe(true))
 
-  it.each(['https://x.test/news/a', '//x.test/news/a', 'news/a', '/x?u=https://evil.test', '\\\\x\\a'])(
+  it.each([
+    'https://x.test/news/a', '//x.test/news/a', 'news/a', '/x?u=https://evil.test', '\\\\x\\a',
+    '/\t/evil.test/x', '/\n/evil.test', '/a\u0000b',
+  ])(
     'rejects %s', value => expect(isHostRelativePath(value)).toBe(false),
   )
 })
@@ -164,6 +167,9 @@ describe('content guards', () => {
     const draft = { ...MOCK_STAFF_CONTENT[0], status: 'draft', state: null, publishedScenarioTime: null }
     expect(isChannelContentStaffDto(draft)).toBe(true)
     expect(isChannelContentStaffDto({ ...draft, origin: 'robot' })).toBe(false)
+    expect(isChannelContentStaffDto({ ...draft, version: -1 })).toBe(false)
+    expect(isChannelContentStaffDto({ ...draft, revisionCount: 1.5 })).toBe(false)
+    expect(isChannelContentStaffDto({ ...draft, version: Number.NaN })).toBe(false)
   })
 
   it.each([null, undefined, 'x', 42, []])('reject a non-object %j', value => {

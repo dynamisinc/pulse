@@ -25,6 +25,8 @@ describe('contentPermalink', () => {
     ['news', 'ok', 'a/b'],
     ['news', 'ok', 'a?b=1'],
     ['news', 'ok', 'a'.repeat(81)],
+    ['news', 'ok', 'a\n'],
+    ['news', 'ok\n', 'a'],
   ])('rejects a malformed slug (%s, %s, %s)', (channel, outlet, slug) => {
     expect(() => contentPermalink(channel as ContentChannelId, outlet, slug)).toThrow()
   })

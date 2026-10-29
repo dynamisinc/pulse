@@ -9,6 +9,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 
@@ -67,16 +71,25 @@ public class ChannelContractParityTests
             expected, $"{shape} must serialize to exactly the frozen FC-3 camelCase keys");
     }
 
-    [Theory]
-    [MemberData(nameof(ShapeNames))]
-    public void SerializedKeys_AreStableUnderDefaultAndWebOptions(string shape)
+    [Fact]
+    public void SerializedKeys_SurviveTheHostsRealRestAndHubOptions()
     {
-        // The SignalR JSON protocol and the REST pipeline may carry different options; explicit
-        // [JsonPropertyName]s make the wire key independent of the naming policy.
-        var plain = SerializedKeys(Samples[shape], new JsonSerializerOptions());
-        var web = SerializedKeys(Samples[shape], new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        // Every nullable key must be WRITTEN as null: the TS guards treat an absent key as out of shape. Serialize each
+        // sample under the options the running app actually uses for REST (minimal APIs) and for the SignalR JSON hub
+        // protocol, so a future WhenWritingNull (or naming-policy) change to either fails here instead of blanking every
+        // participant client.
+        using var factory = new HostOptionsProbeFactory();
+        var rest = factory.Services.GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+            .Value.SerializerOptions;
+        var hub = factory.Services.GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
 
-        plain.Should().BeEquivalentTo(web);
+        foreach (var (shape, sample) in Samples)
+        {
+            var expected = GoldenStrings(Golden.Value["shapes"]![shape]);
+
+            SerializedKeys(sample, rest).Should().BeEquivalentTo(expected, $"{shape} over REST");
+            SerializedKeys(sample, hub).Should().BeEquivalentTo(expected, $"{shape} over the SignalR hub protocol");
+        }
     }
 
     [Theory]
@@ -127,6 +140,27 @@ public class ChannelContractParityTests
         }.State.Should().Be("retracted");
         ((ChannelContentSummaryDto)Samples["ChannelContentSummaryDto"]).State.Should().Be("published");
         ((ChannelContentDto)Samples["ChannelContentDto"]).State.Should().Be("published");
+    }
+
+    [Theory]
+    [InlineData(typeof(ChannelContentSummaryDto))]
+    [InlineData(typeof(ChannelContentDto))]
+    [InlineData(typeof(ChannelContentTombstoneDto))]
+    public void ParticipantState_IsGetOnly(Type type)
+    {
+        // A mapper cannot put "draft" or "scheduled" on a participant DTO: the property has no setter (XC-002).
+        type.GetProperty("State")!.CanWrite.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("weather", "weather")]
+    [InlineData("news", "news")]
+    [InlineData("system", null)]
+    [InlineData(null, null)]
+    [InlineData("radio", null)]
+    public void AlertSourceChannel_SystemNeverReachesTheWire(string? stored, string? wire)
+    {
+        AlertDto.WireSourceChannel(stored).Should().Be(wire);
     }
 
     public static TheoryData<string, string[]> VocabularyLists() => new()
@@ -264,6 +298,23 @@ public class ChannelContractParityTests
             ["PairedPostOptions"] = new PairedPostOptions { Text = "Read more" },
             ["PublishAlertOptions"] = new PublishAlertOptions { Severity = "emergency" },
         };
+    }
+
+    /// <summary>Boots the real composition root (no database is opened) to read its serializer options.</summary>
+    private sealed class HostOptionsProbeFactory : WebApplicationFactory<Program>
+    {
+        private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
+        private const string DummyConnectionString =
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
+
+        public HostOptionsProbeFactory()
+            => Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
+        }
     }
 
     private static string FindRepositoryRoot()

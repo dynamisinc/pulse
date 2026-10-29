@@ -45,7 +45,14 @@ import {
 export const USE_MOCK_CHANNELS = USE_MOCK_DATA
 
 function respond(config: InternalAxiosRequestConfig, status: number, data: unknown): AxiosResponse {
-  return { data, status, statusText: status === 200 ? 'OK' : 'Not Found', headers: {}, config }
+  // A deep copy per response, so a consumer that mutates what it received
+  // can never change the shared fixtures (or what the next test reads).
+  const body: unknown = structuredClone(data)
+  return { data: body, status, statusText: status === 200 ? 'OK' : 'Not Found', headers: {}, config }
+}
+
+function newestFirst<T>(items: readonly T[], instant: (item: T) => string): T[] {
+  return [...items].sort((a, b) => Date.parse(instant(b)) - Date.parse(instant(a)))
 }
 
 function toSummary(item: ChannelContentDto): ChannelContentSummaryDto {
@@ -98,12 +105,12 @@ function route(config: InternalAxiosRequestConfig): [number, unknown] {
       const outletSlug = paramOf(config, url, 'outlet')
       const category = paramOf(config, url, 'category')
       const featured = paramOf(config, url, 'featured') === 'true'
-      const items = MOCK_PUBLISHED_CONTENT
+      const rows = MOCK_PUBLISHED_CONTENT
         .filter(i => i.channelId === channelId)
         .filter(i => outletSlug === null || i.outlet.slug === outletSlug)
         .filter(i => category === null || i.category === category)
         .filter(i => !featured || i.featured)
-        .map(toSummary)
+      const items = newestFirst(rows, i => i.publishedScenarioTime).map(toSummary)
       const body: ChannelContentListDto = { items, nextCursor: null }
       return [200, body]
     }
@@ -118,9 +125,7 @@ function route(config: InternalAxiosRequestConfig): [number, unknown] {
 
   if (segments[0] === 'alerts' && segments.length === 1) return [200, { alerts: MOCK_ALERTS }]
   if (segments[0] === 'alerts' && segments[1] === 'history' && segments.length === 2) {
-    const newestFirst = [...MOCK_ALERTS]
-      .sort((a, b) => b.scenarioTime.localeCompare(a.scenarioTime))
-    return [200, { alerts: newestFirst }]
+    return [200, { alerts: newestFirst(MOCK_ALERTS, a => a.scenarioTime) }]
   }
 
   if (segments[0] === 'link-previews' && segments.length === 1) {

@@ -39,6 +39,8 @@ public class ContentPermalinksTests
     [InlineData("news", "ok", "../etc")]
     [InlineData("news", "ok", "a/b")]
     [InlineData("news", "ok", "a?b=1")]
+    [InlineData("news", "ok", "a\n")]
+    [InlineData("news", "ok\n", "a")]
     [InlineData("social", "ok", "ok")]
     [InlineData("portal", "ok", "ok")]
     [InlineData("//x.test", "ok", "ok")]
@@ -48,6 +50,23 @@ public class ContentPermalinksTests
         var act = () => _permalinks.For(channelId, outletSlug, contentSlug);
 
         act.Should().Throw<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("/news/newsline-7/a", true)]
+    [InlineData("/", true)]
+    [InlineData("https://x.test/news", false)]
+    [InlineData("//x.test/news", false)]
+    [InlineData("news/a", false)]
+    [InlineData("/x?u=https://evil.test", false)]
+    [InlineData("/\t/evil.test/x", false)]
+    [InlineData("/\n/evil.test", false)]
+    [InlineData("/\\evil.test", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsHostRelativePath_AcceptsOnlyAPlainPath(string? value, bool expected)
+    {
+        ChannelVocabulary.IsHostRelativePath(value).Should().Be(expected);
     }
 
     [Fact]

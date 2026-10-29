@@ -7,8 +7,11 @@
  * the C# list, both pinned by `wireContract.json` (wireContract.test.ts on
  * this side, ChannelContractParityTests on the server).
  *
- * Additive-only after Wave 1, through the orchestrator. A channel adds a
- * content kind by registering a descriptor/editor, never by editing this file.
+ * Additive-only after Wave 1, through the orchestrator. The guards are
+ * CLOSED over these lists (fail-closed), so a new content kind is a
+ * both-sides vocabulary change: add it here, in `ChannelVocabulary.cs` and in
+ * `wireContract.json` together, and ship the client with or before the first
+ * server that emits it.
  *
  * World: both (types only). No React, no MUI.
  */

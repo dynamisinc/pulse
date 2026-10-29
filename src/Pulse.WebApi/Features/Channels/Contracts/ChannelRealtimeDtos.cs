@@ -30,11 +30,18 @@ public sealed record AlertDto
     [JsonPropertyName("scenarioTime")]
     public required string ScenarioTime { get; init; }
 
-    /// <summary>The host-relative "Details" target (FC-9.3), or null.</summary>
+    /// <summary>
+    /// The host-relative "Details" target (FC-9.3), or null. Must pass <see cref="ChannelVocabulary.IsHostRelativePath"/>;
+    /// the client guard rejects anything else.
+    /// </summary>
     [JsonPropertyName("href")]
     public string? Href { get; init; }
 
-    /// <summary>The source channel id, or null (a <c>system</c> alert has no participant-facing source).</summary>
+    /// <summary>
+    /// The source channel id, or null. The stored value may be <see cref="ChannelVocabulary.AlertSourceSystem"/>, which
+    /// never goes on the wire: map it with <see cref="WireSourceChannel"/> (the client guard rejects <c>"system"</c>, and
+    /// one bad alert fails the whole active set).
+    /// </summary>
     [JsonPropertyName("sourceChannel")]
     public string? SourceChannel { get; init; }
 
@@ -45,6 +52,15 @@ public sealed record AlertDto
     /// <summary>The scenario-time expiry, or null.</summary>
     [JsonPropertyName("expiresScenarioTime")]
     public string? ExpiresScenarioTime { get; init; }
+
+    /// <summary>
+    /// Maps a stored <c>ChannelAlert.SourceChannel</c> (a channel id or <c>system</c>) to the wire value: a channel id
+    /// passes through; anything else, including <c>system</c>, becomes null.
+    /// </summary>
+    /// <param name="storedSourceChannel">The stored source.</param>
+    /// <returns>The wire <c>sourceChannel</c>.</returns>
+    public static string? WireSourceChannel(string? storedSourceChannel) =>
+        ChannelVocabulary.IsChannelId(storedSourceChannel) ? storedSourceChannel : null;
 }
 
 /// <summary>
