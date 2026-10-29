@@ -45,8 +45,9 @@ export function createArrivalCoalescer(
 
   return {
     add: count => {
-      if (!Number.isFinite(count) || count <= 0) return
-      pending += Math.floor(count)
+      const whole = Math.floor(count)
+      if (!Number.isFinite(whole) || whole <= 0) return
+      pending += whole
       if (timer === undefined) flush()
     },
     dispose: () => {

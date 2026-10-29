@@ -20,7 +20,7 @@
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid var(--pc-line);
+  border: 1px solid var(--pc-line, #e5e8ea);
   border-radius: 16px;
   background: #000;
   color: #fff;
@@ -198,13 +198,13 @@
   justify-content: center;
   gap: 6px;
   padding: 44px 16px 16px;
-  background: var(--pc-panel);
-  color: var(--pc-ink);
+  background: var(--pc-panel, #f3f5f6);
+  color: var(--pc-ink, #0e1518);
   text-align: center;
 }
 
 .unplayableIcon {
-  color: var(--pc-ink-muted);
+  color: var(--pc-ink-muted, #61707a);
   font-size: 22px;
 }
 
@@ -219,7 +219,7 @@
   max-width: 100%;
   margin: 0;
   overflow: hidden;
-  color: var(--pc-ink-muted);
+  color: var(--pc-ink-muted, #61707a);
   font-size: 13px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;

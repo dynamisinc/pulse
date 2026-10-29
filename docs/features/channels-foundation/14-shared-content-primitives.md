@@ -28,8 +28,10 @@ Files: `features/channels/primitives/**` (+ tests), plus `core/media/**` only if
 - **Player extraction:** the inline player and its helpers moved to `core/media/player/` (Social keeps re-export shims at the old paths; the staff boundary test covers the new path). `ParticipantTooltip` moved with it because the player depends on it.
 - **Updated stamp:** `ScenarioDateline` takes `updatedScenarioTime` and renders "Updated 3:05 PM" from that field alone (never from `revisions[]`), so a `silent_rewrite` shows the stamp. A stamp not after publish is hidden. A next-day stamp carries its date.
 - **Sanitizer allowlist:** the client allowlist is the union of rich-basic and rich-tables plus `<pulse-post data-id>`, exported for an F04 parity test. Story 04's rich profiles did not exist when this was built (`PostSanitizer` strips every tag), so "the same allowlist" is defined here and F04 mirrors it.
-- **Skin variables:** styles read `--skin-palette-*`, `--skin-type-*-family` and `--skin-density-radius` with neutral fallbacks. The names must match what F13's scope emits.
+- **Skin variables:** styles read F13's `--pulse-skin-*` custom properties (`text`, `link`, `rule`, `surface`, `font-body`, `font-hed`, `body-size`, `radius`; source of truth `SKIN_CSS_VARS` in `skin/theme.ts`), each with a neutral fallback that also applies inside `SkinResetBoundary`.
 - **Document file name:** `ContentMediaDto` has no file-name field. The link uses the URL's last segment when it has an extension, else the alt text plus `.pdf`.
+- **Known layering debt (follow-up):** `core/media/player` imports `features/participant-shell` (chrome config, `SHELL_Z`, overlay state) and the tooltip composes Social's token class. All of this is inherited from the moved code. Moving those small contracts into `core/` is a follow-up, not December scope.
+- **External links:** body `http(s)` links are allowed and open in a new tab with an "(opens in new tab)" note. Whether real-world hosts may appear in fiction bodies is F04's server-profile call (FC-9 rule 3).
 - **Lint rule:** the COR-053 ban for this module is a static test (`primitives.static.test.ts`), not an `eslint.config.js` edit, to keep the footprint inside `primitives/**`.
 
 ## Dependencies

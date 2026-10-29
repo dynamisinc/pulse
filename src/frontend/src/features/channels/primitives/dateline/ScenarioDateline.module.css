@@ -5,10 +5,10 @@
  */
 
 .dateline {
-  font-family: var(--skin-type-body-family, system-ui, sans-serif);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
   font-size: 0.875rem;
   line-height: 1.4;
-  color: var(--skin-palette-text-muted, var(--skin-palette-text, #3d4451));
+  color: var(--pulse-skin-text, #3d4451);
 }
 
 .updated {

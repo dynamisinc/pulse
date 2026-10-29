@@ -10,7 +10,9 @@
  *    modified click (ctrl / cmd / shift / middle) keeps the browser's own behaviour.
  *  - `<pulse-post data-id="…">` placeholders are filled by `renderEmbeddedPost(id)`
  *    through a portal, so E4 can embed a post in D1 anatomy and this module never
- *    imports Social. With no render prop the placeholder stays empty.
+ *    imports Social. With no render prop the placeholder stays empty. Note for E4: React
+ *    events from an embed bubble through the REACT tree (to this component's parent), not
+ *    through the body `div`, so a card-level `onClick` above this sees embed clicks.
  *
  * Presentational only. Typography comes from skin CSS variables.
  */
@@ -50,6 +52,7 @@ export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: Sanit
     const container = containerRef.current
     if (container === null) return
     container.innerHTML = html
+    wrapTablesForScroll(container)
     const found: EmbedTarget[] = []
     for (const element of container.querySelectorAll(`${PULSE_POST_TAG}[data-id]`)) {
       const postId = element.getAttribute('data-id')?.trim() ?? ''
@@ -66,6 +69,9 @@ export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: Sanit
     if (link === null || !event.currentTarget.contains(link)) return
     const href = link.getAttribute('href')
     if (href === null) return
+    // Belt and braces beside the sanitizer's normalisation: only a same-origin target is
+    // routed; anything else is left to the browser (and never handed to `navigate`).
+    if (new URL(href, window.location.href).origin !== window.location.origin) return
     event.preventDefault()
     void navigate(href)
   }
@@ -87,4 +93,22 @@ export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: Sanit
         ))}
     </>
   )
+}
+
+/**
+ * A wide table scrolls inside a focusable, named region rather than widening the page
+ * (mobile-first). The table itself keeps `display: table`, so its semantics survive in
+ * every screen reader, and the region is keyboard-scrollable (WCAG 2.1.1).
+ */
+function wrapTablesForScroll(container: HTMLElement): void {
+  for (const table of container.querySelectorAll('table')) {
+    const region = container.ownerDocument.createElement('div')
+    region.className = styles.tableScroll ?? ''
+    region.setAttribute('role', 'region')
+    region.setAttribute('tabindex', '0')
+    const caption = table.querySelector('caption')?.textContent?.trim()
+    region.setAttribute('aria-label', caption ? `Table: ${caption}` : 'Table')
+    table.replaceWith(region)
+    region.appendChild(table)
+  }
 }

@@ -48,12 +48,19 @@ export function toPlayerMedia(media: ContentMediaDto, alt: string): PlayerMedia 
 /**
  * The file name a `document` link shows and downloads as. The contract carries no file
  * name field, so it is the URL's last path segment when that looks like a file
- * (`advisory-3.pdf`), else the alt text with an extension from the content type.
+ * (`advisory-3.pdf`), else the RESOLVED alt text (`contentMediaAlt`, never empty) with an
+ * extension from the content type.
  */
-export function documentFileName(media: Pick<ContentMediaDto, 'url' | 'alt' | 'contentType'>): string {
+export function documentFileName(
+  media: Pick<ContentMediaDto, 'url' | 'contentType'>,
+  alt: string,
+): string {
   const segment = lastPathSegment(media.url)
-  if (segment !== undefined && /\.[a-z0-9]{2,5}$/i.test(segment)) return segment
-  const base = media.alt.trim() !== '' ? media.alt.trim() : 'document'
+  if (segment !== undefined && /\.[a-z0-9]{2,5}$/i.test(segment)) {
+    // A decoded `%2F` / `%5C` must not show as a path in the label.
+    return segment.replace(/[/\\]/g, '_')
+  }
+  const base = alt.trim() !== '' ? alt.trim() : 'document'
   const extension = media.contentType === 'application/pdf' ? '.pdf' : ''
   return base.toLowerCase().endsWith(extension) ? base : `${base}${extension}`
 }

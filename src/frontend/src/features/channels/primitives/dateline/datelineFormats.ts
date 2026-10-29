@@ -149,11 +149,20 @@ function pinnedFormatter(key: PinnedKey, timeZone: string): (epoch: number) => s
   const cacheKey = `${key}|${timeZone}`
   let format = pinnedCache.get(cacheKey)
   if (format === undefined) {
-    // The zone is ALWAYS passed explicitly: never the browser's zone (COR-053).
-    const intl = new Intl.DateTimeFormat('en-US', { ...PINNED_OPTIONS[key], timeZone })
-    format = key === 'zoneName'
-      ? epoch => intl.formatToParts(epoch).find(part => part.type === 'timeZoneName')?.value ?? ''
-      : epoch => intl.format(epoch)
+    // The zone is ALWAYS passed explicitly: never the browser's zone (COR-053). An invalid
+    // zone throws a RangeError here; render nothing rather than crash the participant tree.
+    let intl: Intl.DateTimeFormat | undefined
+    try {
+      intl = new Intl.DateTimeFormat('en-US', { ...PINNED_OPTIONS[key], timeZone })
+    } catch {
+      intl = undefined
+    }
+    const pinned = intl
+    format = pinned === undefined
+      ? () => ''
+      : key === 'zoneName'
+        ? epoch => pinned.formatToParts(epoch).find(part => part.type === 'timeZoneName')?.value ?? ''
+        : epoch => pinned.format(epoch)
     pinnedCache.set(cacheKey, format)
   }
   return format

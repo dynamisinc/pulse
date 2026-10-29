@@ -14,8 +14,8 @@
   isolation: isolate;
   overflow: hidden;
   width: 100%;
-  border-radius: var(--skin-density-radius, 4px);
-  background-color: var(--skin-palette-surface, #eef0f3);
+  border-radius: var(--pulse-skin-radius, 4px);
+  background-color: var(--pulse-skin-surface, #eef0f3);
 }
 
 .image {
@@ -36,10 +36,10 @@
 
 .caption {
   margin-top: 6px;
-  font-family: var(--skin-type-body-family, system-ui, sans-serif);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
   font-size: 0.875rem;
   line-height: 1.4;
-  color: var(--skin-palette-text-muted, var(--skin-palette-text, #3d4451));
+  color: var(--pulse-skin-text, #3d4451);
 }
 
 .docLink,
@@ -48,16 +48,16 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--skin-palette-rule, #c4c9d1);
-  border-radius: var(--skin-density-radius, 4px);
-  font-family: var(--skin-type-body-family, system-ui, sans-serif);
+  border: 1px solid var(--pulse-skin-rule, #c4c9d1);
+  border-radius: var(--pulse-skin-radius, 4px);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
   font-size: 0.9375rem;
-  color: var(--skin-palette-text, #1b1f24);
-  background-color: var(--skin-palette-surface, #ffffff);
+  color: var(--pulse-skin-text, #1b1f24);
+  background-color: var(--pulse-skin-surface, #ffffff);
 }
 
 .docLink {
-  color: var(--skin-palette-link, #0b57d0);
+  color: var(--pulse-skin-link, #0b57d0);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -67,7 +67,7 @@
 }
 
 .docLink:focus-visible {
-  outline: 3px solid var(--skin-palette-focus, var(--skin-palette-link, #0b57d0));
+  outline: 3px solid var(--pulse-skin-link, #0b57d0);
   outline-offset: 2px;
 }
 

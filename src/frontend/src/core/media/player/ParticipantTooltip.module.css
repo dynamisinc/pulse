@@ -15,7 +15,7 @@
 }
 
 .tooltip {
-  composes: tokens from '../theme/social.module.css';
+  composes: tokens from '../../../features/social/theme/social.module.css';
 
   position: fixed;
   top: 0;

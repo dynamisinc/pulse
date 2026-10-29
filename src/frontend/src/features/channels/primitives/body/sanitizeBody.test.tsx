@@ -133,3 +133,41 @@ describe('sanitizeBodyHtml: what it keeps and adds', () => {
     expect(sanitizeBodyHtml('<p>a<img src="/x.png" alt="x">b</p>')).toBe('<p>ab</p>')
   })
 })
+
+describe('sanitizeBodyHtml: link edge cases (cold review)', () => {
+  const link = (html: string) =>
+    new DOMParser().parseFromString(sanitizeBodyHtml(html), 'text/html').querySelector('a')
+
+  it.each([
+    '/\t/evil.example/x',
+    '/\n/evil.example/x',
+    '/\r\\evil.example/x',
+  ])('%j is never classed in-sim (the browser would resolve it off-host)', href => {
+    const a = link(`<a href="${href}">x</a>`)
+    expect(a?.hasAttribute(INSIM_LINK_ATTR)).toBe(false)
+    // Stored as the browser resolves it, so the classification matches what is followed.
+    expect(a?.getAttribute('href')).not.toMatch(/[\t\n\r]/)
+  })
+
+  it('external http(s) links say they open in a new tab; mailto / tel do not open one', () => {
+    const external = link('<a href="https://example.org">site</a>')
+    expect(external?.getAttribute('target')).toBe('_blank')
+    expect(external?.textContent).toBe('site (opens in new tab)')
+    expect(external?.querySelector('[data-new-tab-note]')).not.toBeNull()
+    for (const href of ['mailto:desk@example.org', 'tel:+15550100', '#section']) {
+      const a = link(`<a href="${href}">x</a>`)
+      expect(a?.hasAttribute('target')).toBe(false)
+      expect(a?.textContent).toBe('x')
+    }
+  })
+
+  it('an author cannot forge the new-tab note marker', () => {
+    expect(sanitizeBodyHtml('<p><span data-new-tab-note>hidden</span></p>'))
+      .toBe('<p><span>hidden</span></p>')
+  })
+
+  it('author text inside a <pulse-post> placeholder is dropped', () => {
+    expect(sanitizeBodyHtml('<pulse-post data-id="p">spoof</pulse-post>'))
+      .toBe('<pulse-post data-id="p"></pulse-post>')
+  })
+})

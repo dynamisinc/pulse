@@ -29,12 +29,37 @@ const STYLES: readonly (readonly [string, string])[] = [
   'watermark/WatermarkSlot.module.css',
 ].map(path => [path, readSrcFile(`features/channels/primitives/${path}`)] as const)
 
-/** Strips comments so prose that NAMES a banned API (as this module's docs do) is ignored. */
+/** The shared player the primitives render through (`core/media/player`, news FU-9). */
+const PLAYER_SOURCES = import.meta.glob([
+  '../../../core/media/player/**/*.{ts,tsx}',
+  '!../../../core/media/player/**/*.test.{ts,tsx}',
+], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+/**
+ * Strips comments so prose that NAMES a banned API (as this module's docs do) is ignored.
+ * A line comment must start the line or follow whitespace, so a `'//'` string literal
+ * (e.g. `startsWith('//')`) does not hide the rest of its line.
+ */
 function code(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1')
 }
 
+/** Wall-clock reads and browser-zone renderings (COR-053 / XC-008). */
+const CLOCK_BANS: readonly RegExp[] = [
+  /\bDate\s*(\.\s*now|\[\s*['"]now['"]\s*\])/,
+  /\bnew\s+Date\s*(\(\s*\)|(?!\s*\())/,
+  /\bperformance\s*\.\s*now/,
+  /\.toLocale[A-Za-z]*\s*\(/,
+  /\.get(Hours|Minutes|Seconds|Date|Day|Month|FullYear|Year|TimezoneOffset)\s*\(/,
+  /\.to(Time|Date)String\s*\(/,
+]
+
 const files = Object.entries(SOURCES)
+const playerFiles = Object.entries(PLAYER_SOURCES)
 
 describe('primitives: static rules', () => {
   it('covers the module (the glob found the primitives)', () => {
@@ -49,11 +74,28 @@ describe('primitives: static rules', () => {
     ]))
   })
 
-  it.each(files)('%s never reads wall-clock or the browser zone (COR-053)', (_path, source) => {
+  it.each([...files, ...playerFiles])('%s never reads wall-clock or the browser zone (COR-053)', (_path, source) => {
     const body = code(source)
-    expect(body).not.toMatch(/Date\s*\.\s*now/)
-    expect(body).not.toMatch(/new\s+Date\s*\(\s*\)/)
-    expect(body).not.toMatch(/\.toLocale[A-Za-z]*\s*\(/)
+    for (const banned of CLOCK_BANS) expect(body).not.toMatch(banned)
+    // Every Intl date formatter is pinned to an explicit zone (never the browser's).
+    for (const match of body.matchAll(/new\s+Intl\s*\.\s*DateTimeFormat\s*\(/g)) {
+      expect(body.slice(match.index, match.index + 200)).toMatch(/timeZone/)
+    }
+  })
+
+  it('the clock bans catch the evasions they target (the rule is not vacuous)', () => {
+    const evasions = [
+      'Date.now()', 'Date[\'now\']()', 'new Date()', 'new Date;', 'performance.now()',
+      'x.toLocaleTimeString()', 'd.getHours()', 'd.getFullYear()', 'd.toTimeString()',
+      'd.toDateString()',
+    ]
+    for (const evasion of evasions) {
+      expect(CLOCK_BANS.some(banned => banned.test(evasion)), evasion).toBe(true)
+    }
+    // Parsing or formatting a GIVEN instant stays allowed.
+    for (const allowed of ['Date.parse(iso)', 'new Date(epoch)', 'formatScenarioTime(x)']) {
+      expect(CLOCK_BANS.some(banned => banned.test(allowed)), allowed).toBe(false)
+    }
   })
 
   it.each(files)('%s imports no COBRA, no MUI, no MUI icons and no Social', (_path, source) => {
@@ -78,8 +120,8 @@ describe('primitives: static rules', () => {
       /(?:^|[;{\s])(color|background-color|border(?:-[a-z]+)?|outline):\s*([^;]+);/g
     for (const match of css.matchAll(declarations)) {
       const value = match[2] ?? ''
-      if (!/#[0-9a-f]{3,8}b/i.test(value)) continue
-      expect(value, `${path} ${match[1]}`).toMatch(/var\(--skin-/)
+      if (!/#[0-9a-f]{3,8}\b/i.test(value)) continue
+      expect(value, `${path} ${match[1]}`).toMatch(/var\(--pulse-skin-/)
     }
   })
 })

@@ -97,6 +97,12 @@ describe('createScenarioTimeFormatter', () => {
       .toEqual(['', '', '', '', '', ''])
   })
 
+  it('an invalid time zone renders empty pinned parts instead of throwing', () => {
+    const t = createScenarioTimeFormatter(INSTANT, 'Not/AZone', () => '')
+    expect(() => [t.time(), t.shortDate(), t.zoneName()]).not.toThrow()
+    expect([t.time(), t.shortDate(), t.zoneName()]).toEqual(['', '', ''])
+  })
+
   it('pins every rendering to the given zone', () => {
     const t = fmt('Asia/Tokyo')
     // 18:32 UTC = 03:32 next day in Tokyo.

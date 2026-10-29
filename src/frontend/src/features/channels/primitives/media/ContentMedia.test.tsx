@@ -82,9 +82,11 @@ describe('ContentMedia: video', () => {
     expect(screen.getByTestId('exercise-bands')).toBeInTheDocument()
   })
 
-  it('with watermark, the chip clears the video control row', () => {
+  it('with watermark, the chip sits INSIDE the fullscreened player wrapper, clear of the controls', () => {
     render(<ContentMedia media={video} watermark />)
-    expect(screen.getByTestId('watermark-slot').className).toMatch(/clearControls/)
+    const chip = screen.getByTestId('watermark-slot')
+    expect(chip.className).toMatch(/clearControls/)
+    expect(screen.getByTestId('video-player').contains(chip)).toBe(true)
   })
 
   it('imports the player from core/media, never from Social (news FU-9)', () => {
@@ -109,9 +111,14 @@ describe('ContentMedia: document (Q-03, download-only)', () => {
 
   it('renders a download link with its file name, and nothing else', () => {
     const { container } = render(<ContentMedia media={pdf} />)
-    const link = screen.getByRole('link', { name: 'Download Press advisory 3 (advisory-3.pdf)' })
+    const link = screen.getByRole('link', {
+      name: /^Download Press advisory 3: ?advisory-3\.pdf ?PDF ?\(opens in new tab\)$/,
+    })
     expect(link).toHaveAttribute('href', '/media/press/advisory-3.pdf')
     expect(link).toHaveAttribute('download', 'advisory-3.pdf')
+    // `download` is ignored cross-origin: the link must never replace the fiction's tab.
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(link).toHaveTextContent('advisory-3.pdf')
     expect(link).toHaveTextContent('PDF')
     expect(container.querySelector('img, video, iframe, object, embed')).toBeNull()
@@ -136,7 +143,8 @@ describe('ContentMedia: document (Q-03, download-only)', () => {
     [{ url: '/m/Situation%20Report.pdf?sig=abc', alt: 'x', contentType: 'application/pdf' }, 'Situation Report.pdf'],
     [{ url: '/m/7f3a9c2e', alt: 'Press advisory 3', contentType: 'application/pdf' }, 'Press advisory 3.pdf'],
     [{ url: '/m/7f3a9c2e', alt: '', contentType: 'text/plain' }, 'document'],
+    [{ url: '/m/a%2Fb.pdf', alt: 'x', contentType: 'application/pdf' }, 'a_b.pdf'],
   ])('documentFileName(%o) => %s', (media, expected) => {
-    expect(documentFileName(media)).toBe(expected)
+    expect(documentFileName(media, media.alt)).toBe(expected)
   })
 })

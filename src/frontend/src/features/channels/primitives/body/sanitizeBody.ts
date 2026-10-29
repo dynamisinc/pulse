@@ -52,32 +52,55 @@ const URI_WHITESPACE = /[\u0000-\u0020\u00a0\u1680\u180e\u2000-\u2029\u205f\u300
 
 /** A host-relative path that stays on this host (not `//host` or `/\host`). */
 export function isInSimHref(href: string): boolean {
-  return href.startsWith('/') && !href.startsWith('//') && !href.startsWith('/\\')
+  // Browsers drop tabs / newlines inside a URL, so `/\t/evil.example` IS `//evil.example`.
+  const normalised = href.replace(URI_WHITESPACE, '')
+  return normalised.startsWith('/') && !normalised.startsWith('//') && !normalised.startsWith('/\\')
 }
+
+/** http(s) links open in a new tab; mailto / tel / fragments never do. */
+const NEW_TAB_HREF = /^https?:/i
+
+/** Marks the visually hidden "(opens in new tab)" note the hook appends to such links. */
+export const NEW_TAB_NOTE_ATTR = 'data-new-tab-note'
 
 const purifier = createDOMPurify(window)
 
+/** The "(opens in new tab)" notes created by the `afterSanitizeAttributes` hook, and only those. */
+const ownNotes = new WeakSet<Node>()
+
 // The scheme allowlist applies to `href` only. (DOMPurify's ALLOWED_URI_REGEXP would also
 // test every non-URI attribute value, which drops `scope="col"` and `colspan="2"`.)
-purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+purifier.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'href' && !ALLOWED_URI.test(data.attrValue.replace(URI_WHITESPACE, ''))) {
     data.keepAttr = false
   }
+  // The new-tab notes this module appends are visited by the same pass; keep THEIR marker
+  // (an author-written one is not in the set, so it is stripped like any other attribute).
+  if (data.attrName === NEW_TAB_NOTE_ATTR && ownNotes.has(node)) data.forceKeepAttr = true
 })
 
 // Runs AFTER the allowlist check, so the attributes it sets are the only `rel` / `target` /
 // `data-insim-link` in the output: an author-supplied one was already stripped.
 purifier.addHook('afterSanitizeAttributes', node => {
   if (node.nodeName === 'A') {
-    const href = node.getAttribute('href') ?? ''
+    // Store the href exactly as the browser will resolve it (no tabs / newlines), so what
+    // was classified below is what gets followed.
+    const href = (node.getAttribute('href') ?? '').replace(URI_WHITESPACE, '')
+    if (node.hasAttribute('href')) node.setAttribute('href', href)
     node.setAttribute('rel', 'noopener noreferrer')
     if (isInSimHref(href)) {
       node.setAttribute(INSIM_LINK_ATTR, '')
-      node.removeAttribute('target')
-    } else if (href !== '' && !href.startsWith('#')) {
+    } else if (NEW_TAB_HREF.test(href)) {
       node.setAttribute('target', '_blank')
+      const note = node.ownerDocument.createElement('span')
+      note.setAttribute(NEW_TAB_NOTE_ATTR, '')
+      note.textContent = ' (opens in new tab)'
+      ownNotes.add(note)
+      node.appendChild(note)
     }
   }
+  // Author text inside an embed placeholder would show beside the embedded post.
+  if (node.nodeName.toLowerCase() === PULSE_POST_TAG) node.replaceChildren()
   // `data-id` only means something on the embed placeholder.
   if (node.nodeName.toLowerCase() !== PULSE_POST_TAG) node.removeAttribute('data-id')
 })

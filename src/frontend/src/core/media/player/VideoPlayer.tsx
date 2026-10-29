@@ -81,7 +81,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent, SyntheticEvent } from 'react'
+import type { CSSProperties, KeyboardEvent, ReactNode, SyntheticEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCompress,
@@ -128,6 +128,11 @@ export interface VideoPlayerProps {
   readonly onRequestModal?: (trigger: HTMLElement, startAt?: number) => void
   /** Resume position in seconds (the modal fallback carries it over). Default: the start. */
   readonly startAt?: number
+  /**
+   * Extra overlay drawn INSIDE the wrapper that is fullscreened (e.g. a channel's EXERCISE
+   * chip), so it stays on screen in fullscreen. Not drawn over the unplayable message.
+   */
+  readonly overlay?: ReactNode
 }
 
 /** Starts playback without leaking a rejected promise (autoplay policy, abort). */
@@ -140,6 +145,7 @@ export function VideoPlayer({
   variant = 'inline',
   onRequestModal,
   startAt,
+  overlay,
 }: VideoPlayerProps) {
   const alt = mediaAlt(media)
   // A shell Pause / EndEx / break-fiction overlay covers the channel: media must stop.
@@ -405,6 +411,7 @@ export function VideoPlayer({
       */}
       {/* No bands over the unplayable message: it shows no footage (Gate-1 L-5). */}
       {!failed && <ExerciseBands force={fullscreen} clearNativeControls />}
+      {!failed && overlay}
 
       {/*
         The overlay top row: duration | Mute . Expand. Painted ABOVE the bands, so the

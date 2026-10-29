@@ -5,10 +5,10 @@
  */
 
 .body {
-  font-family: var(--skin-type-body-family, Georgia, 'Times New Roman', serif);
-  font-size: 1.0625rem;
+  font-family: var(--pulse-skin-font-body, Georgia, 'Times New Roman', serif);
+  font-size: var(--pulse-skin-body-size, 1.0625rem);
   line-height: 1.6;
-  color: var(--skin-palette-text, #1b1f24);
+  color: var(--pulse-skin-text, #1b1f24);
   overflow-wrap: break-word;
 }
 
@@ -18,13 +18,13 @@
 
 .body :where(h2, h3, h4) {
   margin: 1.4em 0 0.5em;
-  font-family: var(--skin-type-hed-family, inherit);
+  font-family: var(--pulse-skin-font-hed, inherit);
   line-height: 1.25;
 }
 
 /* Links are underlined, not colour-only (WCAG 1.4.1). */
 .body a {
-  color: var(--skin-palette-link, #0b57d0);
+  color: var(--pulse-skin-link, #0b57d0);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -34,36 +34,56 @@
 }
 
 .body a:focus-visible {
-  outline: 3px solid var(--skin-palette-focus, var(--skin-palette-link, #0b57d0));
+  outline: 3px solid var(--pulse-skin-link, #0b57d0);
   outline-offset: 2px;
   border-radius: 2px;
 }
 
 .body blockquote {
   padding-left: 1em;
-  border-left: 3px solid var(--skin-palette-rule, #c4c9d1);
+  border-left: 3px solid var(--pulse-skin-rule, #c4c9d1);
 }
 
 .body hr {
   border: 0;
-  border-top: 1px solid var(--skin-palette-rule, #c4c9d1);
+  border-top: 1px solid var(--pulse-skin-rule, #c4c9d1);
 }
 
-/* A wide table scrolls inside itself instead of widening the page (mobile-first). */
-.body table {
-  display: block;
+/* A wide table scrolls inside its focusable region (added by SanitizedBody), not the page.
+   The table keeps `display: table` so screen readers keep its semantics. */
+.tableScroll {
   max-width: 100%;
+  margin: 0 0 1em;
   overflow-x: auto;
+}
+
+.tableScroll:focus-visible {
+  outline: 3px solid var(--pulse-skin-link, #0b57d0);
+  outline-offset: 2px;
+}
+
+.body table {
+  margin: 0;
   border-collapse: collapse;
 }
 
 .body :where(th, td) {
   padding: 4px 8px;
-  border: 1px solid var(--skin-palette-rule, #c4c9d1);
+  border: 1px solid var(--pulse-skin-rule, #c4c9d1);
   text-align: left;
 }
 
 .body pulse-post {
   display: block;
   margin: 0 0 1em;
+}
+
+/* "(opens in new tab)" on external links: read by screen readers, not shown. */
+.body [data-new-tab-note] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

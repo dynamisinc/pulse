@@ -80,11 +80,16 @@ export function ContentMedia({
     <figure className={rootClass} data-testid="content-media" data-media-kind={media.kind}>
       {media.kind === 'video' ? (
         <div className={styles.frame}>
-          <VideoPlayer media={toPlayerMedia(media, alt)} onRequestModal={onRequestVideoModal} />
-          {watermark && <WatermarkSlot clearVideoControls />}
+          <VideoPlayer
+            media={toPlayerMedia(media, alt)}
+            onRequestModal={onRequestVideoModal}
+            // Inside the player's fullscreened wrapper, so the chip survives fullscreen.
+            overlay={watermark ? <WatermarkSlot clearVideoControls /> : undefined}
+          />
         </div>
       ) : (
-        <ContentImage media={media} alt={alt} watermark={watermark} />
+        // Keyed by URL: a new image starts un-faded and un-failed.
+        <ContentImage key={media.url} media={media} alt={alt} watermark={watermark} />
       )}
       {caption && <figcaption className={styles.caption}>{caption}</figcaption>}
     </figure>
@@ -147,7 +152,7 @@ function DocumentLink({
   readonly coarse: boolean
 }) {
   const href = resolveSafeMediaUrl(media.url)
-  const fileName = documentFileName(media)
+  const fileName = documentFileName(media, alt)
   const typeLabel = documentTypeLabel(media.contentType)
   const label = (
     <>
@@ -172,10 +177,17 @@ function DocumentLink({
       className={coarse ? `${styles.docLink} ${styles.coarse}` : styles.docLink}
       href={href}
       download={fileName}
-      aria-label={`Download ${alt === fileName ? fileName : `${alt} (${fileName})`}`}
+      // `download` is ignored cross-origin (signed URLs): never replace the fiction's tab.
+      target="_blank"
+      rel="noopener noreferrer"
       data-testid="content-media-document"
     >
+      {/* The name starts with the visible text's words (WCAG 2.5.3 label in name). */}
+      <span className={styles.srOnly}>
+        {alt === fileName ? 'Download ' : `Download ${alt}: `}
+      </span>
       {label}
+      <span className={styles.srOnly}> (opens in new tab)</span>
     </a>
   )
 }

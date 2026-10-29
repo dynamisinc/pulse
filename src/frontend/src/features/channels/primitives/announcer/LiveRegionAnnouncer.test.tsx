@@ -44,6 +44,7 @@ describe('createArrivalCoalescer', () => {
     coalescer.add(0)
     coalescer.add(-3)
     coalescer.add(Number.NaN)
+    coalescer.add(0.5)
     expect(spoken).toEqual([])
   })
 

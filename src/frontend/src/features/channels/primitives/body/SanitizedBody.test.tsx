@@ -55,7 +55,7 @@ describe('SanitizedBody: in-sim links', () => {
 
   it('an external link is not routed and opens in a new tab with noopener', () => {
     renderBody('<p><a href="https://example.org/a">ext</a></p>')
-    const link = screen.getByRole('link', { name: 'ext' })
+    const link = screen.getByRole('link', { name: /^ext.*opens in new tab/ })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
@@ -92,5 +92,15 @@ describe('SanitizedBody: embedded Pulse posts', () => {
     )
     expect(screen.queryByTestId('embed-a')).toBeNull()
     expect(screen.getByTestId('embed-b')).toBeInTheDocument()
+  })
+})
+
+describe('SanitizedBody: tables', () => {
+  it('wraps a table in a focusable, named scroll region and keeps it a table', () => {
+    renderBody('<table><caption>Shelters</caption><tbody><tr><td>North High</td></tr></tbody></table>')
+    const region = screen.getByRole('region', { name: 'Table: Shelters' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(region.contains(screen.getByRole('table'))).toBe(true)
   })
 })
