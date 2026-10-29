@@ -58,9 +58,10 @@ because the client change is purely additive.
 - [ ] Given the enabled-channel setting, when a channel is disabled for the exercise, then it is
       reported `enabled: false` in the channel catalog **(delivered in Phase 1 — Social enabled,
       E3–E6 catalogued-but-off)**, and, **when a disabled channel's own participant routes exist, they
-      refuse to serve it**. The second clause is **not delivered by this story** and does not hold today
-      — see "Known gap: channel-enablement route gating" below. It lands with the E3–E6 channel routes
-      (each channel epic), which do not exist yet.
+      refuse to serve it**. The second clause is **not delivered by this story**. For the E3–E6 channels it
+      is delivered by channels-foundation 08 (#704): `RequireChannelEnabled(channel)` 404s a disabled
+      channel's participant routes and `<ChannelRoute>` renders `ChannelNotFound`. Social is still ungated
+      (channels-foundation Q4) — see "Known gap: channel-enablement route gating" below.
 - [x] Given an exercise, when its time zone is read, then it is a single IANA zone per exercise (XC-008,
       known constraint) and is the zone every participant-visible timestamp renders in (COR-053) —
       including the value already served on `ExerciseScope.timeZone`.
@@ -91,7 +92,16 @@ because the client change is purely additive.
 - [x] Given the watermark on/off flag, when it is stored, then it is a real per-exercise column story
       02's NFR-008 guard reads — not a constant.
 
-### Known gap: channel-enablement route gating (unowned — needs filing)
+### Known gap: channel-enablement route gating (E3–E6 closed by channels-foundation 08; Social open, Q4)
+
+> **Update (channels-foundation 08, #704).** The shared participant-route filter now exists:
+> `Features/Channels/Enablement/` (`IChannelEnablement` + the `RequireChannelEnabled(channelId)` endpoint
+> filter) reads the resolved exercise's enabled set through `ChannelCatalog.ResolveEnabled`, the same rule
+> as `GET /api/channel-nav-config`, and 404s a disabled channel's routes for participants (staff pass). Every
+> E3–E6 participant route is wrapped in it (FC-4), and the client guard is `<ChannelRoute>`
+> (`features/channels/routing`). **Social is deliberately not gated yet** (channels-foundation Q4): applying
+> `.RequireChannelEnabled("social")` to `/api/feed`, `/api/threads`, `/api/posts` is the one-line follow-up.
+> The analysis below is kept for history.
 
 AC3's second clause ("no participant route serves it") holds **only vacuously** today, and the gap is
 real rather than theoretical:

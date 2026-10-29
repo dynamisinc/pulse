@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Channels;
 
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Enablement;
 
 /// <summary>
 /// The channels foundation's one DI entry point (FC-9.10), called once from the orchestrator-owned <c>Program.cs</c>.
@@ -22,6 +23,8 @@ public static class ChannelsServiceCollectionExtensions
 
         // Story 04: the content publish funnel (IContentPublishService), its sanitizer profiles and startup check.
         services.AddContentPublishFunnel();
+
+        services.AddChannelEnablement(); // 08: IChannelEnablement behind RequireChannelEnabled (FC-7)
         return services;
     }
 }

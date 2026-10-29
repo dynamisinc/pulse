@@ -12,6 +12,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Features.Channels.Enablement;
 using Xunit;
 
 /// <summary>
@@ -22,7 +23,7 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// Story 01 registers no service of its own (schema only); stories 03+ extend this file as they fill <c>AddChannels()</c>
-/// (story 04: the publish funnel). Resolving the context only needs the host to BUILD, so it is fed a dummy,
+/// (story 04: the publish funnel; story 08: <see cref="IChannelEnablement"/>). Resolving the context only needs the host to BUILD, so it is fed a dummy,
 /// never-connecting connection string.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
@@ -90,6 +91,16 @@ public sealed class ChannelsCompositionRootWiringTests
         var start = () => factory.Services;
 
         start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
+    }
+
+    [Fact]
+    public void ProgramCs_ResolvesTheChannelEnablementGate_ThroughAddChannels()
+    {
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IChannelEnablement>().Should().BeOfType<ChannelEnablement>(
+            "story 08 registers the gate RequireChannelEnabled resolves per request; a missing line 500s every gated route");
     }
 
     /// <summary>Boots the real <c>Program</c> host with a dummy, never-connecting connection string. Overrides nothing else.</summary>
