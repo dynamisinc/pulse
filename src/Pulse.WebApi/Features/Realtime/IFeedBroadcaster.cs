@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Realtime;
 
+using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
@@ -134,5 +135,71 @@ public interface IFeedBroadcaster
     /// <returns>A task that completes when the frame has been dispatched.</returns>
     Task BroadcastScenarioClockChangedAsync(
         Guid exerciseId, ScenarioClockChangedDto clock, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a content item became <c>published</c> (channels-foundation FC-5): a
+    /// publish-now, the scheduled runner, or a restore. Client event <c>ContentPublished</c>; the payload is ONLY the
+    /// participant-safe <see cref="ChannelContentSummaryDto"/> (no body, no status/origin/actingHumanId/wall clock,
+    /// XC-002). It goes to the exercise-wide group only while <c>IsLivePushOpen</c> holds; otherwise to the staff group
+    /// only (#375, see the type remarks).
+    /// </summary>
+    /// <remarks>
+    /// A <b>default interface method</b> (a no-op), added by channels-foundation story 02 so the funnel (04) and the
+    /// alert source (10) can call it before story 09 implements it in <c>SignalRFeedBroadcaster</c>, and so the
+    /// existing test doubles keep compiling unchanged.
+    /// </remarks>
+    /// <param name="exerciseId">The owning exercise run (COR-001 scope).</param>
+    /// <param name="content">The published item's summary.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastContentPublishedAsync(
+        Guid exerciseId, ChannelContentSummaryDto content, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a published item was revised (<c>update</c> / <c>correction</c> /
+    /// <c>silent_rewrite</c>; FC-5). Client event <c>ContentRevised</c>; the payload is ONLY
+    /// <see cref="ContentRevisedDto"/> (<c>{ id, channelId, permalink, updatedScenarioTime, revisions[], headline, dek }</c>):
+    /// no body (the client refetches), no revision author or wall clock (XC-002). Exercise-wide only while
+    /// <c>IsLivePushOpen</c> holds; otherwise the staff group only (#375).
+    /// </summary>
+    /// <remarks>A no-op <b>default interface method</b> until story 09 (see <see cref="BroadcastContentPublishedAsync"/>).</remarks>
+    /// <param name="exerciseId">The owning exercise run (COR-001 scope).</param>
+    /// <param name="revised">The revise frame.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastContentRevisedAsync(
+        Guid exerciseId, ContentRevisedDto revised, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a published item was retracted (or soft-deleted; FC-5). Client event
+    /// <c>ContentRetracted</c>; the payload is ONLY <see cref="ContentRetractedDto"/>
+    /// (<c>{ id, channelId, permalink, retractedScenarioTime }</c>). Exercise-wide only while <c>IsLivePushOpen</c>
+    /// holds; otherwise the staff group only (#375).
+    /// </summary>
+    /// <remarks>A no-op <b>default interface method</b> until story 09 (see <see cref="BroadcastContentPublishedAsync"/>).</remarks>
+    /// <param name="exerciseId">The owning exercise run (COR-001 scope).</param>
+    /// <param name="retracted">The retract frame.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastContentRetractedAsync(
+        Guid exerciseId, ContentRetractedDto retracted, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that the active alert set changed (raised, cleared or expired; FC-5). Client
+    /// event <c>AlertsChanged</c>; the payload is <see cref="AlertsChangedDto"/>, the FULL active set, so a late or
+    /// reconnecting client converges. Never who raised an alert or its origin (XC-002). Exercise-wide only while
+    /// <c>IsLivePushOpen</c> holds; otherwise the staff group only (#375).
+    /// </summary>
+    /// <remarks>A no-op <b>default interface method</b> until story 09 (see <see cref="BroadcastContentPublishedAsync"/>).</remarks>
+    /// <param name="exerciseId">The owning exercise run (COR-001 scope).</param>
+    /// <param name="alerts">The full active alert set.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastAlertsChangedAsync(
+        Guid exerciseId, AlertsChangedDto alerts, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

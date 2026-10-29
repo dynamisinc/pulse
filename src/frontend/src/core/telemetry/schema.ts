@@ -277,6 +277,13 @@ export type TelemetryEventV0 = z.infer<typeof telemetryEventV0Schema>
  * backend), which emits `follow` / `unfollow` as distinct server-side event
  * types. It is listed here so an AAR/evaluator consumer that filters on this
  * vocabulary counts unfollows instead of silently dropping them.
+ *
+ * The block after `steering_action` is the December channels vocabulary
+ * (channels-foundation FC-6b, story 02), registered ONCE for every channel so
+ * no channel story edits this list. It equals the server's
+ * `ChannelTelemetryEventTypes.All`; both are pinned to
+ * `features/channels/contract/wireContract.json`. `article_view` and
+ * `press_release` above are reused by the channels, not re-registered.
  */
 export const KNOWN_TELEMETRY_EVENT_TYPES = [
   'post',
@@ -294,6 +301,36 @@ export const KNOWN_TELEMETRY_EVENT_TYPES = [
   'view',
   'search',
   'steering_action',
+  // FC-6b foundation
+  'content_dwell',
+  'content_published',
+  'content_revised',
+  'content_retracted',
+  'content_share',
+  'alert_issued',
+  'alert_cleared',
+  'outlet_action',
+  'content_schedule_failed',
+  // FC-6b E4 news
+  'content_video_play',
+  'content_video_progress',
+  'content_embed_open',
+  // FC-6b E5 press
+  'press_draft_created',
+  'press_embargo_set',
+  'press_embargo_cancelled',
+  'press_approval_requested',
+  'press_approval_approved',
+  'press_approval_returned',
+  // FC-6b E6 weather
+  'weather_zone_changed',
+  // FC-6b E3 portal (display_* registered, unused in December)
+  'portal_view',
+  'portal_module_click',
+  'resource_view',
+  'portal_config_changed',
+  'display_command',
+  'display_session_started',
 ] as const
 
 /**
