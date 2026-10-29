@@ -141,6 +141,15 @@ describe('finalizeSkinTokens', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ext\.news\.labelColor .* clamped/))
   })
 
+  it('measures the ext cap in UTF-8 bytes, not characters', () => {
+    const keys = Object.fromEntries('abcdefgh'.split('').map(k => [k, { type: 'string' as const }]))
+    registerSkinExtension('portal', { keys })
+    // 8 x 450 'é' = 3,600 characters (under 4,096) but 7,200 bytes (over).
+    const bag = Object.fromEntries('abcdefgh'.split('').map(k => [k, 'é'.repeat(450)]))
+    expect(JSON.stringify(bag).length).toBeLessThan(4096)
+    expect(finalizeSkinTokens({ ...NEUTRAL_SKIN_TOKENS, ext: { portal: bag } }, 'portal').ext).toBeUndefined()
+  })
+
   it('drops an ext object over the 4 KB cap', () => {
     registerSkinExtension('press', { keys: { letterhead: { type: 'string[]' }, contacts: { type: 'string[]' } } })
     const long = Array.from({ length: 20 }, () => 'x'.repeat(200))

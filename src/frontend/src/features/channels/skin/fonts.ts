@@ -91,6 +91,10 @@ export function fontFaceProblem(face: SkinFontFace, origin: string = pageOrigin(
 /** Faces already handed to `document.fonts`, by identity key. */
 const added = new Map<string, FontFace>()
 
+/** Failed load attempts per face; a face is retried on later mounts up to this many times. */
+const failures = new Map<string, number>()
+const MAX_FONT_ATTEMPTS = 2
+
 function faceKey(face: SkinFontFace): string {
   return [face.family, face.src, face.weight ?? '', face.style ?? '', face.unicodeRange ?? ''].join('|')
 }
@@ -105,7 +109,7 @@ export function loadSkinFonts(faces: readonly SkinFontFace[]): void {
   if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) return
   for (const face of faces) {
     const key = faceKey(face)
-    if (added.has(key)) continue
+    if (added.has(key) || (failures.get(key) ?? 0) >= MAX_FONT_ATTEMPTS) continue
     const fontFace = new FontFace(face.family, `url("${face.src}") format("woff2")`, {
       display: 'swap',
       ...(face.weight !== undefined ? { weight: String(face.weight) } : {}),
@@ -115,7 +119,9 @@ export function loadSkinFonts(faces: readonly SkinFontFace[]): void {
     added.set(key, fontFace)
     document.fonts.add(fontFace)
     fontFace.load().catch(() => {
-      // Free it so a later scope mount can retry (e.g. after a transient network failure).
+      // Free it so a later scope mount can retry once (a transient network failure), but stop
+      // re-requesting a file that is really missing or blocked.
+      failures.set(key, (failures.get(key) ?? 0) + 1)
       added.delete(key)
       document.fonts.delete(fontFace)
       reportSkinIssue(`font-load:${key}`, `font "${face.family}" (${face.src}) failed to load; ` +
@@ -127,4 +133,5 @@ export function loadSkinFonts(faces: readonly SkinFontFace[]): void {
 /** Test-only: forget which faces were added. */
 export function resetSkinFontsForTests(): void {
   added.clear()
+  failures.clear()
 }

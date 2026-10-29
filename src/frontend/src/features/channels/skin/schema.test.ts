@@ -78,6 +78,8 @@ describe('OutletSkinTokens schema', () => {
     expect(isFontStack('x; background: url(https://evil.example/f.woff2), serif')).toBe(false)
     expect(isFontStack('')).toBe(false)
     expect(isFontStack('"Foo, serif')).toBe(false)
+    expect(isFontStack('3Dumb, serif')).toBe(false)
+    expect(isFontStack("'3Dumb', serif")).toBe(true)
     expect(isFontStack("'Foo\", serif")).toBe(false)
   })
 

@@ -145,6 +145,32 @@ describe('SkinScope', () => {
     expect(scopeOf('ext').style.getPropertyValue(skinExtColorVar('news', 'label'))).toBe('')
   })
 
+  it('gives MUI primary and secondary the link colour when the accent is not text-safe', () => {
+    function PaletteProbe() {
+      const { palette } = useTheme()
+      return <span data-testid="pal" data-primary={palette.primary.main} data-secondary={palette.secondary.main} />
+    }
+    render(<SkinScope scopeId="p" tokens={tokensWith('#ff3399')}><PaletteProbe /></SkinScope>)
+    expect(screen.getByTestId('pal').dataset.primary).toBe(NEUTRAL_SKIN_TOKENS.palette.link)
+    expect(screen.getByTestId('pal').dataset.secondary).toBe(NEUTRAL_SKIN_TOKENS.palette.link)
+    expect(scopeOf('pal').style.getPropertyValue(SKIN_CSS_VARS.accent)).toBe('#ff3399')
+  })
+
+  it('keeps the same theme across re-renders with an equal inline token literal', () => {
+    const seen: Theme[] = []
+    function IdentityProbe() {
+      seen.push(useTheme())
+      return null
+    }
+    const view = (
+      <SkinScope scopeId="p" tokens={{ ...tokensWith('#0f2749') }}><IdentityProbe /></SkinScope>
+    )
+    const { rerender } = render(view)
+    rerender(<SkinScope scopeId="p" tokens={{ ...tokensWith('#0f2749') }}><IdentityProbe /></SkinScope>)
+    expect(seen.length).toBeGreaterThanOrEqual(2)
+    expect(seen[seen.length - 1]).toBe(seen[0])
+  })
+
   it('applies the a11y floor to a token object handed straight in', () => {
     const unreadable = { ...NEUTRAL_SKIN_TOKENS, palette: { ...NEUTRAL_SKIN_TOKENS.palette, text: '#eeeeee' } }
     render(<SkinScope scopeId="portal" tokens={unreadable}><Probe id="p" /></SkinScope>)
@@ -258,6 +284,16 @@ describe('fonts load lazily', () => {
     }, { timeout: 5000 })
     // The failed face is released, so the next scope mount retries it.
     expect(document.fonts.delete).toHaveBeenCalledTimes(1)
+    render(
+      <OutletSkinScope outlet={{ slug: 'n', skinKey: 'newsline7', skinOverrides: null }}>
+        <span />
+      </OutletSkinScope>,
+    )
+    expect(document.fonts.add).toHaveBeenCalledTimes(2)
+
+    // After the second failure it stops re-requesting the missing file.
+    const deletedTwice = () => expect(document.fonts.delete).toHaveBeenCalledTimes(2)
+    await vi.waitFor(deletedTwice, { timeout: 5000 })
     render(
       <OutletSkinScope outlet={{ slug: 'n', skinKey: 'newsline7', skinOverrides: null }}>
         <span />

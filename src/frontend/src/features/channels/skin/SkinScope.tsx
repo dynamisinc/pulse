@@ -66,8 +66,8 @@ export function SkinScope({ scopeId, tokens, skinKey, children }: SkinScopeProps
   // A function theme: MUI shallow-merges an OBJECT theme over the outer one, which would
   // carry an outer theme's custom keys (COBRA's) into the skin. A function replaces it.
   const muiTheme = useMemo(() => {
-    const theme = buildSkinMuiTheme(finalTokens)
-    return () => theme
+    const skinTheme = buildSkinMuiTheme(finalTokens)
+    return () => skinTheme
   }, [finalTokens])
   const cssVars = useMemo(() => buildSkinCssVars(finalTokens), [finalTokens])
   const parentVarNames = parent?.cssVarNames

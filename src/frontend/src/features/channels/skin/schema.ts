@@ -72,8 +72,9 @@ export const GENERIC_FONT_FAMILIES = [
 ] as const
 
 /** One family in a stack: a plain name, or a name in matching single or double quotes. */
-const FAMILY = /[A-Za-z0-9][A-Za-z0-9 -]*/.source
-const FAMILY_NAME = new RegExp(`^(?:${FAMILY}|'${FAMILY}'|"${FAMILY}")$`)
+const UNQUOTED = /[A-Za-z][A-Za-z0-9 -]*/.source
+const QUOTED = /[A-Za-z0-9][A-Za-z0-9 -]*/.source
+const FAMILY_NAME = new RegExp(`^(?:${UNQUOTED}|'${QUOTED}'|"${QUOTED}")$`)
 
 /**
  * A CSS font stack: comma-separated family names, no declarations, no
