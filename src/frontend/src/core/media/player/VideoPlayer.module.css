@@ -1,5 +1,5 @@
 /*
- * features/social/components/media/VideoPlayer.module.css
+ * core/media/player/VideoPlayer.module.css
  * ---------------------------------------------------------------------------
  * The inline video player. Reads the `--pc-*` tokens from the enclosing card
  * root. The frame's `aspect-ratio` is set inline from the contract's width/height

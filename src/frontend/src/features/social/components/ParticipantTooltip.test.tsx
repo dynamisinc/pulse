@@ -301,8 +301,8 @@ function cssVar(sheet: string, name: string): string {
 }
 
 describe('ParticipantTooltip — participant skin, not MUI or COBRA', () => {
-  const source = readSrcFile('features/social/components/ParticipantTooltip.tsx')
-  const sheet = readSrcFile('features/social/components/ParticipantTooltip.module.css')
+  const source = readSrcFile('core/media/player/ParticipantTooltip.tsx')
+  const sheet = readSrcFile('core/media/player/ParticipantTooltip.module.css')
   const tokens = readSrcFile('features/social/theme/social.module.css')
 
   it('imports no MUI and no COBRA staff component', () => {

@@ -1,0 +1,16 @@
+/*
+ * features/channels/primitives/dateline/ScenarioDateline.module.css
+ * Styled by the outlet skin's CSS variables (FC-3b), each with a neutral fallback so the
+ * dateline never shows a default-MUI or unstyled look outside a skin scope.
+ */
+
+.dateline {
+  font-family: var(--skin-type-body-family, system-ui, sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--skin-palette-text-muted, var(--skin-palette-text, #3d4451));
+}
+
+.updated {
+  white-space: nowrap;
+}

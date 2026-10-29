@@ -1,5 +1,5 @@
 /*
- * features/social/components/media/MediaFallbackTile.module.css
+ * core/media/player/MediaFallbackTile.module.css
  * ---------------------------------------------------------------------------
  * The alt-text placeholder tile. Reads the `--pc-*` tokens from the enclosing
  * card/grid root. It FILLS its nearest positioned ancestor (`position: absolute;

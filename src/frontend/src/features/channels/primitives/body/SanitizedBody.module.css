@@ -1,0 +1,69 @@
+/*
+ * features/channels/primitives/body/SanitizedBody.module.css
+ * Body typography from the outlet skin's CSS variables (FC-3b), each with a neutral
+ * fallback. Authors cannot style the body (no `style` / `class` in the allowlist).
+ */
+
+.body {
+  font-family: var(--skin-type-body-family, Georgia, 'Times New Roman', serif);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--skin-palette-text, #1b1f24);
+  overflow-wrap: break-word;
+}
+
+.body :where(p, ul, ol, blockquote, pre, figure, table) {
+  margin: 0 0 1em;
+}
+
+.body :where(h2, h3, h4) {
+  margin: 1.4em 0 0.5em;
+  font-family: var(--skin-type-hed-family, inherit);
+  line-height: 1.25;
+}
+
+/* Links are underlined, not colour-only (WCAG 1.4.1). */
+.body a {
+  color: var(--skin-palette-link, #0b57d0);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.body a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.body a:focus-visible {
+  outline: 3px solid var(--skin-palette-focus, var(--skin-palette-link, #0b57d0));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.body blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--skin-palette-rule, #c4c9d1);
+}
+
+.body hr {
+  border: 0;
+  border-top: 1px solid var(--skin-palette-rule, #c4c9d1);
+}
+
+/* A wide table scrolls inside itself instead of widening the page (mobile-first). */
+.body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.body :where(th, td) {
+  padding: 4px 8px;
+  border: 1px solid var(--skin-palette-rule, #c4c9d1);
+  text-align: left;
+}
+
+.body pulse-post {
+  display: block;
+  margin: 0 0 1em;
+}
