@@ -1,7 +1,7 @@
 # Story: Staff authoring and publish seam (console)
 
 **Feature:** Channels foundation  ·  **Epic:** E7 (console) with E4/E5/E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-020, NWS-013, NWS-022 (review queue for engine drafts), PRS-020, WX-012, PRT-004 (feature/pin), PRT-031, COR-041, XC-006  ·  **Design decisions:** D5 (console conventions), D4-002, D4-011  ·  **Issue:** —
+**Requirements:** NWS-020, NWS-013, NWS-022 (review queue for engine drafts), PRS-020, WX-012, PRT-004 (feature/pin), PRT-031, COR-041, XC-006  ·  **Design decisions:** D5 (console conventions), D4-002, D4-011  ·  **Issue:** #713
 **Stack:** frontend  ·  **World:** staff (COBRA)  ·  **Wave:** 4  ·  **Effort:** L
 
 ## Context

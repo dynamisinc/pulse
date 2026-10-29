@@ -1,7 +1,7 @@
 # Story: Outlet registry and defaults
 
 **Feature:** Channels foundation  ·  **Epic:** E4 (with E5/E6)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-001, NWS-002, NWS-004 (pairing), PRS-010, PRS-012, WX-001, WX-020, COR-030, COR-066  ·  **Design decisions:** D3-P1, D3-P2, D4-011  ·  **Issue:** —
+**Requirements:** NWS-001, NWS-002, NWS-004 (pairing), PRS-010, PRS-012, WX-001, WX-020, COR-030, COR-066  ·  **Design decisions:** D3-P1, D3-P2, D4-011  ·  **Issue:** #699
 **Stack:** backend  ·  **World:** participant read / staff write  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

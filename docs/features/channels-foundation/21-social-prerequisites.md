@@ -1,7 +1,7 @@
 # Story: Social prerequisites for channel consumers (read-only exports, bounded posts, compose-with-link)
 
 **Feature:** Channels foundation  ·  **Epic:** E2 (consumed by E3/E4)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-005, NWS-015, NWS-011, SOC-004, COR-015, XC-001, XC-004, NFR-001, NFR-002  ·  **Design decisions:** D1 (PostCard anatomy), D7-001  ·  **Issue:** —
+**Requirements:** PRT-005, NWS-015, NWS-011, SOC-004, COR-015, XC-001, XC-004, NFR-001, NFR-002  ·  **Design decisions:** D1 (PostCard anatomy), D7-001  ·  **Issue:** #717
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 1  ·  **Effort:** M
 **Added by:** the December consolidation pass — portal request **R-S1** plus news follow-ups **FU-5** (compose-with-link) and **FU-6a** (post-by-id). The social feature folders are complete; this is the
 one additive, no-behavior-change story that exposes what the channels need, so neither the portal nor news deep-imports Social internals or forks `PostCard`.

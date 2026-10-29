@@ -1,7 +1,7 @@
 # Story: Weather site read API (site, zone, widget summary)
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-001, WX-002, WX-003, WX-004, WX-021  ·  **Design decisions:** D4-009, D4-010  ·  **Issue:** —
+**Requirements:** WX-001, WX-002, WX-003, WX-004, WX-021  ·  **Design decisions:** D4-009, D4-010  ·  **Issue:** #754
 **Stack:** fullstack (backend + one TS contract file)  ·  **World:** participant (read)  ·  **Wave:** 4  ·  **Effort:** M
 
 ## Context

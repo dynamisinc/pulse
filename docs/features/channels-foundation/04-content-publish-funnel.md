@@ -1,7 +1,7 @@
 # Story: Content publish funnel and lifecycle
 
 **Feature:** Channels foundation  ·  **Epic:** E4 (with E5/E6)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-013, NWS-022, PRS-005, PRS-004, PRS-022, WX-010, WX-011, XC-004, XC-010, COR-053, NFR-004  ·  **Design decisions:** D3-P4, D4-002  ·  **Issue:** —
+**Requirements:** NWS-013, NWS-022, PRS-005, PRS-004, PRS-022, WX-010, WX-011, XC-004, XC-010, COR-053, NFR-004  ·  **Design decisions:** D3-P4, D4-002  ·  **Issue:** #700
 **Stack:** backend  ·  **World:** staff/data  ·  **Wave:** 2  ·  **Effort:** L
 
 ## Context

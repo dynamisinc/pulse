@@ -1,7 +1,7 @@
 # Story: Evergreen filler starter pack
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-030, PRT-031, XC-001, XC-010, NFR-004  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** PRT-030, PRT-031, XC-001, XC-010, NFR-004  ·  **Design decisions:** none  ·  **Issue:** #784
 **Stack:** backend  ·  **World:** foundation (staff action, participant-visible result)  ·  **Wave:** 4  ·  **Effort:** M  ·  **Priority:** Could (cut order 2)
 
 ## Context
@@ -23,4 +23,4 @@ Authoring UI and the background tag control (F17), the news article editor (E4 1
 Files: `Features/Portal/Seed/**` plus the versioned pack `filler-pack.v1.json`. Depends on the funnel's `ScheduleAsync` and `Background` support (F04/F07). Cast/outlet names come from the existing cast library; no new outlet is created here.
 
 ## Dependencies
-03 (portal wiring convention), F03, F04, F05, F07. Can run with 17-20, 22.
+03 (portal wiring convention), F03, F04, F05, F07. Can run with 17-19, 22.

@@ -1,7 +1,7 @@
 # Story: Alert source — raise, clear, history (backend)
 
 **Feature:** Channels foundation  ·  **Epic:** E3 (with E6/E4/E7)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-010, PRT-011, PRT-012, WX-011, NWS-012 (flash), SOC-072 (pilot bridge), CTL-021 (raise path), XC-001, XC-004  ·  **Design decisions:** D4-010, D7-002  ·  **Issue:** —
+**Requirements:** PRT-010, PRT-011, PRT-012, WX-011, NWS-012 (flash), SOC-072 (pilot bridge), CTL-021 (raise path), XC-001, XC-004  ·  **Design decisions:** D4-010, D7-002  ·  **Issue:** #706
 **Stack:** backend  ·  **World:** participant read / staff write  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

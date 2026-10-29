@@ -1,7 +1,7 @@
 # Story: Breaking-news slot (authorial, empty by default)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-012, NWS-002, NFR-001  ·  **Design decisions:** D3-P4, D3-P1 (slot 3), D3-P2  ·  **Issue:** —
+**Requirements:** NWS-012, NWS-002, NFR-001  ·  **Design decisions:** D3-P4, D3-P1 (slot 3), D3-P2  ·  **Issue:** #724
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** S
 
 ## Context

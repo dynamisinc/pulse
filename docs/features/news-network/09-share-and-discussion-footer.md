@@ -1,7 +1,7 @@
 # Story: Share to Pulse and the discussion footer (no comments, ever)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-011, NWS-015, NWS-004 (link target), NWS-030 (share-out), NWS-031, XC-004  ·  **Design decisions:** D3-P1 (slots 5 and 9), D3-P2  ·  **Issue:** —
+**Requirements:** NWS-011, NWS-015, NWS-004 (link target), NWS-030 (share-out), NWS-031, XC-004  ·  **Design decisions:** D3-P1 (slots 5 and 9), D3-P2  ·  **Issue:** #726
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

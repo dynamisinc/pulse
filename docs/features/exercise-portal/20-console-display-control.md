@@ -1,8 +1,10 @@
 # Story: Console: display control
 
-**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
+**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — **Deferred to post-December (Tom, 10/29, Q-35)**  ·  **Status:** Deferred (post-December)
 **Requirements:** PRT-040, PRT-041, COR-041, COR-052 (pairing), XC-004  ·  **Design decisions:** D5 (console conventions via F17)  ·  **Issue:** —
 **Stack:** frontend (staff)  ·  **World:** staff (COBRA)  ·  **Wave:** 4  ·  **Effort:** L
+
+> **Deferred (post-December).** Tom decided on 10/29 (Q-35) that December ships the portal first and **kiosk-lite only** (the existing shared view-only login on `/portal?display=1`, using the kiosk frame, no new credential, no remote control). The facilitator console (displays list, link/QR, rotate/revoke, "Show on screen", "Show next", playlist builder) moved out of December. **No GitHub issue is created for this story**; it is listed on the Portal feature issue. The text below is kept as the starting point for the post-December display-credential work; before it is scheduled, re-check it against what stories 18/19 actually shipped for kiosk-lite.
 
 ## Context
 The facilitator's remote: create and manage screens, get a display link/QR, choose what a screen shows, build a playlist and say "show this next". Staff world, COBRA, desktop-first but usable on a tablet at the front of the room. It pairs with module-based advancement (COR-052) only in that the facilitator advances the exercise clock elsewhere and the screen follows the content that publishes; no module UI here (Q-E3-7).

@@ -1,7 +1,7 @@
 # Story: Product components — severity chip, IBW grid, NWS product text
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-010, WX-011, NFR-001, NFR-008, COR-053  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** —
+**Requirements:** WX-010, WX-011, NFR-001, NFR-008, COR-053  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** #758
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context

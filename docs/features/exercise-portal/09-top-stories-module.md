@@ -1,7 +1,7 @@
 # Story: Top Stories module
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-004, PRT-006, PRT-030, PRT-031 (consumes), COR-053, XC-001, NFR-001, NFR-002, NFR-008  ·  **Design decisions:** D2-001, D2-004, D2-008  ·  **Issue:** —
+**Requirements:** PRT-004, PRT-006, PRT-030, PRT-031 (consumes), COR-053, XC-001, NFR-001, NFR-002, NFR-008  ·  **Design decisions:** D2-001, D2-004, D2-008  ·  **Issue:** #773
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** L
 
 ## Context
@@ -24,4 +24,4 @@ Pin/reorder UI (F17, 22), outlet pages (E4), search, per-user personalization, "
 Files: `features/portal/modules/topStories/**` (+ its `register.ts`, added to `modules/index.ts` by the orchestrator). Exports `useTopStories` for the kiosk portal slide (19). Reuse `ContentMedia`, `WatermarkSlot`, `ScenarioDateline`, `useChannelStream` (F09). Runs on fixtures until F06 is live.
 
 ## Dependencies
-02, 07, F06, F09, F13, F14, F15. Can run with 08, 10-16.
+02, 07, F06, F09, F13, F14, F15. Can run with 10-16.

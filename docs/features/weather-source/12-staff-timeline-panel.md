@@ -1,7 +1,7 @@
 # Story: Staff weather timeline panel
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-002, WX-003  ·  **Design decisions:** D4-011 (#9)  ·  **Issue:** —
+**Requirements:** WX-002, WX-003  ·  **Design decisions:** D4-011 (#9)  ·  **Issue:** #763
 **Stack:** frontend  ·  **World:** staff (COBRA)  ·  **Wave:** 5  ·  **Effort:** M
 
 ## Context
@@ -24,4 +24,4 @@ Drag-to-reschedule lanes, bulk offset, copy-timeline-between-exercises, a printa
 Files: `src/frontend/src/features/weather/staff/timeline/**` (`WeatherTimelinePanel.tsx`, `useWeatherTimeline.ts*`). COBRA via `@/theme/styledComponents`; React Query over `GET /api/weather/timeline` (mock until live); stream via `useChannelStream`; clock via `core/clock`.
 
 ## Dependencies
-05 (read model; mock until live), 11 (editors for the edit action), F17 (shell, routes), F09. Can run with 08, 09, 10, 13.
+05 (read model; mock until live), **11 (explicit: starts after 11 merges; the edit action delegates to 11's editors)**, F17 (shell, routes), F09. Can run with 08, 09, 10, 13 (not 11).

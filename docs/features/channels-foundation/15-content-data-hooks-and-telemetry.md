@@ -1,7 +1,7 @@
 # Story: Content data hooks and reader telemetry
 
 **Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-030, WX-022, PRT-006, XC-004, XC-001, COR-015  ·  **Design decisions:** D3-P2 (telemetry invisibility)  ·  **Issue:** —
+**Requirements:** NWS-030, WX-022, PRT-006, XC-004, XC-001, COR-015  ·  **Design decisions:** D3-P2 (telemetry invisibility)  ·  **Issue:** #711
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 4  ·  **Effort:** M
 
 ## Context

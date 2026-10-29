@@ -1,7 +1,7 @@
 # Story: Host-relative URLs and subdomain readiness
 
 **Feature:** Channels foundation  ·  **Epic:** E1 (cross-cutting)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** COR-008, COR-001, XC-001, NWS-011  ·  **Design decisions:** PDF-11 (#679, Tom 10/21)  ·  **Issue:** —
+**Requirements:** COR-008, COR-001, XC-001, NWS-011  ·  **Design decisions:** PDF-11 (#679, Tom 10/21)  ·  **Issue:** #715
 **Stack:** fullstack  ·  **World:** participant  ·  **Wave:** 4  ·  **Effort:** S
 
 ## Context

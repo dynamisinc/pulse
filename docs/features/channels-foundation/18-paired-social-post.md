@@ -1,7 +1,7 @@
 # Story: Paired social auto-post with link card
 
 **Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared) with E2  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-004, NWS-015, NWS-031 (discussion link), PRS-013, WX-011, WX-020, SOC-004, XC-004  ·  **Design decisions:** D4-004, D4-011, D3-P1 (slot 9)  ·  **Issue:** —
+**Requirements:** NWS-004, NWS-015, NWS-031 (discussion link), PRS-013, WX-011, WX-020, SOC-004, XC-004  ·  **Design decisions:** D4-004, D4-011, D3-P1 (slot 9)  ·  **Issue:** #714
 **Stack:** backend  ·  **World:** participant output / staff option  ·  **Wave:** 4  ·  **Effort:** M
 
 ## Context

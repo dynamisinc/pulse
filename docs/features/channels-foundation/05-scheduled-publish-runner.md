@@ -1,7 +1,7 @@
 # Story: Scheduler — embargo, scheduled publish, time jumps
 
 **Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-013, PRS-003, WX-002 (seam: snap on jump, freeze on suspend), COR-050/051, XC-004  ·  **Design decisions:** D4-003  ·  **Issue:** —
+**Requirements:** NWS-013, PRS-003, WX-002 (seam: snap on jump, freeze on suspend), COR-050/051, XC-004  ·  **Design decisions:** D4-003  ·  **Issue:** #701
 **Stack:** backend  ·  **World:** staff/data  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context

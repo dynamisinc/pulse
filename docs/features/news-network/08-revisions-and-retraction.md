@@ -1,7 +1,7 @@
 # Story: Corrections (two renderings), "Updated" stamp and retraction tombstone
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-013, NWS-010, COR-053, XC-010, NFR-001  ·  **Design decisions:** D3-P4, D3-P1 (slot 8), D3-P2  ·  **Issue:** —
+**Requirements:** NWS-013, NWS-010, COR-053, XC-010, NFR-001  ·  **Design decisions:** D3-P4, D3-P1 (slot 8), D3-P2  ·  **Issue:** #725
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Publish, embargo, revise and cross-post API
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-003, PRS-005, PRS-013, PRS-022 (publish event), PRS-020 (the single-gate server half)  ·  **Design decisions:** D4-002, D4-003, D4-004  ·  **Issue:** —
+**Requirements:** PRS-003, PRS-005, PRS-013, PRS-022 (publish event), PRS-020 (the single-gate server half)  ·  **Design decisions:** D4-002, D4-003, D4-004  ·  **Issue:** #741
 **Stack:** backend  ·  **World:** participant write path  ·  **Wave:** 4  ·  **Effort:** L
 
 ## Context

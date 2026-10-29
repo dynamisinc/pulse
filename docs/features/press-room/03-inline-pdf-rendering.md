@@ -1,8 +1,10 @@
 # Story: Inline PDF page rendering
 
-**Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
+**Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — **Deferred to Q1 / post-December (Tom, 10/29, Q-03)**  ·  **Status:** Deferred (post-December)
 **Requirements:** PRS-002 (rendered inline as pages, plus download), NFR-001, NFR-004  ·  **Design decisions:** D4-001  ·  **Issue:** —
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
+
+> **Deferred (post-December).** Tom decided on 10/29 (Q-03) that the December composer is rich text first and a PDF is a **download-only attachment** (story 02, narrowed). Inline PDF rendering is Q1 work. **No GitHub issue is created for this story**; it is listed on the Press feature issue. The December stand-ins are small components inside stories 07 (composer attachment chip) and 09 (release-page attachment block): a file name, size and a "Download PDF" link. The text below is kept as the Q1 starting point; when it is scheduled, re-check it against story 02's download-only serve (an `inline` variant and `pageCount`/`suggestedHeadline` would have to be added back there).
 
 ## Context
 A dropped PDF must read as the release's body, page by page, on a phone and on a desktop, in the composer and on the release page. One reusable component, no data fetching beyond the signed URL it is given.

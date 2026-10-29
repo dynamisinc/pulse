@@ -1,7 +1,7 @@
 # Story: Staff authoring — product and forecast editors
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-002, WX-010, WX-011, WX-012, WX-013, WX-020  ·  **Design decisions:** D4-009, D4-010, D4-011 (#9, #10), D5 STORY-UPDATES §E  ·  **Issue:** —
+**Requirements:** WX-002, WX-010, WX-011, WX-012, WX-013, WX-020  ·  **Design decisions:** D4-009, D4-010, D4-011 (#9, #10), D5 STORY-UPDATES §E  ·  **Issue:** #762
 **Stack:** frontend  ·  **World:** staff (COBRA)  ·  **Wave:** 5  ·  **Effort:** L
 
 ## Context
@@ -26,4 +26,4 @@ Publish/schedule/retract mechanics (F17), the timeline panel (12), zone admin (1
 Files: `src/frontend/src/features/weather/staff/{register.ts, ProductEditor.tsx, ForecastEditor.tsx, deliveryOptions/**, hooks/**}` — kept under `features/weather/` (not `features/controller/content/`, which is F17's). Reuse `features/channels/contract` types, `features/weather/contract`, `registerContentKindEditor`, `useZones` (owned by story 03). The participant preview mounts `OutletSkinScope` for `weather-desk`.
 
 ## Dependencies
-01, 07 (preview components), F17 (shell + `registerContentKindEditor`), F14; 05 for the follow-up actions (mock until live); 02 for zones (mock until live). Can run with 08, 09, 10, 12, 13.
+01, 07 (preview components), F17 (shell + `registerContentKindEditor`), F14; 05 for the follow-up actions (mock until live); 02 for zones (mock until live). Can run with 08, 09, 10, 13. **Story 12 waits for this story** (it hands editing to these editors), so 12 is not a parallel peer.

@@ -1,7 +1,7 @@
 # Story: News channel mount and routes
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-011, NWS-015, NWS-003 (route shell), COR-053  ·  **Design decisions:** D3-P1, D7-001  ·  **Issue:** —
+**Requirements:** NWS-011, NWS-015, NWS-003 (route shell), COR-053  ·  **Design decisions:** D3-P1, D7-001  ·  **Issue:** #719
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-4  ·  **Effort:** M
 
 ## Context

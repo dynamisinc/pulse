@@ -1,7 +1,7 @@
 # Story: Console approval-gate settings
 
 **Feature:** Press Room  ·  **Epic:** E5 (with E7)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-021 (exercise configuration of the gate)  ·  **Design decisions:** D4-007 sign-off #1 (per-exercise routing, per-org defaults), off by default  ·  **Issue:** —
+**Requirements:** PRS-021 (exercise configuration of the gate)  ·  **Design decisions:** D4-007 sign-off #1 (per-exercise routing, per-org defaults), off by default  ·  **Issue:** #750
 **Stack:** frontend  ·  **World:** staff (COBRA)  ·  **Wave:** 5  ·  **Effort:** S
 
 ## Context

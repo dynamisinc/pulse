@@ -1,7 +1,7 @@
 # Story: World-state shift and alert placement
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-010, PRT-011, COR-053, NFR-001, NFR-008  ·  **Design decisions:** D2-004 (amended by conflict C-2), D7-002  ·  **Issue:** —
+**Requirements:** PRT-010, PRT-011, COR-053, NFR-001, NFR-008  ·  **Design decisions:** D2-004 (amended by conflict C-2), D7-002  ·  **Issue:** #777
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context
@@ -23,4 +23,4 @@ Raising or clearing alerts (E7 / F10), the alert bar's design (final, D7-002), a
 Files: `features/portal/alerts/{usePortalWorldState.ts*, WorldStateFrame.tsx*, worldState.css*}`. Consumes the shell's `useAlerts` unchanged; uses the CSS variable names declared in 06's tokens. 17 mounts `WorldStateFrame`.
 
 ## Dependencies
-02, 06 (variable names), F11. Can run with 08-12, 14-16.
+02, 06 (variable names), F11. Can run with 09-12, 14-16.

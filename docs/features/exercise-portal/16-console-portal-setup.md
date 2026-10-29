@@ -1,7 +1,7 @@
 # Story: Console: portal setup
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-002, PRT-003, PRT-022, COR-041, XC-004  ·  **Design decisions:** D5 (console conventions via F17)  ·  **Issue:** —
+**Requirements:** PRT-002, PRT-003, PRT-022, COR-041, XC-004  ·  **Design decisions:** D5 (console conventions via F17)  ·  **Issue:** #780
 **Stack:** frontend (staff)  ·  **World:** staff (COBRA)  ·  **Wave:** 3  ·  **Effort:** L
 
 ## Context
@@ -17,10 +17,10 @@ The planner's/controller's screen for everything portal-specific that is not con
 - [ ] **A11y.** Given the surface, then every field is labelled, errors are announced, focus order is logical, status chips carry text, and axe is clean (NFR-001; the evaluator/staff-side gate).
 
 ## Out of Scope
-Display control (20), pinning stories (F17, 22), enabling channels (exercise settings), `band`/`grid` layouts and skin editing beyond logo (the token overrides stay API-only in December).
+Display control (20, Deferred post-December), pinning stories (F17, 22), enabling channels (exercise settings), `band`/`grid` layouts and skin editing beyond logo (the token overrides stay API-only in December).
 
 ## Technical Notes
 Files: `features/controller/portalSetup/**`. COBRA only; React Query against the axios client with the PC-3 guards (fixtures until 03/04 are live); FontAwesome icons; MUI 9 `sx`-only. Orchestrator adds the registry entry.
 
 ## Dependencies
-03, 04, 07 (module ids), F17 (console conventions, preview frame). Can run with 08-15.
+03, 04, 07 (module ids), F17 (console conventions, preview frame). Can run with 09-15.

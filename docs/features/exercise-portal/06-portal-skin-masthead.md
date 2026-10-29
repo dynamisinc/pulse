@@ -1,7 +1,7 @@
 # Story: Portal skin, masthead and dateline
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-002, COR-053, COR-066, NFR-001, NFR-008  ·  **Design decisions:** D2-001, D2-002 (broadcast direction only), D2-008  ·  **Issue:** —
+**Requirements:** PRT-002, COR-053, COR-066, NFR-001, NFR-008  ·  **Design decisions:** D2-001, D2-002 (broadcast direction only), D2-008  ·  **Issue:** #771
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context
@@ -22,4 +22,4 @@ Digital and print visual directions (D2-002, parked), the `band` / `grid` layout
 Files: `features/portal/skin/**`, `features/portal/masthead/**`. Mount with F13's token-object `<SkinScope scopeId="portal" tokens>` (not an outlet; FU-4a resolved) and register the portal tokens with `registerSkinTokens('portal', …)` + `registerSkinExtension('portal', …)` from this folder — no private scope, no F13 edit; `ScenarioDateline` (F14), `core/clock`. Fonts use F13's `registerSkinFonts` (self-hosted woff2 or system fallback; no third-party font CDN at runtime; CSP via PP-3).
 
 ## Dependencies
-02, F13 (`SkinScope`, `registerSkinTokens`), F14. Can run with 03, 04, 05, 07.
+02, F13 (`SkinScope`, `registerSkinTokens`), F14. Can run with 03, 04, 07.

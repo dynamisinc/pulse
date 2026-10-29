@@ -1,7 +1,7 @@
 # Story: Frozen wire contracts, client types and mock fixtures
 
 **Feature:** Channels foundation  ·  **Epic:** E3–E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-010, NWS-011, PRT-011, XC-002, XC-004, COR-053  ·  **Design decisions:** D3-P2, D4-010  ·  **Issue:** —
+**Requirements:** NWS-010, NWS-011, PRT-011, XC-002, XC-004, COR-053  ·  **Design decisions:** D3-P2, D4-010  ·  **Issue:** #698
 **Stack:** fullstack  ·  **World:** both (types only)  ·  **Wave:** 1  ·  **Effort:** M
 
 ## Context

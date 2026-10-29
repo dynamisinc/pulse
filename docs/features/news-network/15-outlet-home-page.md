@@ -1,7 +1,7 @@
 # Story: Outlet home page (lead story, sections, latest list)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-003, NWS-002, NWS-012, NWS-015, COR-053, NFR-001, NFR-002  ·  **Design decisions:** D3-P1, D3-P2 (layout enums)  ·  **Issue:** —
+**Requirements:** NWS-003, NWS-002, NWS-012, NWS-015, COR-053, NFR-001, NFR-002  ·  **Design decisions:** D3-P1, D3-P2 (layout enums)  ·  **Issue:** #732
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-2  ·  **Effort:** L
 
 ## Context

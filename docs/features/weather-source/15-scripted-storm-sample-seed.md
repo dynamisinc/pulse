@@ -1,7 +1,7 @@
 # Story: Scripted-storm sample timeline seed (stretch)
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-002  ·  **Design decisions:** D4-009, D4-010, D4-011  ·  **Issue:** —
+**Requirements:** WX-002  ·  **Design decisions:** D4-009, D4-010, D4-011  ·  **Issue:** #766
 **Stack:** backend  ·  **World:** staff  ·  **Wave:** 5  ·  **Effort:** S
 
 **Slip candidate.** Not required for the December exit criteria; it makes the epic's "scripted storm" demo (partly cloudy at StartEx, watch at hour 2, warning with radar at hour 3) one click.

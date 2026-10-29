@@ -1,7 +1,7 @@
 # Story: Console: Top Stories board
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-004, COR-041, XC-004  ·  **Design decisions:** D5 (console conventions via F17)  ·  **Issue:** —
+**Requirements:** PRT-004, COR-041, XC-004  ·  **Design decisions:** D5 (console conventions via F17)  ·  **Issue:** #785
 **Stack:** frontend (staff)  ·  **World:** staff (COBRA)  ·  **Wave:** 4  ·  **Effort:** S  ·  **Priority:** Could (cut order 1)
 
 ## Context
@@ -22,4 +22,4 @@ Authoring and the `background` toggle (F17), scheduling a pin for a scenario tim
 Files: `features/controller/topStoriesBoard/**`. React Query on F07 list/feature endpoints with guards; reuse F17 list row components. Orchestrator adds the registry entry.
 
 ## Dependencies
-F07 (`feature`, list), F17. Uses F07's `feature/reorder`. Can run with 17-21.
+F07 (`feature`, list), F17. Uses F07's `feature/reorder`. Can run with 17-19, 21.

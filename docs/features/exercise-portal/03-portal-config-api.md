@@ -1,7 +1,7 @@
 # Story: Portal config API (masthead and modules)
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-002, PRT-003, COR-030, COR-066, XC-001, XC-002, XC-004  ·  **Design decisions:** D2-001, D2-005  ·  **Issue:** —
+**Requirements:** PRT-002, PRT-003, COR-030, COR-066, XC-001, XC-002, XC-004  ·  **Design decisions:** D2-001, D2-005  ·  **Issue:** #769
 **Stack:** backend  ·  **World:** foundation (serves the participant portal; staff write)  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context
@@ -24,4 +24,4 @@ The console UI (16), the portal skin tokens themselves (06), resources (04), ena
 Files: `Features/Portal/Config/**`. Pattern: `OutletService` + `ParticipantShellConfigService` projection style; the `EngineCockpitStaffAuthorizationFilter` + role filter from the `InjectEndpoints` pattern. Wiring test via `WebApplicationFactory<Program>`. Orchestrator adds `AddPortal()/MapPortal()`.
 
 ## Dependencies
-01, 02, F03 (`ISkinOverridesValidator`), F08. Can run with 04, 05, 06, 07.
+01, 02, F03 (`ISkinOverridesValidator`), F08. Can run with 04, 06, 07.

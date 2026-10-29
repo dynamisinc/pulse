@@ -1,7 +1,7 @@
 # Story: Warning delivery — alert bar, @WeatherDesk post, lifecycle
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-011, WX-020, WX-002  ·  **Design decisions:** D4-010 (sign-offs #6, #7), D4-011 (#10), C-2, C-3  ·  **Issue:** —
+**Requirements:** WX-011, WX-020, WX-002  ·  **Design decisions:** D4-010 (sign-offs #6, #7), D4-011 (#10), C-2, C-3  ·  **Issue:** #755
 **Stack:** backend  ·  **World:** participant-visible effects, staff-controlled  ·  **Wave:** 4  ·  **Effort:** M
 
 ## Context

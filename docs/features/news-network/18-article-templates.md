@@ -1,7 +1,7 @@
 # Story: Article templates by story type
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-021, NWS-010  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** NWS-021, NWS-010  ·  **Design decisions:** none  ·  **Issue:** #735
 **Stack:** frontend  ·  **World:** staff  ·  **Wave:** E4-2  ·  **Effort:** S
 
 ## Context

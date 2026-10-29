@@ -1,7 +1,7 @@
 # Story: Portal weather widget tile and summary hook
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-021, WX-011, COR-053  ·  **Design decisions:** D4-010, D2-008  ·  **Issue:** —
+**Requirements:** WX-021, WX-011, COR-053  ·  **Design decisions:** D4-010, D2-008  ·  **Issue:** #761
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 5  ·  **Effort:** S
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Staff zone admin
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-004  ·  **Design decisions:** D4-009  ·  **Issue:** —
+**Requirements:** WX-004  ·  **Design decisions:** D4-009  ·  **Issue:** #764
 **Stack:** frontend  ·  **World:** staff (COBRA)  ·  **Wave:** 5  ·  **Effort:** S
 
 ## Context

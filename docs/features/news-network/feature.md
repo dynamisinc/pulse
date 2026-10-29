@@ -1,7 +1,7 @@
 # Feature: News network (outlets, articles, breaking and corrections)
 
 **Epic:** E4 — News Network  ·  **Phase:** 3, pulled forward — **December release (Tom, 10/21)**  ·  **Feature ref:** F4.1–F4.4 (one feature: the channel is a single rendering system)
-**World:** participant (articles, outlet pages, skins) + staff (article editor only)  ·  **Issue:** — (no GitHub issues created in this pass)
+**World:** participant (articles, outlet pages, skins) + staff (article editor only)  ·  **Issue:** #693 (Epic #689)
 
 ## Summary
 Four credibility-diverse news outlets (Newsline 7, The Courier-Ledger, The National Wire, The Scoop) rendered by **one** article/homepage system, each outlet a skin token file (D3-P1). Participants read
@@ -50,26 +50,26 @@ full clickable mockup (article states, homepage compositions, mobile, skin switc
 ## Stories
 | # | Story | Requirement(s) | Stack | E4 wave | Effort | Foundation deps | Status | Issue |
 |---|-------|----------------|-------|---------|--------|-----------------|--------|-------|
-| 01 | [Article kind descriptor](01-article-kind-descriptor.md) | NWS-010/012/013/022/032, NFR-004 | backend | 1 | M | F02, F04 | Not Started | — |
-| 02 | [News channel mount and routes](02-news-channel-mount.md) | NWS-011/015/003 | frontend | 4 | M | F08, F12, F13, F15 | Not Started | — |
-| 03 | [Outlet masthead and section nav](03-outlet-masthead-nav.md) | NWS-001/002/003 | frontend | 1 | M | F02, F13 | Not Started | — |
-| 04 | [Article page grid, head block, assembly](04-article-page-assembly.md) | NWS-010/011/030, COR-053 | frontend | 2 | L | F02, F13, F14, F15 (mock until live) | Not Started | — |
-| 05 | [Hero media, Beat video player, watermark chip](05-hero-media-beat-video.md) | NWS-014/032, NFR-008 | frontend | 1 | M | F02, F13, F14 | Not Started | — |
-| 06 | [Body, pull quotes, inline media, embedded Pulse posts](06-article-body-embeds.md) | NWS-010/015, NFR-004 | frontend | 1 | M | F02, F13, F14, F21 | Not Started | — |
-| 07 | [Breaking-news slot](07-breaking-slot.md) | NWS-012 | frontend | 1 | S | F02, F13, F14 | Not Started | — |
-| 08 | [Corrections, Updated stamp, retraction tombstone](08-revisions-and-retraction.md) | NWS-013, XC-010 | frontend | 1 | M | F02, F13, F14 | Not Started | — |
-| 09 | [Share to Pulse and discussion footer](09-share-and-discussion-footer.md) | NWS-011/015/030/031 | frontend | 1 | M | F02, F13, F14, F18, F21 | Not Started | — |
-| 10 | [Skin — Newsline 7](10-skin-newsline7.md) | NWS-002 | frontend | 1 | S | F13 | Not Started | — |
-| 11 | [Skin — The Courier-Ledger](11-skin-courier-ledger.md) | NWS-002 | frontend | 1 | S | F13 | Not Started | — |
-| 12 | [Skin — The National Wire](12-skin-national-wire.md) | NWS-002 | frontend | 1 | S | F13, F14 | Not Started | — |
-| 13 | [Skin — The Scoop](13-skin-the-scoop.md) | NWS-002 | frontend | 1 | S | F13, F03 | Not Started | — |
-| 14 | [Scoop clutter modules](14-scoop-clutter-modules.md) | NWS-002/003 | frontend | 1 | M | F13 | Not Started | — |
-| 15 | [Outlet home page](15-outlet-home-page.md) | NWS-003, NFR-002 | frontend | 2 | L | F13, F14, F15, F09 | Not Started | — |
-| 16 | [Section pages](16-section-pages.md) | NWS-001/003 | frontend | 3 | S | F15 | Not Started | — |
-| 17 | [Article editor](17-article-editor.md) | NWS-020/022 | frontend (staff) | 3 | L | F17, F07 | Not Started | — |
-| 18 | [Article templates](18-article-templates.md) | NWS-021 | frontend (staff) | 2 | S | — (E4 01 only) | Not Started | — |
-| 19 | [E4 telemetry beyond FC-6](19-news-telemetry.md) | NWS-030/014, XC-004 | frontend | 2 | S | F15 | Not Started | — |
-| 20 | [News conformance](20-news-conformance.md) | XC-001, NFR-001 (#680), NFR-004/008 | testing | 5 | M | F20, F06, F07 | Not Started | — |
+| 01 | [Article kind descriptor](01-article-kind-descriptor.md) | NWS-010/012/013/022/032, NFR-004 | backend | 1 | M | F02, F04 | Not Started | #718 |
+| 02 | [News channel mount and routes](02-news-channel-mount.md) | NWS-011/015/003 | frontend | 4 | M | F08, F12, F13, F15 | Not Started | #719 |
+| 03 | [Outlet masthead and section nav](03-outlet-masthead-nav.md) | NWS-001/002/003 | frontend | 1 | M | F02, F13 | Not Started | #720 |
+| 04 | [Article page grid, head block, assembly](04-article-page-assembly.md) | NWS-010/011/030, COR-053 | frontend | 2 | L | F02, F13, F14, F15 (mock until live) | Not Started | #721 |
+| 05 | [Hero media, Beat video player, watermark chip](05-hero-media-beat-video.md) | NWS-014/032, NFR-008 | frontend | 1 | M | F02, F13, F14 | Not Started | #722 |
+| 06 | [Body, pull quotes, inline media, embedded Pulse posts](06-article-body-embeds.md) | NWS-010/015, NFR-004 | frontend | 1 | M | F02, F13, F14, F21 | Not Started | #723 |
+| 07 | [Breaking-news slot](07-breaking-slot.md) | NWS-012 | frontend | 1 | S | F02, F13, F14 | Not Started | #724 |
+| 08 | [Corrections, Updated stamp, retraction tombstone](08-revisions-and-retraction.md) | NWS-013, XC-010 | frontend | 1 | M | F02, F13, F14 | Not Started | #725 |
+| 09 | [Share to Pulse and discussion footer](09-share-and-discussion-footer.md) | NWS-011/015/030/031 | frontend | 1 | M | F02, F13, F14, F18, F21 | Not Started | #726 |
+| 10 | [Skin — Newsline 7](10-skin-newsline7.md) | NWS-002 | frontend | 1 | S | F13 | Not Started | #727 |
+| 11 | [Skin — The Courier-Ledger](11-skin-courier-ledger.md) | NWS-002 | frontend | 1 | S | F13 | Not Started | #728 |
+| 12 | [Skin — The National Wire](12-skin-national-wire.md) | NWS-002 | frontend | 1 | S | F13, F14 | Not Started | #729 |
+| 13 | [Skin — The Scoop](13-skin-the-scoop.md) | NWS-002 | frontend | 1 | S | F13, F03 | Not Started | #730 |
+| 14 | [Scoop clutter modules](14-scoop-clutter-modules.md) | NWS-002/003 | frontend | 1 | M | F13 | Not Started | #731 |
+| 15 | [Outlet home page](15-outlet-home-page.md) | NWS-003, NFR-002 | frontend | 2 | L | F13, F14, F15, F09 | Not Started | #732 |
+| 16 | [Section pages](16-section-pages.md) | NWS-001/003 | frontend | 3 | S | F15 | Not Started | #733 |
+| 17 | [Article editor](17-article-editor.md) | NWS-020/022 | frontend (staff) | 3 | L | F17, F07 | Not Started | #734 |
+| 18 | [Article templates](18-article-templates.md) | NWS-021 | frontend (staff) | 2 | S | — (E4 01 only) | Not Started | #735 |
+| 19 | [E4 telemetry beyond FC-6](19-news-telemetry.md) | NWS-030/014, XC-004 | frontend | 2 | S | F15 | Not Started | #736 |
+| 20 | [News conformance](20-news-conformance.md) | XC-001, NFR-001 (#680), NFR-004/008 | testing | 5 | M | F20, F06, F07 | Not Started | #737 |
 
 Totals: 20 stories — 3 L (04, 15, 17), 9 M, 8 S; 1 backend (01), 2 staff-world (17, 18), 1 testing (20), the rest participant frontend. `F##` = channels-foundation story number.
 

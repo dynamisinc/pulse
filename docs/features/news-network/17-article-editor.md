@@ -1,7 +1,7 @@
 # Story: Article editor (registered kind editor)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-020, NWS-012, NWS-013, NWS-022, NWS-004 (paired-post option surfaced), NFR-004, COR-041  ·  **Design decisions:** D5 console patterns; D3-P4 (correction choice)  ·  **Issue:** —
+**Requirements:** NWS-020, NWS-012, NWS-013, NWS-022, NWS-004 (paired-post option surfaced), NFR-004, COR-041  ·  **Design decisions:** D5 console patterns; D3-P4 (correction choice)  ·  **Issue:** #734
 **Stack:** frontend  ·  **World:** staff (COBRA); preview shows the participant world  ·  **Wave:** E4-3  ·  **Effort:** L
 
 ## Context

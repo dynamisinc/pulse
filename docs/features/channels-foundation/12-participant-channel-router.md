@@ -1,7 +1,7 @@
 # Story: Participant channel router and landing
 
 **Feature:** Channels foundation  ·  **Epic:** E3 (shell: E1)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-001, PRT-003, PRT-020, COR-004, COR-060, COR-061, XC-002  ·  **Design decisions:** D7-001, D7-005, D2-005  ·  **Issue:** —
+**Requirements:** PRT-001, PRT-003, PRT-020, COR-004, COR-060, COR-061, XC-002  ·  **Design decisions:** D7-001, D7-005, D2-005  ·  **Issue:** #708
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context

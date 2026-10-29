@@ -1,13 +1,13 @@
 # Story: Approval gate backend
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-021, EVL-010 (approval latency capture)  ·  **Design decisions:** D4-002 (cancel-embargo notifies approvers + audit), D4-007, D4-007 sign-off #1, C-1  ·  **Issue:** —
+**Requirements:** PRS-021, EVL-010 (approval latency capture)  ·  **Design decisions:** D4-002 (cancel-embargo notifies approvers + audit), D4-007, D4-007 sign-off #1, C-1  ·  **Issue:** #742
 **Stack:** backend  ·  **World:** participant write path (+ staff settings API)  ·  **Wave:** 4  ·  **Effort:** L
 
 ## Context
 An optional, off-by-default gate: a participant release is held until an approver approves it. The approver is a **participant role** (JIC lead, legal reviewer) **or a controller playing that role**
 (epic PRS-021); per C-1 the gate is participant paper regardless of who operates it, so this story exposes participant-session routes that a controller reaches through the participant approval view.
-Routing is per-exercise config with per-org defaults (D4-007 sign-off #1). Owns **M5**, the last entry of the foundation [migration ledger](../channels-foundation/implementation.md#migration-ledger) (FU-4 resolved).
+Routing is per-exercise config with per-org defaults (D4-007 sign-off #1). Owns **M2** (formerly M5), the **only** migration after F01's M1 in the foundation [migration ledger](../channels-foundation/implementation.md#migration-ledger) (FU-4 resolved; Q-28, Tom 10/29: press's audit tables stay a separate, later migration).
 
 ## Acceptance Criteria
 - [ ] **Off by default.** Given a fresh exercise, then `ApprovalGate.EvaluateAsync` returns `Pass` for every release and no approval rows exist; the participant publish path is unchanged from story 05.
@@ -21,16 +21,16 @@ Routing is per-exercise config with per-org defaults (D4-007 sign-off #1). Owns 
 - [ ] **Audit trail ("wire audit trace").** Given requests, approvals, returns and embargo cancellations, then `PressReleaseEvent` rows form an append-only audit visible to approvers and the author's org (display names, scenario time) and to staff in full; never edited, soft-delete only.
 - [ ] **Isolation and no leaks (XC-001/002).** Approvers see only their routed orgs' pending releases; cross-exercise ids are 404; participant DTOs never expose approver wall-clock times or staff fields.
 - [ ] **Controller bypass is audited (Q-E5-6).** Given a staff publish of a release that is `pending_approval`, then F04's `IContentPublishGate` (registered here) returns `Allow("controller bypass of pending approval")`, the funnel records it as `payload.gateNote`, a `PressReleaseEvent` audit row is written, and the pending approval is closed; no participant route can bypass.
-- [ ] **Migration (M5).** One migration adds `PressReleaseEvent` and `PressApprovalSettings` (both `IExerciseScoped`, soft-deleted, behind the central filter), idempotent-script safe, merged **after M4 (F16)** per the ledger and regenerated against that snapshot.
+- [ ] **Migration (M2).** One migration adds `PressReleaseEvent` and `PressApprovalSettings` (both `IExerciseScoped`, soft-deleted, behind the central filter), idempotent-script safe, merged **after M1 (F01)** per the ledger and regenerated against that snapshot; it needs nothing else (the portal, zone and inject schema are already in M1), and its id carries the `Channels_M2` token.
 
 ## Out of Scope
 The approval UI (10), the settings UI (14), notifications beyond the wire (D4-007 sign-off #3), multi-stage approval chains (single approval step only), approval of revisions to an already-published release (revise-own is immediate, PRS-005), staff-chrome approve controls (C-1).
 
 ## Technical Notes
-Files: `Features/Press/Approval/**`, `Data/Entities/Press*.cs`, migration **M5**. Implements `IReleaseApprovalGate` (story 01), `IApprovalNotifier` (used by 05) and an `IContentPublishGate` (F04) for the audited staff bypass (Q-E5-6).
+Files: `Features/Press/Approval/**`, `Data/Entities/Press*.cs`, migration **M2**. Implements `IReleaseApprovalGate` (story 01), `IApprovalNotifier` (used by 05) and an `IContentPublishGate` (F04) for the audited staff bypass (Q-E5-6).
 
 ## Dependencies
-Stories 01, 04; foundation F04. Can run with 05, 07, F15, F16, F17, F18, F19. Migration M5 is orchestrator-serialized after F16's M4 (ledger).
+Stories 01, 04; foundation F04. Can run with 05, 07, F15, F16, F17, F18, F19. Migration M2 is orchestrator-serialized after F01's M1 only (ledger); it is no longer ordered behind F16.
 
 ## Tests
 Gate matrix (off/on/per-org), return-without-note, self-approval, diff correctness, authz (controller via participant route), migration test, isolation additions, wiring test.

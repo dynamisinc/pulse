@@ -1,7 +1,7 @@
 # Story: Realtime fan-out for channel content
 
 **Feature:** Channels foundation  ·  **Epic:** E3/E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-006 (live-updating without refresh), NWS-013, XC-001, XC-002, NFR-002 (burst), NFR-001 (live region)  ·  **Design decisions:** D7-002  ·  **Issue:** —
+**Requirements:** PRT-006 (live-updating without refresh), NWS-013, XC-001, XC-002, NFR-002 (burst), NFR-001 (live region)  ·  **Design decisions:** D7-002  ·  **Issue:** #705
 **Stack:** fullstack  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

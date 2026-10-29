@@ -1,8 +1,10 @@
 # Story: Display state and remote-control API
 
-**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
+**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — **Deferred to post-December (Tom, 10/29, Q-35)**  ·  **Status:** Deferred (post-December)
 **Requirements:** PRT-040, PRT-041, XC-001, XC-002, XC-004  ·  **Design decisions:** none (Master decision 10)  ·  **Issue:** —
 **Stack:** backend  ·  **World:** foundation  ·  **Wave:** 3  ·  **Effort:** M
+
+> **Deferred (post-December).** Tom decided on 10/29 (Q-35) that December ships the portal first and **kiosk-lite only** (the existing shared view-only login on `/portal?display=1`, using the kiosk frame, no new credential, no remote control). Per-display state and the remote-control API (pin a target, playlist, show-next, display read with ETag, connected status) moved out of December. **No GitHub issue is created for this story**; it is listed on the Portal feature issue. The text below is kept as the starting point for the post-December display-credential work; before it is scheduled, re-check it against what stories 18/19 actually shipped for kiosk-lite.
 
 ## Context
 PRT-040: a facilitator chooses a surface (the portal, a feed, a specific article/post/warning), builds an auto-cycling playlist, and says "show this next". This story owns that state per display and the two sides of it: the read a screen polls and the commands a facilitator sends. December ships **5-second ETag polling** (PP-4: a per-display push group is parked). Pairs with module-based time advancement (COR-052) only through content: a clock jump publishes scheduled items and the screen shows them; no direct coupling.

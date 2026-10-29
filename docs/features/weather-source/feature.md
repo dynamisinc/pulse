@@ -1,7 +1,7 @@
 # Feature: Weather source — The Weather Desk (E6)
 
 **Epic:** E6 — Weather Source  ·  **Phase:** 3, pulled forward — **December release (Tom, 10/21)**  ·  **Feature ref:** F6.1 Weather site, F6.2 Warning products & alerts, F6.3 Presence in the wider world
-**World:** participant (the Weather Desk, institutional skin) + staff (authoring/timeline in the controller console)  ·  **Issue:** — (no GitHub issues created in this pass)
+**World:** participant (the Weather Desk, institutional skin) + staff (authoring/timeline in the controller console)  ·  **Issue:** #695 (Epic #691)
 
 ## Summary
 The authoritative, fictional weather service: a government-data-site-style destination with current conditions, a multi-day forecast per zone, an active-alerts panel and
@@ -38,26 +38,27 @@ Decisions recorded here: **C-2** — every warning product raises `emergency` th
 ## Stories
 | # | Story | Requirement(s) | Stack | Wave | Effort | Status | Issue |
 |---|-------|----------------|-------|------|--------|--------|-------|
-| 01 | [Product and forecast payload contract, kind descriptors](01-product-forecast-contract-and-kinds.md) | WX-010, WX-003, WX-013, WX-002 | fullstack | 2 | M | Not Started | — |
-| 02 | [Zone model, service and API](02-zone-model-and-api.md) | WX-004 | backend | 3 | M | Not Started | — |
-| 03 | [Weather site read API (site, zone, widget summary)](03-weather-site-read-api.md) | WX-001, WX-002, WX-003, WX-004, WX-021 | backend | 4 | M | Not Started | — |
-| 04 | [Warning delivery: alert bar, @WeatherDesk post, lifecycle](04-warning-delivery-alert-and-post.md) | WX-011, WX-020, WX-002 | backend | 4 | M | Not Started | — |
-| 05 | [Staff timeline read model and issue-update helper](05-staff-timeline-api.md) | WX-002, WX-003, WX-012 | backend | 4 | S | Not Started | — |
-| 06 | [Weather channel mount, route shell and Weather Desk skin](06-channel-mount-and-skin.md) | WX-001, NFR-001, NFR-008 | frontend | 4 | M | Not Started | — |
-| 07 | [Product components: severity chip, IBW grid, NWS product text](07-product-components.md) | WX-010, WX-011, NFR-001 | frontend | 3 | M | Not Started | — |
-| 08 | [Weather site home: conditions, forecast, alerts panel, zone selector](08-weather-site-home.md) | WX-001, WX-003, WX-004, WX-011 | frontend | 5 | L | Not Started | — |
-| 09 | [Product and forecast permalink page](09-product-permalink-page.md) | WX-010, WX-013, WX-022, XC-010 | frontend | 5 | M | Not Started | — |
-| 10 | [Portal weather widget tile and summary hook](10-portal-widget-tile.md) | WX-021, WX-011 | frontend | 5 | S | Not Started | — |
-| 11 | [Staff authoring: product and forecast editors](11-staff-product-forecast-editors.md) | WX-002, WX-010, WX-011, WX-012, WX-013, WX-020 | frontend | 5 | L | Not Started | — |
-| 12 | [Staff weather timeline panel](12-staff-timeline-panel.md) | WX-002, WX-003 | frontend | 5 | M | Not Started | — |
-| 13 | [Staff zone admin](13-staff-zone-admin.md) | WX-004 | frontend | 5 | S | Not Started | — |
-| 14 | [Weather conformance: isolation, watermark, a11y/508, fictional-NWS guard](14-weather-conformance.md) | XC-001, NFR-001/008, PDF-12 (#680), WX-001 | testing | 6 | M | Not Started | — |
-| 15 | [Scripted-storm sample timeline seed (stretch)](15-scripted-storm-sample-seed.md) | WX-002 | backend | 5 | S | Not Started | — |
+| 01 | [Product and forecast payload contract, kind descriptors](01-product-forecast-contract-and-kinds.md) | WX-010, WX-003, WX-013, WX-002 | fullstack | 2 | M | Not Started | #752 |
+| 02 | [Zone model, service and API](02-zone-model-and-api.md) | WX-004 | backend | 3 | M | Not Started | #753 |
+| 03 | [Weather site read API (site, zone, widget summary)](03-weather-site-read-api.md) | WX-001, WX-002, WX-003, WX-004, WX-021 | backend | 4 | M | Not Started | #754 |
+| 04 | [Warning delivery: alert bar, @WeatherDesk post, lifecycle](04-warning-delivery-alert-and-post.md) | WX-011, WX-020, WX-002 | backend | 4 | M | Not Started | #755 |
+| 05 | [Staff timeline read model and issue-update helper](05-staff-timeline-api.md) | WX-002, WX-003, WX-012 | backend | 4 | S | Not Started | #756 |
+| 06 | [Weather channel mount, route shell and Weather Desk skin](06-channel-mount-and-skin.md) | WX-001, NFR-001, NFR-008 | frontend | 4 | M | Not Started | #757 |
+| 07 | [Product components: severity chip, IBW grid, NWS product text](07-product-components.md) | WX-010, WX-011, NFR-001 | frontend | 3 | M | Not Started | #758 |
+| 08 | [Weather site home: conditions, forecast, alerts panel, zone selector](08-weather-site-home.md) | WX-001, WX-003, WX-004, WX-011 | frontend | 5 | L | Not Started | #759 |
+| 09 | [Product and forecast permalink page](09-product-permalink-page.md) | WX-010, WX-013, WX-022, XC-010 | frontend | 5 | M | Not Started | #760 |
+| 10 | [Portal weather widget tile and summary hook](10-portal-widget-tile.md) | WX-021, WX-011 | frontend | 5 | S | Not Started | #761 |
+| 11 | [Staff authoring: product and forecast editors](11-staff-product-forecast-editors.md) | WX-002, WX-010, WX-011, WX-012, WX-013, WX-020 | frontend | 5 | L | Not Started | #762 |
+| 12 | [Staff weather timeline panel](12-staff-timeline-panel.md) | WX-002, WX-003 | frontend | 5 | M | Not Started | #763 |
+| 13 | [Staff zone admin](13-staff-zone-admin.md) | WX-004 | frontend | 5 | S | Not Started | #764 |
+| 14 | [Weather conformance: isolation, watermark, a11y/508, fictional-NWS guard](14-weather-conformance.md) | XC-001, NFR-001/008, PDF-12 (#680), WX-001 | testing | 6 | M | Not Started | #765 |
+| 15 | [Scripted-storm sample timeline seed (stretch)](15-scripted-storm-sample-seed.md) | WX-002 | backend | 5 | S | Not Started | #766 |
 
 ## Dependencies
 **Channels foundation** (`docs/features/channels-foundation/`, story numbers prefixed `F`): F01 data model, F02 contracts, F03 outlet registry (Weather Desk outlet + `@WeatherDesk` pairing), F04 publish funnel,
 F05 scheduler, F06 participant read API, F07 staff content API, F08 enablement gate, F09 realtime, F10 alert source, F12 router, F13 skin system, F14 primitives, F15 data hooks + telemetry, F17 staff
 authoring seam, F18 paired post, F20 conformance kit. Nothing in E6 is a prerequisite for another channel except the widget (story 10 → E3 portal, which consumes it).
+**Migrations (Q-28, Tom 10/29):** E6 adds none; `WeatherZone` is created by F01's M1. **Same-wave serial edge (inconsistency I-4 fixed, 10/29):** story **12 waits for story 11** (the timeline's edit action delegates to 11's editors), so 11 and 12 are not parallel peers; both are in the combined wave CW5 with 12 starting after 11 merges.
 
 ## Design notes
 - **Two worlds.** The Weather Desk is the *one* participant surface that should feel like a government data site (dense, plain, monospace product text) — and it is still a participant surface: skinned via

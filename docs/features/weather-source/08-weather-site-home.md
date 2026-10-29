@@ -1,7 +1,7 @@
 # Story: Weather site home — conditions, forecast, alerts panel, zone selector
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-001, WX-003, WX-004, WX-011, COR-053  ·  **Design decisions:** D4-009, D4-010, D7-002  ·  **Issue:** —
+**Requirements:** WX-001, WX-003, WX-004, WX-011, COR-053  ·  **Design decisions:** D4-009, D4-010, D7-002  ·  **Issue:** #759
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 5  ·  **Effort:** L
 
 ## Context

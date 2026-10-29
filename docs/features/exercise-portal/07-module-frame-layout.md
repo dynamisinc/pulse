@@ -1,7 +1,7 @@
 # Story: Module frame, layout and clean hiding
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-003, PRT-020, PRT-006, NFR-001, XC-004  ·  **Design decisions:** D2-005, D2-003 (`anchor` only)  ·  **Issue:** —
+**Requirements:** PRT-003, PRT-020, PRT-006, NFR-001, XC-004  ·  **Design decisions:** D2-005, D2-003 (`anchor` only)  ·  **Issue:** #772
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context
@@ -23,4 +23,4 @@ Any module's content, `band` / `grid` layouts, per-user layout customization, dr
 Files: `features/portal/layout/**`. MUI 9 `sx`-only; CSS grid via `grid-template-areas`; FontAwesome icons. The harness (`renderPortalSubset(subset, fixtures)`) is exported for 09-15 and 23.
 
 ## Dependencies
-02, F08 (`useEnabledChannels`), F14. Can run with 03, 04, 05, 06.
+02, F08 (`useEnabledChannels`), F14. Can run with 03, 04, 06.

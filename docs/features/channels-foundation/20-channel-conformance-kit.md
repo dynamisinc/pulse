@@ -1,7 +1,7 @@
 # Story: Channel conformance kit (isolation, stored-XSS, a11y / Section 508)
 
 **Feature:** Channels foundation  ·  **Epic:** cross-cutting  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** XC-001, XC-002, NFR-001, NFR-004, NFR-008, PDF-12 (#680 Section 508)  ·  **Design decisions:** D0 §4  ·  **Issue:** —
+**Requirements:** XC-001, XC-002, NFR-001, NFR-004, NFR-008, PDF-12 (#680 Section 508)  ·  **Design decisions:** D0 §4  ·  **Issue:** #716
 **Stack:** testing  ·  **World:** both  ·  **Wave:** 5  ·  **Effort:** M
 
 ## Context
@@ -16,7 +16,7 @@ covered: the standing isolation suite, the stored-XSS corpus, and the axe sweep 
 - [ ] **Scenario-time guard.** A static check fails the build on `Date.now`, `new Date()` display formatting, `toLocale*` or relative-time libraries in participant channel code (COR-053); a fixture asserts no wall-clock string appears in participant DTOs.
 - [ ] **Watermark and no-enterprise-look guards.** A test fails if a high-risk kind renders without `WatermarkSlot`, if chrome and watermark are both off, or if a participant channel module imports `@/theme`/`styledComponents` (two-worlds).
 - [ ] **Telemetry conformance.** `channelConformance.telemetry` asserts a publish emits exactly one server event of the FC-6 type with wall + scenario time, actor incl. acting human, and a view emits exactly one `article_view` with a session/participant id.
-- [ ] **Migration-ledger test.** Given the migration history, then the five ledger migrations (M1 F01, M2 portal 01, M3 weather 02, M4 F16, M5 press 06) appear in that order once present, each carries its `Channels_M<n>` token, no other migration touches their tables, and the model snapshot matches `Up` on a clean database; features not yet merged are skipped, not failed.
+- [ ] **Migration-ledger test.** Given the migration history, then the two ledger migrations (**M1 F01** — content tables plus the folded `PortalConfig`, `PortalResource`, `WeatherZone` and `InjectItem.ContentItemId` — and **M2 press 06**, the approval audit tables) appear in that order once present, each carries its `Channels_M<n>` token, no migration other than M1 creates the folded tables/column (a portal, weather or F16 migration fails the test), no other migration touches their tables, and the model snapshot matches `Up` on a clean database; features not yet merged are skipped, not failed.
 - [ ] **Docs.** A short `README` lists how a channel opts in (three calls) and which PDF-12 evidence each check feeds.
 
 ## Out of Scope

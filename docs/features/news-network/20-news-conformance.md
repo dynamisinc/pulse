@@ -1,7 +1,7 @@
 # Story: News conformance (skin matrix, CANNOT-list invariance, isolation, a11y/508)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-002, NWS-011, NWS-030, NWS-031, NWS-032, XC-001, NFR-001 (PDF-12 #680), NFR-004, NFR-008, COR-053  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** —
+**Requirements:** NWS-002, NWS-011, NWS-030, NWS-031, NWS-032, XC-001, NFR-001 (PDF-12 #680), NFR-004, NFR-008, COR-053  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** #737
 **Stack:** testing  ·  **World:** participant  ·  **Wave:** E4-5  ·  **Effort:** M
 
 ## Context

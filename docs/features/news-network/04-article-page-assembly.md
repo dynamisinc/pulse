@@ -1,7 +1,7 @@
 # Story: Article page grid, head block and assembly
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-010, NWS-011, NWS-002, NWS-030 (invisibility), COR-053, NFR-001  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** —
+**Requirements:** NWS-010, NWS-011, NWS-002, NWS-030 (invisibility), COR-053, NFR-001  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** #721
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-2  ·  **Effort:** L
 
 ## Context

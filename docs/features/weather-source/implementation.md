@@ -27,7 +27,7 @@ authoring shell (F17), paired post machinery (F18). WX-012 is therefore F16 + F1
 | Story | Approach | Key files (owns) | Exports (that others import) |
 |-------|----------|------------------|------------------------------|
 | 01 | Payload records + async validators (`ValidatePayloadAsync`) + sanitizer profile reuse; two `IContentKindDescriptor` impls (incl. `ResolvePublishOptions` reading the `delivery` block) registered by `AddWeather()`; TS mirror with guards and a pure `productState`; fictional fixtures. Defines `IWeatherZoneCatalog` (impl in 02). | `Features/Weather/Contracts/**`, `Features/Weather/Kinds/**`, `features/weather/contract/**` (except `site.ts`, `zones.ts`, `timeline.ts`) | payload types, descriptors, `productState`, `IWeatherZoneCatalog` |
-| 02 | `WeatherZone` entity + `ZoneService` (mirrors `OutletService`) + routes + `IWeatherZoneCatalog` impl; migration **M3** of the foundation ledger. | `Data/Entities/WeatherZone.cs`, `Features/Weather/Zones/**`, migration M3, `PulseDbContext` DbSet line | `/api/weather/zones*`, catalog impl |
+| 02 | `ZoneService` (mirrors `OutletService`) over the `WeatherZone` entity that F01's **M1** creates (Q-28) + routes + `IWeatherZoneCatalog` impl; **no migration**. | `Features/Weather/Zones/**` | `/api/weather/zones*`, catalog impl |
 | 03 | `WeatherReadService`: resolve-at-scenario-time queries through the F06 projector; site + summary endpoints; TS DTO mirror, fixtures and `useZones`. | `Features/Weather/Read/**`, `features/weather/contract/{site,zones}.ts`, `features/weather/hooks/useZones.ts*` | `/api/weather/{site,summary}`, `WeatherSiteDto`, `WeatherSummaryDto`, `useZones` |
 | 04 | `WeatherAlertSeverityMap`, `WeatherDeliveryPlanner` (alert + post plan from the payload `delivery` block, stale-on-jump guard), `WeatherPublishedObserver` (replace/clear on upgrade/cancel/retract/correct). | `Features/Weather/Delivery/**` | `WeatherAlertSeverityMap` |
 | 05 | Staff read model over weather `ContentItem`s + issue-update helper through `CreateDraftAsync`; filters copied from `InjectEndpoints`. | `Features/Weather/Timeline/**`, `features/weather/contract/timeline.ts` | `/api/weather/timeline`, `issue-update` |
@@ -58,7 +58,7 @@ disjoint file footprints and fan out in parallel.
 | Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
 |-------|-------|---------------|------------|--------------|------|--------|
 | 01 Contract + kinds | fullstack | `Features/Weather/{Contracts,Kinds}/**`, `features/weather/contract/**` (not `site/zones/timeline`) | F01, F02 | F03, F04, F08, F09, F10, F13, F14 | 2 | M |
-| 02 Zone model + API | backend | `Data/Entities/WeatherZone.cs`, `Features/Weather/Zones/**`, **migration M3** (after portal's M2; before F16's M4), `PulseDbContext` DbSet line | 01, F01, F08 | 07, F05, F06, F07, F11, F12 | 3 | M |
+| 02 Zone model + API | backend | `Features/Weather/Zones/**` (entity + migration are F01's M1) | 01, F01 (M1 has `WeatherZone`), F08 | 07, F05, F06, F07, F11, F12 | 3 | M |
 | 07 Product components | frontend | `features/weather/components/product/**` | 01, F14 | 02, F05, F06, F07, F11, F12 | 3 | M |
 | 03 Site read API | fullstack | `Features/Weather/Read/**`, `features/weather/contract/{site,zones}.ts`, `features/weather/hooks/useZones.ts*` | 01, 02, F06, F08 | 04, 05, 06, F15, F16, F17, F18, F19 | 4 | M |
 | 04 Warning delivery | backend | `Features/Weather/Delivery/**` | 01, F04 (FC-7a options), F05, F10, F18 (post ACs) | 03, 05, 06, F15, F16, F17, F19 | 4 | M |
@@ -67,8 +67,8 @@ disjoint file footprints and fan out in parallel.
 | 08 Site home | frontend | `features/weather/pages/WeatherHomePage.tsx`, `features/weather/components/site/**`, `features/weather/hooks/useWeatherSite.ts*` | 06, 07, 03 (types/mocks), F09, F15 | 09, 10, 11, 12, 13, 15 | 5 | L |
 | 09 Permalink page | frontend | `features/weather/pages/ProductPage.tsx`, `features/weather/hooks/useWeatherProduct.ts*` | 06, 07, 01, F06, F15 | 08, 10, 11, 12, 13, 15 | 5 | M |
 | 10 Widget tile | frontend | `features/weather/widget/**`, `features/weather/hooks/useWeatherSummary.ts*` | 07, 03 (types/mocks), F09, F15 | 08, 09, 11, 12, 13, 15 | 5 | S |
-| 11 Staff editors | frontend | `features/weather/staff/{register.ts,ProductEditor.tsx,ForecastEditor.tsx,deliveryOptions/**}` | 01, 07, 03 (`useZones`), F17 (`ownsDeliveryOptions`); 05 follow-up actions (mock until live) | 08, 09, 10, 12, 13, 15 | 5 | L |
-| 12 Staff timeline panel | frontend | `features/weather/staff/timeline/**` | 05 (mock until live), 11, F09, F17 | 08, 09, 10, 11, 13, 15 | 5 | M |
+| 11 Staff editors | frontend | `features/weather/staff/{register.ts,ProductEditor.tsx,ForecastEditor.tsx,deliveryOptions/**}` | 01, 07, 03 (`useZones`), F17 (`ownsDeliveryOptions`); 05 follow-up actions (mock until live) | 08, 09, 10, 13, 15 (**not 12: 12 waits for 11**) | 5 | L |
+| 12 Staff timeline panel | frontend | `features/weather/staff/timeline/**` | 05 (mock until live), **11 (explicit serial edge: starts after 11 merges)**, F09, F17 | 08, 09, 10, 13, 15 | 5 | M |
 | 13 Staff zone admin | frontend | `features/weather/staff/zones/**` | 02 (mock until live), 03, F17 | 08, 09, 10, 11, 12, 15 | 5 | S |
 | 15 Sample seed (stretch) | backend | `Features/Weather/Seed/**` | 01, 02, 04, F03, F04, F05, F07 | 08–13 | 5 | S |
 | 14 Conformance | testing | `Pulse.WebApi.Tests/Weather/Conformance/**`, `features/weather/testing/**`, `e2e/weather/**` | 01–13, F20 | — | 6 | M |
@@ -83,14 +83,14 @@ disjoint file footprints and fan out in parallel.
 | Participant composition | `features/channels/routing/registry.ts` via story 06's own `registerChannel('weather')` call | The router file is F12's; the orchestrator adds the one import of `features/weather` so the registration runs. No `App.tsx` edit by any E6 builder. |
 | Widget re-export | `features/weather/index.ts` | 06 owns it; the orchestrator adds the `export * from './widget'` line after story 10 merges. |
 | Staff registry | `features/staff/staffRouteRegistry` and the F17 editor registry | Orchestrator adds entries for 12, 13 and imports `features/weather/staff/register.ts` (story 11). |
-| Migration order | `src/Pulse.WebApi/Migrations/*` | The foundation [migration ledger](../channels-foundation/implementation.md#migration-ledger): M1 F01 → M2 portal 01 → **M3 weather 02 (this feature)** → M4 F16 → M5 press 06. One migration in flight at a time; a hand-written SQL step is `EXEC`-wrapped (#413). |
+| Migration order | `src/Pulse.WebApi/Migrations/*` | The foundation [migration ledger](../channels-foundation/implementation.md#migration-ledger): **M1 (F01) carries `WeatherZone`** (Q-28, Tom 10/29); this feature adds no migration. Only press 06's M2 follows M1. |
 
 ## Foundation follow-ups — resolved
 All eight were folded into the foundation (or the platform) in the December consolidation pass; **none remains open and no fallback is needed** (the outlet-categories zone store, the observer-based alert/post path and the hand-edited token file are all dropped). Source of truth:
 [`channels-foundation/implementation.md` § Follow-up resolution ledger](../channels-foundation/implementation.md#follow-up-resolution-ledger).
 | # | Gap | Resolved in |
 |---|---|---|
-| FU-1 | A `WeatherZone` migration against the "only F01/F16" rule | **Migration ledger M3** (weather 02), between portal's M2 and F16's M4. |
+| FU-1 | A `WeatherZone` migration against the "only F01/F16" rule | **Folded into F01's M1** (Q-28, Tom 10/29); weather 02 owns the service/API only. |
 | FU-2 | Alert + `@WeatherDesk` post on timed issuance (no dialog); meaning of `DefaultAlertMapping` | **FC-7a** + `IContentKindDescriptor.ResolvePublishOptions` (story 01 reads the `delivery` block); `DefaultAlertMapping` is a dialog suggestion only. F01 (`PublishOptionsJson`), F04, F05, F16 apply it. |
 | FU-3 | Async, scoped payload validation (zones, supersession) | **FC-7** `ValidatePayloadAsync(json, PayloadValidationContext)` (F02/F04); story 01 implements it. |
 | FU-4 | Final `weather-desk` token values; `ext.weather` | **FC-8a** `registerSkinTokens` + `registerSkinExtension` (F13), `ext.weather` allowlisted by F03; story 06 registers from `features/weather/skin/`. |
@@ -119,7 +119,7 @@ Consolidated and de-duplicated in [`../DECEMBER-RELEASE.md`](../DECEMBER-RELEASE
 | Q3 | Backward scenario-time jump: foundation never un-publishes. The site excludes products/forecasts published "after now" and the timeline flags them, but alert-bar entries and permalinks of such items stay. Acceptable, or should a rewind be unsupported for weather? | Acceptable; documented behaviour. |
 | Q4 | D4 is desktop-only (STORY-UPDATES §D "mobile pass deferred"). Build 06–10 mobile-first from the tokens with no mockup, or hold for a design pass? | Build mobile-first; design reviews the result before release. |
 | Q5 | The advisory hue is not in D4 (only warning `#8b0000`, watch `#2e6b4f`). Proposed AA amber `#8a4b00` (white-text contrast ≈ 6.8:1) with `faCircleInfo`. OK? | Yes, pending design confirmation. |
-| Q6 | Zones as their own table with an E6 migration (ledger M3) — confirm, and should a default zone be auto-created with the Weather Desk outlet? | Own table; no auto-create beyond story 15's sample. |
+| Q6 | Zones as their own table (**decided with Q-28, Tom 10/29: own table, in F01's M1**) — and should a default zone be auto-created with the Weather Desk outlet? | Own table; no auto-create beyond story 15's sample. |
 | Q7 | D4-009 says **monospace** product text, while the evidence cites "Public Sans product type". Monospace for the product body (furniture, IBW values as plain sans) and Public Sans/plain sans for chrome? | Monospace for `ProductText` only. |
 | Q8 | Units and locale: US customary (°F, mph, inches) with US-style hazard vocabulary — any non-US exercises in December? | US customary only. |
 | Q9 | The epic's §5 Open questions ends mid-sentence ("1. Should the weather timeline …"; the file is truncated). Is there a lost question to restore? | None assumed; timeline = scheduled content (this feature's decision). |

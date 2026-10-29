@@ -1,7 +1,7 @@
 # Story: Channel enablement gate (server + client)
 
 **Feature:** Channels foundation  ·  **Epic:** E3 (shared with E4/E5/E6)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-003 (disabled channels hide cleanly), PRT-020, COR-030 (enabled channels), XC-001  ·  **Design decisions:** D7-001, D2-005  ·  **Issue:** —
+**Requirements:** PRT-003 (disabled channels hide cleanly), PRT-020, COR-030 (enabled channels), XC-001  ·  **Design decisions:** D7-001, D2-005  ·  **Issue:** #704
 **Stack:** fullstack  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

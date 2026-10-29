@@ -1,7 +1,7 @@
 # Feature: Channels foundation (shared by E3 Portal, E4 News, E5 Press Room, E6 Weather)
 
 **Epic:** E3/E4/E5/E6 shared foundation (hosted under E1 — Platform Core)  ·  **Phase:** 3, pulled forward — **December release (Tom, 10/21)**  ·  **Feature ref:** cross-cutting
-**World:** both (participant read surfaces + staff authoring seam)  ·  **Issue:** — (no GitHub issues created in this pass)
+**World:** both (participant read surfaces + staff authoring seam)  ·  **Issue:** #692 (Epic #37)
 
 ## Summary
 The one content pipeline every non-social channel builds on. E4 articles, E5 releases and E6 weather products are the same kind of thing: an
@@ -40,33 +40,33 @@ story below says so.
 ## Stories
 | # | Story | Requirement(s) | Stack | Wave | Effort | Status | Issue |
 |---|-------|----------------|-------|------|--------|--------|-------|
-| 01 | [Content, outlet and alert data model + migration](01-content-outlet-alert-data-model.md) | NWS-010/013, PRS-005, PRT-031, XC-001/010 | backend | 1 | L | Not Started | — |
-| 02 | [Frozen wire contracts, client types and mock fixtures](02-frozen-wire-contracts.md) | NWS-010/011, PRT-011, XC-002 | fullstack | 1 | M | Not Started | — |
-| 03 | [Outlet registry and defaults](03-outlet-registry.md) | NWS-001/002, PRS-010/012, WX-001/020, COR-066 | backend | 2 | M | Not Started | — |
-| 04 | [Content publish funnel and lifecycle](04-content-publish-funnel.md) | NWS-013, PRS-005/022, XC-004/010, NFR-004, COR-053 | backend | 2 | L | Not Started | — |
-| 05 | [Scheduler: embargo, scheduled publish, time jumps](05-scheduled-publish-runner.md) | NWS-013, PRS-003 | backend | 3 | M | Not Started | — |
-| 06 | [Participant content read API, permalinks, link resolver](06-participant-content-read-api.md) | NWS-011/015, PRS-011, XC-001/002 | backend | 3 | M | Not Started | — |
-| 07 | [Staff content write API](07-staff-content-api.md) | NWS-020/022, PRS-020, WX-012, XC-006 | backend | 3 | M | Not Started | — |
-| 08 | [Channel enablement gate (server + client)](08-channel-enablement-gate.md) | PRT-003/020, XC-001 | fullstack | 2 | M | Not Started | — |
-| 09 | [Realtime fan-out for channel content](09-realtime-content-fanout.md) | PRT-006, XC-001, NFR-002 | fullstack | 2 | M | Not Started | — |
-| 10 | [Alert source: raise, clear, history (backend)](10-alert-source-backend.md) | PRT-010/011/012, WX-011, NWS-012, SOC-072 | backend | 2 | M | Not Started | — |
-| 11 | [Alert bar live wiring (frontend)](11-alert-bar-live-wiring.md) | PRT-010/011/012, D4-010 | frontend | 3 | S | Not Started | — |
-| 12 | [Participant channel router and landing](12-participant-channel-router.md) | PRT-001/020, COR-060/061, XC-002 | frontend | 3 | M | Not Started | — |
-| 13 | [Outlet skin system (token files, scope provider, external registration)](13-outlet-skin-system.md) | NWS-002, COR-066, D3-P1/P2 | frontend | 2 | L | Not Started | — |
-| 14 | [Shared content primitives](14-shared-content-primitives.md) | COR-053, NFR-001/004/008 | frontend | 2 | M | Not Started | — |
-| 15 | [Content data hooks and reader telemetry](15-content-data-hooks-and-telemetry.md) | NWS-030, WX-022, XC-004, PRT-006 | frontend | 4 | M | Not Started | — |
-| 16 | [Inject-queue integration: content injects](16-content-injects.md) | NWS-013, WX-012, CTL-010/011 | backend | 4 | M | Not Started | — |
-| 17 | [Staff authoring and publish seam (console)](17-staff-authoring-seam.md) | NWS-020, PRS-020, WX-012, COR-041 | frontend | 4 | L | Not Started | — |
-| 18 | [Paired social auto-post with link card](18-paired-social-post.md) | NWS-004, PRS-013, WX-011/020, SOC-004 | backend | 4 | M | Not Started | — |
-| 19 | [Host-relative URLs and subdomain readiness](19-subdomain-readiness.md) | COR-008, PDF-11 (#679) | fullstack | 4 | S | Not Started | — |
-| 20 | [Channel conformance kit (isolation, XSS, a11y/508, migration ledger)](20-channel-conformance-kit.md) | XC-001, NFR-001/004, PDF-12 (#680) | testing | 5 | M | Not Started | — |
-| 21 | [Social prerequisites for channel consumers (R-S1, compose-with-link)](21-social-prerequisites.md) | PRT-005, NWS-015, SOC-004, COR-015 | frontend | 1 | M | Not Started | — |
+| 01 | [Content, outlet and alert data model + migration](01-content-outlet-alert-data-model.md) | NWS-010/013, PRS-005, PRT-031, XC-001/010 | backend | 1 | L | Not Started | #697 |
+| 02 | [Frozen wire contracts, client types and mock fixtures](02-frozen-wire-contracts.md) | NWS-010/011, PRT-011, XC-002 | fullstack | 1 | M | Not Started | #698 |
+| 03 | [Outlet registry and defaults](03-outlet-registry.md) | NWS-001/002, PRS-010/012, WX-001/020, COR-066 | backend | 2 | M | Not Started | #699 |
+| 04 | [Content publish funnel and lifecycle](04-content-publish-funnel.md) | NWS-013, PRS-005/022, XC-004/010, NFR-004, COR-053 | backend | 2 | L | Not Started | #700 |
+| 05 | [Scheduler: embargo, scheduled publish, time jumps](05-scheduled-publish-runner.md) | NWS-013, PRS-003 | backend | 3 | M | Not Started | #701 |
+| 06 | [Participant content read API, permalinks, link resolver](06-participant-content-read-api.md) | NWS-011/015, PRS-011, XC-001/002 | backend | 3 | M | Not Started | #702 |
+| 07 | [Staff content write API](07-staff-content-api.md) | NWS-020/022, PRS-020, WX-012, XC-006 | backend | 3 | M | Not Started | #703 |
+| 08 | [Channel enablement gate (server + client)](08-channel-enablement-gate.md) | PRT-003/020, XC-001 | fullstack | 2 | M | Not Started | #704 |
+| 09 | [Realtime fan-out for channel content](09-realtime-content-fanout.md) | PRT-006, XC-001, NFR-002 | fullstack | 2 | M | Not Started | #705 |
+| 10 | [Alert source: raise, clear, history (backend)](10-alert-source-backend.md) | PRT-010/011/012, WX-011, NWS-012, SOC-072 | backend | 2 | M | Not Started | #706 |
+| 11 | [Alert bar live wiring (frontend)](11-alert-bar-live-wiring.md) | PRT-010/011/012, D4-010 | frontend | 3 | S | Not Started | #707 |
+| 12 | [Participant channel router and landing](12-participant-channel-router.md) | PRT-001/020, COR-060/061, XC-002 | frontend | 3 | M | Not Started | #708 |
+| 13 | [Outlet skin system (token files, scope provider, external registration)](13-outlet-skin-system.md) | NWS-002, COR-066, D3-P1/P2 | frontend | 2 | L | Not Started | #709 |
+| 14 | [Shared content primitives](14-shared-content-primitives.md) | COR-053, NFR-001/004/008 | frontend | 2 | M | Not Started | #710 |
+| 15 | [Content data hooks and reader telemetry](15-content-data-hooks-and-telemetry.md) | NWS-030, WX-022, XC-004, PRT-006 | frontend | 4 | M | Not Started | #711 |
+| 16 | [Inject-queue integration: content injects](16-content-injects.md) | NWS-013, WX-012, CTL-010/011 | backend | 4 | M | Not Started | #712 |
+| 17 | [Staff authoring and publish seam (console)](17-staff-authoring-seam.md) | NWS-020, PRS-020, WX-012, COR-041 | frontend | 4 | L | Not Started | #713 |
+| 18 | [Paired social auto-post with link card](18-paired-social-post.md) | NWS-004, PRS-013, WX-011/020, SOC-004 | backend | 4 | M | Not Started | #714 |
+| 19 | [Host-relative URLs and subdomain readiness](19-subdomain-readiness.md) | COR-008, PDF-11 (#679) | fullstack | 4 | S | Not Started | #715 |
+| 20 | [Channel conformance kit (isolation, XSS, a11y/508, migration ledger)](20-channel-conformance-kit.md) | XC-001, NFR-001/004, PDF-12 (#680) | testing | 5 | M | Not Started | #716 |
+| 21 | [Social prerequisites for channel consumers (R-S1, compose-with-link)](21-social-prerequisites.md) | PRT-005, NWS-015, SOC-004, COR-015 | frontend | 1 | M | Not Started | #717 |
 
 Totals: **21 stories** — 4 L (01, 04, 13, 17), 15 M, 2 S (11, 19). Story 21 was added by the December consolidation pass; stories 01–04, 05–07, 09, 11–18 and 20 were amended in it (see [`implementation.md` § Follow-up resolution ledger](implementation.md#follow-up-resolution-ledger)).
 
 ## Dependencies
-**Platform prerequisites** (owned by other features, scheduled by the orchestrator; see [`implementation.md` § Platform prerequisites](implementation.md#platform-prerequisites)): PP-1 a `display` session purpose/actor kind (identity-auth-roles + telemetry) for the portal kiosk; PP-2 participant-shell/06 kiosk chrome + watermark clause; PP-3 host CSP/headers; PP-4 per-display realtime (parked); PP-5 identity grants / "Posting as" chip (press, not required).
-**Migrations** follow one serialized ledger (M1 F01 → M2 portal 01 → M3 weather 02 → M4 F16 → M5 press 06), see [`implementation.md` § Migration ledger](implementation.md#migration-ledger). The cross-feature index, combined waves, cut order and the single open-question list are in [`../DECEMBER-RELEASE.md`](../DECEMBER-RELEASE.md).
+**Platform prerequisites** (owned by other features, scheduled by the orchestrator; see [`implementation.md` § Platform prerequisites](implementation.md#platform-prerequisites)): PP-1 a `display` session purpose/actor kind (**Deferred post-December**: kiosk-lite needs no identity change, Q-35); PP-2 participant-shell/06 kiosk chrome + watermark clause; PP-3 host CSP (fonts); PP-4 per-display realtime (parked); PP-5 identity grants / "Posting as" chip (**not needed**: single org per person, Q-18).
+**Migrations** (Q-28, Tom 10/29): **M1 (F01)** carries the content tables *and* the folded portal tables, `WeatherZone` and `InjectItem.ContentItemId`; press 06's approval tables are the only later migration (**M2**), see [`implementation.md` § Migration ledger](implementation.md#migration-ledger). The cross-feature index, combined waves, cut order and the single open-question list are in [`../DECEMBER-RELEASE.md`](../DECEMBER-RELEASE.md).
 
 Already built and merged: exercise isolation (`IExerciseScoped`, `PulseDbContext` central filter, host resolution), participant shell (chrome, alert bar
 host + history component, nav, overlays, brand hooks), the server scenario clock (`GET /api/clock`, `ScenarioClockChanged`, PR #678), the media pipeline and

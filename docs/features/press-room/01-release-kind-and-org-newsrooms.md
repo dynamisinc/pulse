@@ -1,7 +1,7 @@
 # Story: Release kind, press contracts and org newsrooms
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-010, PRS-012, PRS-001 (org identity), PRS-005 (model), XC-004 (vocabulary)  ·  **Design decisions:** D4-008, D4-005  ·  **Issue:** —
+**Requirements:** PRS-010, PRS-012, PRS-001 (org identity), PRS-005 (model), XC-004 (vocabulary)  ·  **Design decisions:** D4-008, D4-005  ·  **Issue:** #738
 **Stack:** fullstack  ·  **World:** data + participant contracts  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context
@@ -11,7 +11,7 @@ E5's registration with the shared pipeline: the `release` kind descriptor (FC-1 
 ## Acceptance Criteria
 - [ ] **Descriptor registered.** Given the app starts, when the funnel (F04) resolves kind `release`, then `ReleaseKindDescriptor` answers with `ChannelId = press`, `AllowedMediaKinds = image + document`, `BodyPolicy` = F04's built-in **`rich-tables`** profile (no new profile; press FU-5 resolved), and an unregistered kind elsewhere is still a 400.
 - [ ] **Payload validation (PC-1).** Given a release payload, when validated, then `orgPersonaId` must be a persona in the same exercise (another exercise's id answers exactly like an unknown id), `document.mediaId` must be an exercise-owned `document` asset, contact fields are length-capped plain text, and an invalid payload is a readable 400.
-- [ ] **Participant-safe projection.** Given a stored release, when `ProjectPayload` runs, then the output contains only org name/letterhead ref, `contact`, `dateline` and `document { mediaId, fileName, pageCount }`, and never `crossPost`, `approval` or `inputPath` (XC-002) — pinned by a leak test over the serialized JSON.
+- [ ] **Participant-safe projection.** Given a stored release, when `ProjectPayload` runs, then the output contains only org name/letterhead ref, `contact`, `dateline` and `document { mediaId, fileName, sizeBytes }`, and never `crossPost`, `approval` or `inputPath` (XC-002) — pinned by a leak test over the serialized JSON.
 - [ ] **Org newsrooms (PRS-012, Q2).** Given an exercise with The Wire Room outlet and N publishing org personas, when `OrgNewsroomProvisioner` runs (exercise setup and on org grant), then exactly one child outlet per org exists with `ParentOutletId` = The Wire Room, `PairedPersonaId` = the org persona, the org logo as `LogoMediaId`, and running it twice creates no duplicates.
 - [ ] **Letterhead defaults.** Given an org outlet, then its default contact block and address live in `SkinOverridesJson.ext.press.letterhead` (size-capped, F03 allowlist permits `ext.press`), and an org without them gets a neutral letterhead, never a platform-branded one.
 - [ ] **Contracts and fixtures.** PC-2 C# records and TS types + runtime guards + mock fixtures exist (published, embargoed, returned, pending-approval, retracted tombstone) and the guards reject a payload carrying staff-only keys.

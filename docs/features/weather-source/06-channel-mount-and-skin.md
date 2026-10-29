@@ -1,7 +1,7 @@
 # Story: Weather channel mount, route shell and Weather Desk skin
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-001, NFR-001, NFR-008, COR-053  ·  **Design decisions:** D3-P1/P2, D4-009, D4-012, D7-001  ·  **Issue:** —
+**Requirements:** WX-001, NFR-001, NFR-008, COR-053  ·  **Design decisions:** D3-P1/P2, D4-009, D4-012, D7-001  ·  **Issue:** #757
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 4  ·  **Effort:** M
 
 ## Context

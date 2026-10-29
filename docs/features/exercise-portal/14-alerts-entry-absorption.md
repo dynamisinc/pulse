@@ -1,7 +1,7 @@
 # Story: Alerts entry and RIP Alerts absorption
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-012, PRT-010, PRT-011, SOC-072 (consumer), NFR-001  ·  **Design decisions:** D2-005 (right-aligned Alerts link), D7-002  ·  **Issue:** —
+**Requirements:** PRT-012, PRT-010, PRT-011, SOC-072 (consumer), NFR-001  ·  **Design decisions:** D2-005 (right-aligned Alerts link), D7-002  ·  **Issue:** #778
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** S
 
 ## Context
@@ -22,4 +22,4 @@ Raising or clearing alerts (E7), the bar's styling, the history page, notificati
 Files: `features/portal/alerts/AlertsEntry*`. Reuse the shell's `useAlerts`, `alertsRoute` helpers. FontAwesome bell. No telemetry of its own beyond `portal_module_click` through 17's masthead wiring.
 
 ## Dependencies
-02, F10, F11. Can run with 08-13, 15, 16.
+02, F10, F11. Can run with 09-13, 15, 16.

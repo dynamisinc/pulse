@@ -1,8 +1,10 @@
 # Story: Display sessions (kiosk link and read-only session)
 
-**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
+**Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — **Deferred to post-December (Tom, 10/29, Q-35)**  ·  **Status:** Deferred (post-December)
 **Requirements:** PRT-040, PRT-041, NFR-009, XC-001, XC-002, XC-004  ·  **Design decisions:** none (EL-5/7/8/11/16 reused; Master decision 10)  ·  **Issue:** —
 **Stack:** backend  ·  **World:** foundation  ·  **Wave:** 2  ·  **Effort:** L  ·  **Review:** Tier-2 (a new anonymous credential endpoint, always-Critical class)
+
+> **Deferred (post-December).** Tom decided on 10/29 (Q-35) that December ships the portal first and **kiosk-lite only** (the existing shared view-only login on `/portal?display=1`, using the kiosk frame, no new credential, no remote control). The per-display credential, `POST /api/auth/display`, the `/api/displays` staff lifecycle, **PP-1** (the `display` session purpose and actor kind) and the Tier-2 security review of a new anonymous route moved out of December. **No GitHub issue is created for this story**; it is listed on the Portal feature issue. The text below is kept as the starting point for the post-December display-credential work; before it is scheduled, re-check it against what stories 18/19 actually shipped for kiosk-lite.
 
 ## Context
 PRT-040 asks for a "login-free" display view. A kiosk must never be anonymous access to data (XC-001): it is a **revocable bearer link for one exercise**, exchanged for a **read-only session** that cannot write, cannot act as any persona and is attributed to a *display*, not a person (PRT-041; review finding D9). This story is the credential's whole backend life; the display's content state is story 08. It follows easy-login's personal-link design (token primitives, uniform 401, rotate ends sessions) rather than inventing a second one. Fallback if it slips: kiosk-lite (cut order 7).

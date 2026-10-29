@@ -1,7 +1,7 @@
 # Story: Staff timeline read model and issue-update helper
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-002, WX-003, WX-012  ·  **Design decisions:** D4-011  ·  **Issue:** —
+**Requirements:** WX-002, WX-003, WX-012  ·  **Design decisions:** D4-011  ·  **Issue:** #756
 **Stack:** backend  ·  **World:** staff  ·  **Wave:** 4  ·  **Effort:** S
 
 ## Context

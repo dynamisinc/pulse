@@ -1,7 +1,7 @@
 # Story: Article kind descriptor (payload, body policy, alert suggestion)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-010, NWS-012, NWS-013, NWS-022, NWS-032, NFR-004  ·  **Design decisions:** D3-P1, D3-P4  ·  **Issue:** —
+**Requirements:** NWS-010, NWS-012, NWS-013, NWS-022, NWS-032, NFR-004  ·  **Design decisions:** D3-P1, D3-P4  ·  **Issue:** #718
 **Stack:** backend  ·  **World:** data (no UI)  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

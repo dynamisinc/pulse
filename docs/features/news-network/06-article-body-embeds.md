@@ -1,7 +1,7 @@
 # Story: Article body, pull quotes, inline media and embedded Pulse posts
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-010, NWS-015, NFR-004, NFR-001, SOC-002/004 (embed anatomy)  ·  **Design decisions:** D3-P1 (slot 7), D3-P2  ·  **Issue:** —
+**Requirements:** NWS-010, NWS-015, NFR-004, NFR-001, SOC-002/004 (embed anatomy)  ·  **Design decisions:** D3-P1 (slot 7), D3-P2  ·  **Issue:** #723
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

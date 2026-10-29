@@ -1,7 +1,7 @@
 # Story: Outlet skin system (token files, scope provider)
 
 **Feature:** Channels foundation  ·  **Epic:** E4 (with E5/E6)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-002, NWS-012 (breaking vocabulary as token), COR-030, COR-066, NFR-001  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** —
+**Requirements:** NWS-002, NWS-012 (breaking vocabulary as token), COR-030, COR-066, NFR-001  ·  **Design decisions:** D3-P1, D3-P2  ·  **Issue:** #709
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** L
 
 ## Context

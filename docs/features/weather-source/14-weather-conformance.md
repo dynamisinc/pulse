@@ -1,7 +1,7 @@
 # Story: Weather conformance — isolation, watermark, a11y/508, fictional-NWS guard
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** XC-001, XC-002, NFR-001, NFR-004, NFR-008, PDF-12 (#680), WX-001, WX-011  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** —
+**Requirements:** XC-001, XC-002, NFR-001, NFR-004, NFR-008, PDF-12 (#680), WX-001, WX-011  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** #765
 **Stack:** testing  ·  **World:** both  ·  **Wave:** 6  ·  **Effort:** M
 
 ## Context

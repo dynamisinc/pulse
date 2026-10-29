@@ -1,7 +1,7 @@
 # Story: Weather widget mount
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-003, WX-021 (consumer side), WX-011, COR-053, XC-001, NFR-001  ·  **Design decisions:** D4-010, D2-005, D2-008  ·  **Issue:** —
+**Requirements:** PRT-003, WX-021 (consumer side), WX-011, COR-053, XC-001, NFR-001  ·  **Design decisions:** D4-010, D2-005, D2-008  ·  **Issue:** #776
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** S
 
 ## Context
@@ -22,4 +22,4 @@ The tile itself and the summary route (weather 10 / 03), multi-zone carousel, an
 Files: `features/portal/modules/weather/**` (+ `register.ts`). Imports `WeatherWidgetTile`, `useWeatherSummary` from `features/weather` (the orchestrator adds weather's `export * from './widget'` re-export, weather impl). R-W1 is **applied in weather story 10** (`size='display'`, no links, no `aria-live`); this story uses the default `standard` size, story 19 uses `display`.
 
 ## Dependencies
-07, weather 10 (hard import, incl. `size` prop; + weather 03 types). Can run with 08-11, 13-16.
+07, weather 10 (hard import, incl. `size` prop; + weather 03 types). Can run with 09-11, 13-16.

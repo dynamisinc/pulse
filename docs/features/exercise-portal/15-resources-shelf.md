@@ -1,7 +1,7 @@
 # Story: Resources shelf
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-022, PRT-021, NFR-001, NFR-004, XC-001, XC-004  ·  **Design decisions:** D2-007  ·  **Issue:** —
+**Requirements:** PRT-022, PRT-021, NFR-001, NFR-004, XC-001, XC-004  ·  **Design decisions:** D2-007  ·  **Issue:** #779
 **Stack:** frontend  ·  **World:** participant (the sanctioned out-of-fiction shelf)  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context
@@ -24,4 +24,4 @@ Authoring (16), the API (04), PDF viewing (until press 02), external links, kios
 Files: `features/portal/resources/**`. Reuse `SanitizedBody` (F14), `ChannelNotFound` (F12). System fonts only for the shelf.
 
 ## Dependencies
-02, 04 (route; fixtures until live), F14. Can run with 08-14, 16.
+02, 04 (route; fixtures until live), F14. Can run with 09-14, 16.

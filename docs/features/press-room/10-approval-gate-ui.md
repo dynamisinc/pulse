@@ -1,7 +1,7 @@
 # Story: Approval gate participant UI
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-021  ·  **Design decisions:** D4-007, D4-002, C-1  ·  **Issue:** —
+**Requirements:** PRS-021  ·  **Design decisions:** D4-007, D4-002, C-1  ·  **Issue:** #746
 **Stack:** frontend  ·  **World:** participant ("participant paper", not staff chrome)  ·  **Wave:** 5  ·  **Effort:** M
 
 ## Context
@@ -10,7 +10,7 @@ The approval chain is itself evaluated, so the gate lives where the PIO and the 
 
 ## Acceptance Criteria
 - [ ] **Inbox.** Given the signed-in human is a routed approver, then "Approvals (n)" appears in the Wire Room header (wire-internal badge, no platform push, D4-007 #3) and lists pending releases with org, headline, author display name, and "waiting 12m" in scenario time; non-approvers see no affordance.
-- [ ] **Draft-diff review (D4-007).** Given a pending release, then the review shows the release on its letterhead with changes since the last version the approver saw: removed text struck through and added text shaded **with +/− markers and text labels** (not color-only), headline/contact changes called out, and the embedded PDF with a "document replaced" note when it changed.
+- [ ] **Draft-diff review (D4-007).** Given a pending release, then the review shows the release on its letterhead with changes since the last version the approver saw: removed text struck through and added text shaded **with +/− markers and text labels** (not color-only), headline/contact changes called out, and the attachment's file name and size with an "attachment replaced" note when it changed (no inline PDF preview in December).
 - [ ] **Approve = one confirm.** Given the review, when "Approve & release" is chosen, then one confirm chip states org, headline and timing (now, or the author's embargo time); confirming releases it and the inbox updates live; Escape cancels with nothing sent.
 - [ ] **Return requires a note (D4-007).** Given "Return for revision", then the note field is required (button disabled and reason announced until non-empty after trim), one confirm follows, and on confirm the release leaves the inbox.
 - [ ] **Author sees the return.** Given a returned release, then the author's composer shows a "RETURNED FOR REVISION" banner (the `returnedBanner` slot of story 07) with the approver's name, scenario time and note; it stays until the author resubmits; the wire row for the author shows the same state.

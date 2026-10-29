@@ -1,7 +1,7 @@
 # Story: Hero media, Beat video player and watermark chip
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-014, NWS-032, NWS-010, NFR-008, NFR-001  ·  **Design decisions:** D3-P1 (slot 6), D3-P2, D2-008  ·  **Issue:** —
+**Requirements:** NWS-014, NWS-032, NWS-010, NFR-008, NFR-001  ·  **Design decisions:** D3-P1 (slot 6), D3-P2, D2-008  ·  **Issue:** #722
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

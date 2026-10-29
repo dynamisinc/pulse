@@ -1,7 +1,7 @@
 # Story: Outlet masthead and section nav
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-001, NWS-002, NWS-003, NFR-001  ·  **Design decisions:** D3-P1 (slot 2), D3-P2  ·  **Issue:** —
+**Requirements:** NWS-001, NWS-002, NWS-003, NFR-001  ·  **Design decisions:** D3-P1 (slot 2), D3-P2  ·  **Issue:** #720
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** M
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Social Stream and Trending modules
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-005, PRT-003 (Trending), PRT-006, XC-001, COR-053, NFR-001, NFR-002  ·  **Design decisions:** D2-005, D2-006  ·  **Issue:** —
+**Requirements:** PRT-005, PRT-003 (Trending), PRT-006, XC-001, COR-053, NFR-001, NFR-002  ·  **Design decisions:** D2-005, D2-006  ·  **Issue:** #774
 **Stack:** frontend  ·  **World:** participant (portal rail, Pulse brand scope inside it)  ·  **Wave:** 3  ·  **Effort:** L
 
 ## Context
@@ -24,4 +24,4 @@ Composing, reacting or replying from the portal, personalized feeds, a portal-ow
 Files: `features/portal/modules/socialStream/**`. Exports `useSocialExcerpt` for the kiosk feed slide (19). **R-S1 is resolved by foundation story 21**: import `useTrending`, `useRecentPublicPosts`, `SocialBrandScope`, `socialPostPath`/`socialProfilePath` and the read-only `PostCard` from the `features/social` barrel; no adapter file and no deep imports. Reuse the existing explore baseline / feed store so no second feed subscription is opened.
 
 ## Dependencies
-02, 07, **F21** (R-S1), F15. Can run with 08, 09, 11-16.
+02, 07, **F21** (R-S1), F15. Can run with 09, 11-16.

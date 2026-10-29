@@ -1,7 +1,7 @@
 # Story: Product and forecast permalink page
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-010, WX-013, WX-022, XC-010, COR-053  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** —
+**Requirements:** WX-010, WX-013, WX-022, XC-010, COR-053  ·  **Design decisions:** D4-009, D4-010, D4-012  ·  **Issue:** #760
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 5  ·  **Effort:** M
 
 ## Context

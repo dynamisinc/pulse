@@ -1,7 +1,7 @@
 # Story: Staff content write API
 
 **Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-013, NWS-020 (API side), NWS-022, PRS-020, PRS-005, WX-012, PRT-004 (feature/pin), PRT-031, XC-004, XC-006  ·  **Design decisions:** D4-002, D4-011  ·  **Issue:** —
+**Requirements:** NWS-013, NWS-020 (API side), NWS-022, PRS-020, PRS-005, WX-012, PRT-004 (feature/pin), PRT-031, XC-004, XC-006  ·  **Design decisions:** D4-002, D4-011  ·  **Issue:** #703
 **Stack:** backend  ·  **World:** staff  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context

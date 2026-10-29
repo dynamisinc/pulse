@@ -1,7 +1,7 @@
 # Story: Composer — timing, cross-post and the single confirm gate
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-003, PRS-013, PRS-020 (gate wording)  ·  **Design decisions:** D4-002, D4-003, D4-004  ·  **Issue:** —
+**Requirements:** PRS-003, PRS-013, PRS-020 (gate wording)  ·  **Design decisions:** D4-002, D4-003, D4-004  ·  **Issue:** #744
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 5  ·  **Effort:** M
 
 ## Context

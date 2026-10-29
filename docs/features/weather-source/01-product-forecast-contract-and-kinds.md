@@ -1,7 +1,7 @@
 # Story: Product and forecast payload contract, kind descriptors
 
 **Feature:** Weather source  ·  **Epic:** E6  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** WX-010, WX-003, WX-013, WX-002  ·  **Design decisions:** D4-009, D4-011, C-2  ·  **Issue:** —
+**Requirements:** WX-010, WX-003, WX-013, WX-002  ·  **Design decisions:** D4-009, D4-011, C-2  ·  **Issue:** #752
 **Stack:** fullstack  ·  **World:** n/a (contract; consumed by both)  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

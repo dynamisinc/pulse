@@ -1,7 +1,7 @@
 # Story: Participant content read API, permalinks and link resolver
 
 **Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-011, NWS-015, PRS-011, PRS-010/012 (list + org filter), PRT-004 (featured ordering), SOC-004 (resolver), XC-001, XC-002, COR-053  ·  **Design decisions:** D3-P1, D4-008  ·  **Issue:** —
+**Requirements:** NWS-011, NWS-015, PRS-011, PRS-010/012 (list + org filter), PRT-004 (featured ordering), SOC-004 (resolver), XC-001, XC-002, COR-053  ·  **Design decisions:** D3-P1, D4-008  ·  **Issue:** #702
 **Stack:** backend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context

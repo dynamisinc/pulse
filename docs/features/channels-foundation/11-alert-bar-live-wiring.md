@@ -1,7 +1,7 @@
 # Story: Alert bar live wiring (frontend)
 
 **Feature:** Channels foundation  ·  **Epic:** E3 (shell: E1)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-010, PRT-011, PRT-012, WX-011 (headline verbatim), NFR-001  ·  **Design decisions:** D4-010, D7-002  ·  **Issue:** —
+**Requirements:** PRT-010, PRT-011, PRT-012, WX-011 (headline verbatim), NFR-001  ·  **Design decisions:** D4-010, D7-002  ·  **Issue:** #707
 **Stack:** frontend  ·  **World:** participant (shell)  ·  **Wave:** 3  ·  **Effort:** S
 
 ## Context

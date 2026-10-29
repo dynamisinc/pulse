@@ -1,7 +1,7 @@
 # Story: Press Room latest module
 
 **Feature:** Exercise portal  ·  **Epic:** E3  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRT-003, PRT-006, COR-053, XC-001, NFR-001  ·  **Design decisions:** D2-005  ·  **Issue:** —
+**Requirements:** PRT-003, PRT-006, COR-053, XC-001, NFR-001  ·  **Design decisions:** D2-005  ·  **Issue:** #775
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 3  ·  **Effort:** S
 
 ## Context
@@ -22,4 +22,4 @@ Authoring (E5), org newsroom pages, filters, the release page itself.
 Files: `features/portal/modules/pressLatest/**` (+ `register.ts`). Reuse F15 hooks and F09 stream. R-P1 is **applied in press stories 01/04/09/15**: every release summary has a non-empty derived `dek` and `outlet.name` = the publishing org, and scheduled/embargoed releases never appear in any list, so rows are never headline-only and this story has no fallback path.
 
 ## Dependencies
-02, 07, F06, F15, press 01. Can run with 08-10, 12-16.
+02, 07, F06, F15, press 01. Can run with 09, 10, 12-16.

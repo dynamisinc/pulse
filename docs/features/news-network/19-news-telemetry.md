@@ -1,7 +1,7 @@
 # Story: E4 telemetry beyond FC-6 (video, embed) and invisibility
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-030, NWS-014, XC-004, XC-002  ·  **Design decisions:** D3-P2 (telemetry invisibility)  ·  **Issue:** —
+**Requirements:** NWS-030, NWS-014, XC-004, XC-002  ·  **Design decisions:** D3-P2 (telemetry invisibility)  ·  **Issue:** #736
 **Stack:** frontend  ·  **World:** participant (emits only; no UI)  ·  **Wave:** E4-2  ·  **Effort:** S
 
 ## Context

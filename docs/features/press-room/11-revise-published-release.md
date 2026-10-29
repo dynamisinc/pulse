@@ -1,7 +1,7 @@
 # Story: Revise a published release (author side)
 
 **Feature:** Press Room  ·  **Epic:** E5  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** PRS-005 (+ foundation Q6)  ·  **Design decisions:** D4-009 (scenario-time markers, COR-053)  ·  **Issue:** —
+**Requirements:** PRS-005 (+ foundation Q6)  ·  **Design decisions:** D4-009 (scenario-time markers, COR-053)  ·  **Issue:** #747
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** 5  ·  **Effort:** S
 
 ## Context
@@ -10,7 +10,7 @@ This story is the author-side surface; the verb is story 05.
 
 ## Acceptance Criteria
 - [ ] **Entry point.** Given an org member views their published release (wire row or permalink), then "Update this release" opens the sheet in revise mode; non-members and non-PIO see no affordance; there is **no** retract/withdraw control anywhere in the participant UI.
-- [ ] **Revise = one confirm.** Given edits to headline/body/PDF/contact and an optional note ("Corrected the shelter address"), then one confirm states that a public "Updated {scenario time}" marker will appear; confirming calls `revise` and the sheet closes to the updated page.
+- [ ] **Revise = one confirm.** Given edits to headline/body/attachment/contact and an optional note ("Corrected the shelter address"), then one confirm states that a public "Updated {scenario time}" marker will appear; confirming calls `revise` and the sheet closes to the updated page.
 - [ ] **Visible marker, preserved history.** Given a revision, then the release page shows "Updated {scenario time}" with the note (story 09) and the author/org members can open "Previous versions" listing each prior version with scenario time and who revised (display name); the public sees only the marker.
 - [ ] **No silent levers.** Participants cannot choose `correction` or `silent_rewrite`; the UI offers only the labelled "update".
 - [ ] **Conflicts.** Given a stale version (a colleague revised meanwhile), then a non-destructive reload prompt shows the diff; nothing is overwritten.

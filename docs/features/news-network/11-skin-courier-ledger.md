@@ -1,7 +1,7 @@
 # Story: Skin token file — The Courier-Ledger (city paper)
 
 **Feature:** News network  ·  **Epic:** E4  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
-**Requirements:** NWS-002, NWS-001, NFR-001  ·  **Design decisions:** D3-P1, D3-P2, D3-P3  ·  **Issue:** —
+**Requirements:** NWS-002, NWS-001, NFR-001  ·  **Design decisions:** D3-P1, D3-P2, D3-P3  ·  **Issue:** #728
 **Stack:** frontend  ·  **World:** participant  ·  **Wave:** E4-1  ·  **Effort:** S
 
 ## Context
