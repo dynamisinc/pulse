@@ -27,6 +27,13 @@ import {
   type UseChannelStreamOptions,
 } from './useChannelStream'
 
+const tokenState = vi.hoisted(() => ({ token: null as string | null }))
+
+vi.mock('@/core/auth/tokenStore', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/tokenStore')>()),
+  getAccessToken: () => tokenState.token,
+}))
+
 class FakeConnection implements RealtimeConnection {
   state: HubConnectionState = HubConnectionState.Disconnected
   startCalls = 0
@@ -294,17 +301,19 @@ describe('useChannelStream', () => {
   })
 
   it('asks the page to refetch when the hub returns after a gap, never after a deliberate stop', () => {
-    const { connection, onResync } = setup()
+    const connected = new FakeConnection()
+    connected.state = HubConnectionState.Connected
+    const { onResync } = setup({ connection: connected })
 
-    act(() => connection.setState(HubConnectionState.Connected))
+    act(() => connected.setState(HubConnectionState.Connected))
     expect(onResync).not.toHaveBeenCalled()
 
-    act(() => connection.setState(HubConnectionState.Disconnected, 'stopped'))
-    act(() => connection.setState(HubConnectionState.Connected))
+    act(() => connected.setState(HubConnectionState.Disconnected, 'stopped'))
+    act(() => connected.setState(HubConnectionState.Connected))
     expect(onResync).not.toHaveBeenCalled()
 
-    act(() => connection.setState(HubConnectionState.Reconnecting))
-    act(() => connection.setState(HubConnectionState.Connected))
+    act(() => connected.setState(HubConnectionState.Reconnecting))
+    act(() => connected.setState(HubConnectionState.Connected))
     expect(onResync).toHaveBeenCalledTimes(1)
   })
 
@@ -325,6 +334,85 @@ describe('useChannelStream', () => {
 
     act(() => hook.result.current.clearNewItems())
     expect(hook.result.current.newItemCount).toBe(0)
+  })
+
+  it('restarts the shared connection after a deliberate stop when a token is stored', () => {
+    const { connection } = setup()
+    expect(connection.startCalls).toBe(1)
+
+    tokenState.token = null
+    act(() => connection.setState(HubConnectionState.Disconnected, 'stopped'))
+    expect(connection.startCalls).toBe(1)
+
+    tokenState.token = 'next-identity'
+    act(() => connection.setState(HubConnectionState.Disconnected, 'stopped'))
+    expect(connection.startCalls).toBe(2)
+    tokenState.token = null
+  })
+
+  it('bumps announcementSeq so an identical message is announced again', () => {
+    const { connection, flush, hook } = setup()
+
+    connection.emit('ContentPublished', published())
+    flush()
+    expect(hook.result.current.announcementSeq).toBe(1)
+    act(() => {
+      vi.advanceTimersByTime(CHANNEL_STREAM_ANNOUNCE_WINDOW_MS)
+    })
+    connection.emit('ContentPublished', published())
+    flush()
+
+    expect(hook.result.current.announcement).toBe('1 new story')
+    expect(hook.result.current.announcementSeq).toBe(2)
+  })
+
+  it('resyncs once when it mounts before the hub is connected (frames may have been missed)', () => {
+    const { connection, onResync } = setup()
+
+    act(() => connection.setState(HubConnectionState.Connected))
+    act(() => connection.setState(HubConnectionState.Connected))
+
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts a retracted-then-restored item as new again', () => {
+    const { connection, flush, hook, announce } = setup()
+    const a = published()
+
+    connection.emit('ContentPublished', a)
+    flush()
+    connection.emit('ContentRetracted', retracted(a.id, a.permalink))
+    flush()
+    expect(hook.result.current.newItemCount).toBe(0)
+
+    connection.emit('ContentPublished', a)
+    flush()
+    expect(hook.result.current.newItemCount).toBe(1)
+    act(() => {
+      vi.advanceTimersByTime(CHANNEL_STREAM_ANNOUNCE_WINDOW_MS)
+    })
+    expect(announce).toHaveBeenLastCalledWith('1 new story')
+  })
+
+  it('delivers the rest of a batch and keeps the count when one callback throws', () => {
+    const reported = vi.fn()
+    vi.stubGlobal('reportError', reported)
+    const delivered: string[] = []
+    const { connection, flush, hook } = setup({
+      onPublished: item => {
+        if (item.headline === 'boom') throw new Error('consumer bug')
+        delivered.push(item.id)
+      },
+    })
+    const items = [published(), published({ headline: 'boom' }), published()]
+
+    for (const item of items) connection.emit('ContentPublished', item)
+    flush()
+
+    expect(delivered).toEqual([items[0]?.id, items[2]?.id])
+    expect(hook.result.current.newItemCount).toBe(3)
+    expect(reported).toHaveBeenCalledWith(new Error('consumer bug'))
+    vi.unstubAllGlobals()
   })
 
   it('resets the count when the channel view changes', () => {
@@ -450,6 +538,44 @@ describe('useChannelStream', () => {
       expect(delivered).toEqual(sent)
       // 12 bursts -> 12 animation frames -> at most 12 renders (one per frame), never 120.
       expect(renders - rendersAtMount).toBeLessThanOrEqual(12)
+    })
+
+    it('renders at most once per animation frame at a steady 120 frames/min', () => {
+      vi.useRealTimers()
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'],
+      })
+      const connection = new FakeConnection()
+      let renders = 0
+      let flushes = 0
+      const scheduleFrame: FrameScheduler = callback => {
+        const handle = requestAnimationFrame(() => {
+          flushes += 1
+          callback()
+        })
+        return () => cancelAnimationFrame(handle)
+      }
+
+      function Probe(): null {
+        renders += 1
+        useChannelStream({ channelId: 'news', connection, scheduleFrame })
+        return null
+      }
+
+      render(<Probe />)
+      const rendersAtMount = renders
+
+      // Frames every 500 ms for 60 s, each landing between two animation frames.
+      for (let i = 0; i < 120; i += 1) {
+        act(() => {
+          connection.emit('ContentPublished', published())
+          vi.advanceTimersByTime(500)
+        })
+      }
+
+      expect(flushes).toBe(120)
+      // One render per flush, plus at most one per 5 s announcement window (12 in a minute).
+      expect(renders - rendersAtMount).toBeLessThanOrEqual(flushes + 12)
     })
 
     it('schedules one frame for any number of frames queued before it runs', () => {

@@ -15,7 +15,12 @@
  *     outlet is read from the permalink `/{channelId}/{outletSlug}/{slug}`.
  *   - Replays nothing: a frame that arrived before mount is gone. A page
  *     converges by REFETCHING when the hub comes back after a gap
- *     (`onResync`), exactly as the feed does - never by a server replay.
+ *     (`onResync`), exactly as the feed does - never by a server replay. A
+ *     frame can also arrive while the page's own read is in flight and appear
+ *     in both: consumers dedupe by `id`.
+ *   - A DELIBERATE stop (`'stopped'`: the session's identity changed) restarts
+ *     the shared connection when a token is stored, as the social feed's
+ *     re-attach does, so a channel page with no feed mounted stays live.
  *   - `AlertsChanged` is NOT handled here: the alert bar owns alerts and their
  *     announcements (PRT-010).
  *
@@ -37,7 +42,8 @@
  * exercise group; this hook adds no exercise id and widens no shape (XC-002).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { getAccessToken } from '@/core/auth/tokenStore'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
 import {
@@ -64,6 +70,12 @@ export const animationFrameScheduler: FrameScheduler = callback => {
   }
   const handle = setTimeout(callback, 16)
   return () => clearTimeout(handle)
+}
+
+/** Reports a consumer callback's error without aborting the flush. */
+function reportCallbackError(error: unknown): void {
+  if (typeof reportError === 'function') reportError(error)
+  else console.error(error)
 }
 
 /** The default announcement text. */
@@ -103,6 +115,11 @@ export interface UseChannelStreamResult {
   readonly clearNewItems: () => void
   /** The latest coalesced announcement, for a consumer-rendered polite live region. */
   readonly announcement: string
+  /**
+   * Increments with every announcement, so a consumer rendering `announcement` can re-announce an
+   * identical message (use it as the live region's `key`).
+   */
+  readonly announcementSeq: number
 }
 
 type QueuedFrame =
@@ -169,11 +186,12 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
   } = options
 
   const [newItemCount, setNewItemCount] = useState(0)
-  const [announcement, setAnnouncement] = useState('')
+  const [announcement, setAnnouncement] = useState({ message: '', seq: 0 })
 
   // Callbacks are read through a ref, so a consumer passing inline lambdas never re-subscribes.
+  // Updated in a layout effect, so a frame flushed right after a commit sees the new callbacks.
   const callbacksRef = useRef(options)
-  useEffect(() => {
+  useLayoutEffect(() => {
     callbacksRef.current = options
   })
 
@@ -188,12 +206,14 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
     let disposed = false
     let queue: QueuedFrame[] = []
     let cancelFrame: (() => void) | null = null
-    let hadGap = false
+    // Mounting before the hub is Connected is a gap too: frames sent between the page's own read
+    // and the connection coming up are missed, so the first Connected must resync.
+    let hadGap = connection.state !== HubConnectionState.Connected
 
     const coalescer = createAnnouncementCoalescer(count => {
       const format = callbacksRef.current.formatAnnouncement ?? defaultNewItemsMessage
       const message = format(count)
-      setAnnouncement(message)
+      setAnnouncement(previous => ({ message, seq: previous.seq + 1 }))
       callbacksRef.current.announce?.(message)
     })
 
@@ -210,19 +230,25 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
       const pendingBefore = pending.size
       let added = 0
       for (const frame of frames) {
-        if (frame.kind === 'published') {
-          if (!seenIdsRef.current.has(frame.item.id)) {
-            seenIdsRef.current.add(frame.item.id)
-            pending.add(frame.item.id)
-            added += 1
+        // One consumer callback that throws must not lose the rest of the batch or the count.
+        try {
+          if (frame.kind === 'published') {
+            if (!seenIdsRef.current.has(frame.item.id)) {
+              seenIdsRef.current.add(frame.item.id)
+              pending.add(frame.item.id)
+              added += 1
+            }
+            callbacks.onPublished?.(frame.item)
+          } else if (frame.kind === 'revised') {
+            callbacks.onRevised?.(frame.frame)
+          } else {
+            // A retracted item is no longer "new", and a later restore of it is new again.
+            pending.delete(frame.frame.id)
+            seenIdsRef.current.delete(frame.frame.id)
+            callbacks.onRetracted?.(frame.frame)
           }
-          callbacks.onPublished?.(frame.item)
-        } else if (frame.kind === 'revised') {
-          callbacks.onRevised?.(frame.frame)
-        } else {
-          // A retracted item the reader has not loaded yet is no longer "new".
-          pending.delete(frame.frame.id)
-          callbacks.onRetracted?.(frame.frame)
+        } catch (error) {
+          reportCallbackError(error)
         }
       }
       if (pending.size !== pendingBefore || added > 0) setNewItemCount(pending.size)
@@ -255,7 +281,13 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
       if (disposed) return
       if (state !== HubConnectionState.Connected) {
         // A deliberate stop is the session reset's doing, not a missed-push window.
-        if (reason !== 'stopped') hadGap = true
+        if (reason !== 'stopped') {
+          hadGap = true
+        } else if (getAccessToken() !== null) {
+          connection.start().catch(() => {
+            hadGap = true
+          })
+        }
         return
       }
       if (!hadGap) return
@@ -282,7 +314,7 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
       seenIdsRef.current = new Set()
       pendingIdsRef.current = new Set()
       setNewItemCount(0)
-      setAnnouncement('')
+      setAnnouncement({ message: '', seq: 0 })
     }
   }, [enabled, channelId, outletSlug, connection, scheduleFrame])
 
@@ -291,5 +323,10 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
     setNewItemCount(0)
   }, [])
 
-  return { newItemCount, clearNewItems, announcement }
+  return {
+    newItemCount,
+    clearNewItems,
+    announcement: announcement.message,
+    announcementSeq: announcement.seq,
+  }
 }
