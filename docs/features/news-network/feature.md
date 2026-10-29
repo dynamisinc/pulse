@@ -90,8 +90,7 @@ Already-built and reused: server scenario clock, media pipeline and watermark ba
 ### NewsNow (PDF-05) interaction
 `post-demo-feedback` PDF-05 ("NewsNow ... embedding is preferred", triaged **Won't (confirm demand)**) concerns *embedding* Looking Glass's NewsNow, a different thing from E4. E4 is the native
 replacement: its Newsline 7 skin and the `/news/{outlet}/{slug}` permalink pattern already deliver the NewsNow experience (E4 epic: "Looking Glass parity target: NewsNow"). Interaction: **none in the build**; if demand for embedding
-returns, the feature note there ("`D3-news-outlets` is an approved design ... relevant if PDF-05 returns") holds, and E4's skins would be the native alternative. Recommended: mark PDF-05 "superseded by E4 for December" on the next triage pass
-(a post-demo-feedback edit this feature does not make).
+returns, the feature note there ("`D3-news-outlets` is an approved design ... relevant if PDF-05 returns") holds, and E4's skins would be the native alternative. **Done (Tom, 10/29):** PDF-05 is marked superseded by E4 in post-demo-feedback and #528 is closed.
 
 ## Out of scope (parked)
 Comments (never, NWS-031); paywall/subscription theater (epic Q2: never); participant-authored articles (epic §4: via E5); standalone video platform; Beat asset picker via E9 (Phase 4, upload only now);

@@ -32,8 +32,8 @@
 | **Total in scope** | | **92** | **18 / 52 / 22** | **≈ 145.0** | | |
 | *Deferred (post-December), kept in the docs, no issues* | | *4* | *(M, L, M, L)* | *(≈ 8.0)* | press 03; portal 05, 08, 20 | |
 
-\* Sittings use the features' own guide (S ≈ 1 focused sitting, M ≈ 1–2, L ≈ 2–3) at S = 1, M = 1.5, L = 2.5. It is a sizing aid, not a schedule. **Change from the 10/21 plan (94 stories, 23 / 51 / 20, ≈ 154; **10/29 follow-up: +foundation 22 (M) and 23 (S) → 92 stories, 18 / 52 / 22, ≈ 145.0**):** −4 stories deferred
-(press 03, portal 05/08/20), press 02 L → M, portal 18 L → M, portal 19 L → M, portal 01 M → S (schema folded into F01), so L drops 23 → 18, M stays 51, S rises 20 → 21 and sittings fall ≈ 154 → ≈ 142.5 (−11.5).
+\* Sittings use the features' own guide (S ≈ 1 focused sitting, M ≈ 1–2, L ≈ 2–3) at S = 1, M = 1.5, L = 2.5. It is a sizing aid, not a schedule. **Change from the 10/21 plan (94 stories, 23 / 51 / 20, ≈ 154):** −4 stories deferred
+(press 03, portal 05/08/20), press 02 L → M, portal 18 L → M, portal 19 L → M, portal 01 M → S (schema folded into F01), so L drops 23 → 18, M stays 51, S rises 20 → 21 and sittings fall ≈ 154 → ≈ 142.5 (−11.5). **Then the 10/29 follow-up added foundation 22 (M) and 23 (S): 92 stories, 18 / 52 / 22, ≈ 145.0.**
 Earlier consolidation changes still stand: **foundation 13 M → L** (external skin registration, token-object scope, reset boundary, fonts); **foundation story 21 added** (M). Foundation 01 stays L but is now the heaviest story (it also carries the folded portal/zone/inject schema);
 foundation 04 stays L (12 ACs; split seam documented in its tech notes).
 
@@ -234,7 +234,7 @@ Each item is ticked in `docs/design/D3-news-outlets/STORY-UPDATES.md` / `docs/de
 | I-3 | Weather FU-2 wanted `DefaultAlertMapping` to be the alert default on the no-dialog path; news E4-Q8 needs it to never raise an alert | Resolved: `DefaultAlertMapping` is a suggestion only; weather supplies `ResolvePublishOptions` (FC-7a) |
 | I-4 | Press 01 listed "can run with 04" while 04 depends on 01; weather 12 depends on 11 yet listed it as can-run-with | Same-wave serial edges, recorded in section 2; press text corrected on 10/21; **weather corrected 10/29: 12 explicitly waits for 11** (the timeline's edit action delegates to 11's editors), and 11/12's can-run-with lists no longer name each other (weather `feature.md`, `implementation.md`, stories 11 and 12) |
 | I-5 | Feature-local wave numbering differs (press/weather use the foundation axis; news/portal are local) | Combined waves (section 2) with six explicit moves; per-feature tables untouched |
-| I-6 | Portal 18 owned a `ShellLayout.tsx` edit that is really a platform change in a Complete shell story | Moved to PP-2; portal 18 now consumes it (nobody has yet accepted ownership of PP-1/PP-2/PP-3; the orchestrator must) |
+| I-6 | Portal 18 owned a `ShellLayout.tsx` edit that is really a platform change in a Complete shell story | Moved to PP-2; portal 18 now consumes it (PP-2 and PP-3 are now foundation stories 22 (#788) and 23 (#789); PP-1 is deferred with portal 05) |
 | I-7 | "Only F01 and F16 own migrations" contradicted three channel features | Replaced by the ledger (section 3) |
 | I-8 | Foundation F04 now exceeds the 3–7 AC guideline (12) | Existing foundation stories already ran 8–10; split seam documented in F04 tech notes, not split |
 | I-9 | **New 10/29 — F01 now carries other features' schema** (Q-28). A column discovered after M1 merges would have been a cheap amendment under the 10/21 ledger | The folded column specs (portal PC-2 minus `PortalDisplay`, the weather zone columns, the inject column) are **frozen before CW1 starts**; a late column is an orchestrator-approved additive follow-on migration numbered after M2, never a rewrite of M1 (ledger rule 6) |

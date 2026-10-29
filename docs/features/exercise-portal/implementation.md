@@ -177,9 +177,9 @@ All nine follow-ups and the four channel requests were resolved in the December 
 | FU-4 | Token-object skin scope; reusable server-side override validator | (a) **F13** `SkinScope` + `registerSkinTokens`/`registerSkinExtension`; (b) **F03** public `ISkinOverridesValidator` (`ext.portal`). |
 | FU-5 | `display` session purpose + actor kind (E1 identity) | **Platform prerequisite PP-1 — Deferred (post-December)** with the display credential. Verified: **kiosk-lite needs no identity change** (the shared view-only login already mints `readonly` sessions with an ephemeral identity). |
 | FU-6 | Per-display realtime group | **PP-4**, parked; no display state exists in December. |
-| FU-7 | participant-shell/06 AC2 kiosk chrome | **Platform prerequisite PP-2** (owner `participant-shell` story 06). Story 18 no longer edits `ShellLayout.tsx`. |
+| FU-7 | participant-shell/06 AC2 kiosk chrome | **Platform prerequisite PP-2**, built as foundation story 22 (#788). Story 18 no longer edits `ShellLayout.tsx`. |
 | FU-8 | Atomic multi-item featured reorder | **F07** `POST /api/content-items/feature/reorder`; story 22 uses it. |
-| FU-9 | `isWatermarkRequired` true for `variant === 'kiosk'` | **PP-2** (the helper clause ships with the shell kiosk work); story 18 tests the frame. |
+| FU-9 | `isWatermarkRequired` true for `variant === 'kiosk'` | **PP-2**, foundation story 22 (#788) ships the helper clause; story 18 tests the frame. |
 
 ## Channel requests — resolved
 | # | To | Request | Resolved in |

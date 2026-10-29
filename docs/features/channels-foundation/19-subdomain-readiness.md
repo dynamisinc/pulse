@@ -5,7 +5,7 @@
 **Stack:** fullstack  ·  **World:** participant  ·  **Wave:** 4  ·  **Effort:** S
 
 ## Context
-PDF-11 puts each exercise on its own subdomain (`exercise-a.<env-host>`) with wildcard DNS/cert via Front Door; a rename keeps the old host as an alias; the host is kept while archived.
+PDF-11 puts each exercise on its own subdomain (`exercise-a.<env-host>`) with wildcard DNS/cert (Front Door or App Service, decided at build); a rename keeps the old host as an alias; the host is kept while archived.
 Channel content makes this sharper: permalinks are **shared in posts and opened on phones**, so one baked-in hostname or absolute URL breaks across exercises. This story guarantees the
 foundation is host-agnostic and proves it with tripwires the channel stories inherit. The provisioning itself is PDF-11's.
 
@@ -18,7 +18,7 @@ foundation is host-agnostic and proves it with tripwires the channel stories inh
 - [ ] **No absolute canonical/OG tags.** Pages rendered for a permalink set no absolute `<link rel=canonical>` or OG URL from config; any such tag is built from `window.location.origin` at render time (shared links shown in previews are a post concern, see story 18).
 
 ## Out of Scope
-Wildcard DNS, certificates, Front Door provisioning and the alias table (PDF-11 / #679 itself); custom customer domains beyond COR-008's existing support; server-side OG/unfurl endpoints.
+Wildcard DNS, certificates, the hosting/cert provisioning and the alias table (PDF-11 / #679 itself); custom customer domains beyond COR-008's existing support; server-side OG/unfurl endpoints.
 
 ## Technical Notes
 Files: `Features/Channels/Urls/**` (the `IContentPermalinks` implementation hardening + tripwire tests), `features/channels/urls/**`. Reuse `Features/ExerciseResolution` (`ExerciseHostName`, `HostExerciseResolver`) and the existing `exercise-isolation/08` + `/09` tests as the pattern.

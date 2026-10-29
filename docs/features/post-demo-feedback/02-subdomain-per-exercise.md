@@ -60,7 +60,7 @@ and DNS: Azure Front Door was the 10/21 choice, but Tom's 10/29 decision is **de
 bring-your-own wildcard cert (a cost not in view on 10/21). The builder brings costed options: **Front Door + a Key Vault
 wildcard cert from a CA with auto-renewal** versus **App Service + a Let's Encrypt wildcard via a DNS-challenge renewal job**
 (neither App Service nor Front Door managed certs issue wildcards), and confirms the choice and the renewal owner with Tom
-before provisioning. *(A prior review noted this reconfirm was missing from these notes; it is recorded here.)* Alias hosts
+before provisioning. Alias hosts
 need a small alias table checked by the resolver. Frontend: the API base URL must follow the page origin (today
 `VITE_API_URL` is fixed), or the API must be served from each subdomain; this is the main open design point. See
 `implementation.md`, Decision PDF-D6 (decided; Front Door vs App Service decide at build, Tom 10/29).

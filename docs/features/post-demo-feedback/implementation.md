@@ -29,7 +29,7 @@
 
 | Story | Stack | Likely files | Depends on | When | Effort |
 |---|---|---|---|---|---|
-| [02 Subdomain per exercise](02-subdomain-per-exercise.md) (#679) | fullstack + infra | `Features/ExerciseResolution/**`, infra DNS/cert scripts (Azure Front Door), `core/services/api.ts` + `validateEnv.ts`, link/QR URL builders, isolation suite | `exercise-isolation/08`; Front Door (shared with the PDF-03 backup site) | Before December | L |
+| [02 Subdomain per exercise](02-subdomain-per-exercise.md) (#679) | fullstack + infra | `Features/ExerciseResolution/**`, infra DNS/cert scripts (Front Door or App Service, decided at build), `core/services/api.ts` + `validateEnv.ts`, link/QR URL builders, isolation suite | `exercise-isolation/08`; the hosting choice (Front Door could be shared with the PDF-03 backup site) | Before December | L |
 | [03 508 attestation](03-section-508-attestation.md) (#680) | process + test tooling | `docs/compliance/ACR-Pulse.md`, shared axe test util, CI config, `CLAUDE.md`, `D0-FOUNDATIONS.md` | none | Start now; refresh per release | L |
 | [04 Back-pocket injects](04-back-pocket-injects.md) (#681) | fullstack | `Features/Injects/**`, `controller/runSheet/**`, run-sheet import, report | inject-queue 06/07, demo-feedback 10/23 | Before December | M |
 | [05 Due-outs](05-due-outs.md) (#682-#684) | non-code | docs only | DO1 needs the 10/17 run results, then steps up to 250 | Per Tom | n/a |

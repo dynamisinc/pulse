@@ -144,5 +144,5 @@ Consolidated and de-duplicated in [`../DECEMBER-RELEASE.md` § Open questions](.
 | E4-Q6 | December proceeds on D3 **exhibits 1a/1b fidelity** (grid + registers), though the full mockup (article states, homepage compositions per skin, mobile) is not delivered. Wait for the mockup or build to 1a/1b and iterate by token edit? | Build to 1a/1b; iterate via tokens. |
 | E4-Q7 | **Rich-text library** for the article body editor: is there an approved library, or pick one (e.g. TipTap/Lexical)? | **Decided: Tiptap** (Tom, 10/29, Q-13); must emit only the story-01 allowlist. |
 | E4-Q8 | A breaking article **suggests** an `advisory` alert-bar entry but never raises one itself (01). Confirm alerts stay an explicit publish option. | Confirmed as written. |
-| E4-Q9 | **NewsNow (PDF-05):** mark "superseded by E4 for December"? E4's Newsline 7 skin + permalinks already cover the NewsNow target. | Yes, on the next triage pass (no change made here). |
+| E4-Q9 | **NewsNow (PDF-05):** mark "superseded by E4 for December"? E4's Newsline 7 skin + permalinks already cover the NewsNow target. | **Decided (Tom, 10/29): superseded; #528 closed.** |
 | E4-Q10 | The embedded-post feature assumes **participants see posts only from their own exercise** and an article embedding a deleted post shows "post unavailable". OK? | Yes (XC-010 tombstone pattern). |

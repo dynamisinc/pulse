@@ -13,7 +13,7 @@ large type, EXERCISE chip always on) wrapped around the portal, kept alive unatt
 **Does kiosk-lite need an identity change? No — verified against the code (so PP-1 is no longer a December prerequisite).** The existing `SharedReadOnlyLoginService` (`POST /api/auth/shared`) already issues a
 `readonly`-kind, `isReadOnly: true`, persona-less session with a freshly generated ephemeral identity and `actor.kind: 'system'` login telemetry; `ReadOnlySessionWriteFilter` already returns 403 for every
 participant write; `TelemetryEnvelopeAuthority` already special-cases `readonly`; readonly sessions use the sliding access/refresh windows (default refresh window 12 h; they are not day-capped like participant sessions).
-The shell's `kiosk` variant flag and `affordancesAvailable('kiosk')` already exist; the chrome stripping and the watermark clause are **PP-2** (participant-shell/06 AC2 pulled forward), which stays a December prerequisite.
+The shell's `kiosk` variant flag and `affordancesAvailable('kiosk')` already exist; the chrome stripping and the watermark clause are **PP-2**, built as foundation story 22 (#788), which stays a December prerequisite.
 What kiosk-lite loses versus the Deferred design: per-display revoke (rotating the shared view-only code ends **every** view-only session, including the TV), per-display attribution/`display_session_started`, remote control,
 and "refresh until EndEx" (a screen left past the refresh window needs the code re-entered).
 
@@ -30,7 +30,7 @@ and "refresh until EndEx" (a screen left past the refresh window needs the code 
 The slide/portal board content (19); **Deferred (post-December, Q-35): the per-display credential and `/display/:token` route (05), display state and remote control (08), the console display control (20), `PortalDisplay`, PP-1, the `/display/*` hosting headers, per-display revoke and telemetry**; fullscreen API control (needs a user gesture; the operator presses F11), audio.
 
 ## Technical Notes
-Files: `features/portal/kiosk/frame/**` only (`KioskGate`, `useKioskMode`, `KioskFrame`); the `ShellLayout.tsx` kiosk branch and the `isWatermarkRequired` kiosk clause are PP-2, built under `participant-shell/06`. Publish `kiosk/frame/types.ts` (the `KioskFrame` props) first so 19 can start. Reuse `mountContract` `variant`, `OverlayLayer`, `tokenStore`, the existing read-only session flag from the login envelope. The login page already has the "View-only code" tab (`signInWithSharedCode`); no login UI change.
+Files: `features/portal/kiosk/frame/**` only (`KioskGate`, `useKioskMode`, `KioskFrame`); the `ShellLayout.tsx` kiosk branch and the `isWatermarkRequired` kiosk clause are PP-2, built as foundation story 22 (#788). Publish `kiosk/frame/types.ts` (the `KioskFrame` props) first so 19 can start. Reuse `mountContract` `variant`, `OverlayLayer`, `tokenStore`, the existing read-only session flag from the login envelope. The login page already has the "View-only code" tab (`signInWithSharedCode`); no login UI change.
 
 ## Dependencies
 06, 07 (skin, layout), **foundation story 22 / PP-2** (#788: kiosk chrome stripping + watermark clause; must merge by end of CW4), F11 (bar), F12 (landing). **No longer depends on 05 or 08 (Deferred) or PP-1.** Can run with 17, 19, 21, 22.
