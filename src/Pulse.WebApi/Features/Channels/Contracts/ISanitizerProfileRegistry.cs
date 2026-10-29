@@ -1,5 +1,7 @@
 namespace Pulse.WebApi.Features.Channels.Contracts;
 
+using System.Collections.Frozen;
+
 /// <summary>
 /// FC-7, named body-sanitization profiles over <c>PostSanitizer</c> (extended by profile, never forked;
 /// NFR-004). Implemented by channels-foundation story 04, which ships the built-ins <see cref="Plain"/>,
@@ -58,8 +60,11 @@ public sealed record SanitizerProfile
     /// The URL schemes a surviving <c>href</c> / <c>src</c> may use; host-relative paths
     /// (<see cref="ChannelVocabulary.IsHostRelativePath"/>) are always allowed. Any other value, including
     /// <c>javascript:</c>, <c>data:</c> and <c>vbscript:</c>, removes the attribute (NFR-004). A profile may narrow this
-    /// set; the registry refuses a profile that adds a script-capable scheme.
+    /// set; the registry implementation (story 04) MUST refuse a profile that adds a script-capable scheme.
     /// </summary>
-    public IReadOnlySet<string> AllowedUrlSchemes { get; init; } =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "https", "http", "mailto" };
+    public IReadOnlySet<string> AllowedUrlSchemes { get; init; } = DefaultUrlSchemes;
+
+    /// <summary>The default scheme allowlist: <c>https</c>, <c>http</c>, <c>mailto</c>. Immutable.</summary>
+    public static IReadOnlySet<string> DefaultUrlSchemes { get; } =
+        new[] { "https", "http", "mailto" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 }

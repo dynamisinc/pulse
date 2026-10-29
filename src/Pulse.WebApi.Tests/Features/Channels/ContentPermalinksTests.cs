@@ -61,6 +61,8 @@ public class ContentPermalinksTests
     [InlineData("/x?u=https://evil.test", false)]
     [InlineData("/\t/evil.test/x", false)]
     [InlineData("/\n/evil.test", false)]
+    [InlineData("/a\u0000b", false)]
+    [InlineData("/a\u0085b", false)]
     [InlineData("/\\evil.test", false)]
     [InlineData("", false)]
     [InlineData(null, false)]

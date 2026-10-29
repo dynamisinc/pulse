@@ -90,8 +90,9 @@ function isNullableIsoScenarioTime(value: unknown): value is string | null {
   return value === null || isIsoScenarioTime(value)
 }
 
+// C0, DEL and C1: the same set as .NET char.IsControl, so both sides agree.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
 
 /**
  * Whether `value` is a host-relative path: starts with a single `/`, carries

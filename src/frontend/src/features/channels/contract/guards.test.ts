@@ -72,7 +72,7 @@ describe('isHostRelativePath', () => {
 
   it.each([
     'https://x.test/news/a', '//x.test/news/a', 'news/a', '/x?u=https://evil.test', '\\\\x\\a',
-    '/\t/evil.test/x', '/\n/evil.test', '/a\u0000b',
+    '/\t/evil.test/x', '/\n/evil.test', '/a\u0000b', '/a\u0085b',
   ])(
     'rejects %s', value => expect(isHostRelativePath(value)).toBe(false),
   )

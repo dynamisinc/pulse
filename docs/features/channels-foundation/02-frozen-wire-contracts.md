@@ -18,6 +18,11 @@ FC-8). This story turns that document into code on both sides so a drift is a co
 - [ ] **Telemetry vocabulary, once for every channel (FC-6b).** Given the FC-6b list (foundation, news `content_video_play`/`content_video_progress`/`content_embed_open`, press `press_*`, weather `weather_zone_changed`, portal `portal_*`/`resource_view`/`display_*`), then `KNOWN_TELEMETRY_EVENT_TYPES` and the server vocabulary constants gain exactly those additive entries in this one edit, the v0 envelope schema test passes unchanged, and no channel story edits either list.
 - [ ] **Mock fixtures.** `features/channels/mocks/` supplies fixtures for one outlet per content channel, a published, a retracted and a revised item, and two alerts, served behind the shared axios client with a single env-guarded flip point (the `brandTokens.ts` pattern), so Wave-2+ frontend stories run without the backend.
 
+> **Build note (F02, #794; orchestrator option B):** the four FC-7 members typed on F01's `ContentItem` entity
+> (`IContentKindDescriptor.ResolvePublishOptions`, `IContentPublishGate`, `IContentPublishedObserver`,
+> `IPairedSocialPoster`) land in a follow-up commit on the same PR once F01 (#697) merges. The "Seams declared" AC
+> is not complete until then.
+
 ## Out of Scope
 Implementations of any seam; endpoints; the broadcaster implementation (story 09); skin token values (story 13 / E4); kind-specific payload shapes (each channel's descriptor).
 

@@ -307,13 +307,18 @@ public class ChannelContractParityTests
         private const string DummyConnectionString =
             "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
+        private readonly string? _previousConnectionString;
+
         public HostOptionsProbeFactory()
-            => Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+        {
+            _previousConnectionString = Environment.GetEnvironmentVariable(ConnectionStringEnvVar);
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+        }
 
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, _previousConnectionString);
         }
     }
 
