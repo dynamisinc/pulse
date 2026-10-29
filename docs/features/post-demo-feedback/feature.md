@@ -27,7 +27,7 @@ slice is pulled forward into the demo window** (Tom, 10/15): the load-test repor
 | PDF-11 | Subdomain per exercise (host-resolved, automated DNS + cert) | 10/20 demo: customer "really liked" `exercise-a.<env-host>` | **Must** | Not Started | #679 | [02](02-subdomain-per-exercise.md) |
 | PDF-12 | Section 508 attestation (ACR/VPAT, a11y gate, AT audit) | 10/20: we must attest/prove 508 compliance | **Must** | Not Started | #680 | [03](03-section-508-attestation.md) |
 | PDF-13 | Back-pocket injects (loaded, held in reserve, fired at discretion) | 10/20 demo ask | **Must** (December) | Not Started | #681 | [04](04-back-pocket-injects.md) |
-| PDF-BUG | New-posts pill shows nothing on load (fixed) | 10/20: with white noise on, the "N new posts" pill disappears on click but no new posts show | **Must** | **Fixed** (PR #678, merged 10/29); no issue by decision | — | — |
+| PDF-BUG | New-posts pill shows nothing on load (fixed) | 10/20: with white noise on, the "N new posts" pill disappears on click but no new posts show | **Must** | **Fixed** (PR #678, merged 10/29); no issue (Tom, 10/21) | — | — |
 
 ### Due-outs from the 10/20 demo (tracked tasks, not build stories)
 
@@ -54,21 +54,20 @@ above. Open questions were answered by Tom on 10/21 (decisions PDF-D6..D10); onl
      watermark (NFR-008) through the existing overlay.
    - **PDF-04 (Facebook-style)** is NOT part of this commitment. A customer also asked about other social platforms;
      Tom thinks it was a throwaway. Noted against PDF-04, no priority bump.
-   - Epics E3-E6 need decomposition into stories (today stubs). **Decided (Tom, 10/21): the December commitment is
-     FIRM; decompose now.** The schedule risk is **accepted**, with decomposition starting now (it is the next planning
-     task; see the Risks table in `implementation.md`).
+   - **Decided (Tom, 10/21): the December commitment is FIRM; decompose now.** The schedule risk is **accepted**.
+     Decomposed 10/29 in PR #686 (`docs/features/DECEMBER-RELEASE.md`; issues #688-#786).
 2. **Subdomain per exercise** loved by the customer: PDF-11, Must.
 3. **Cadence connection:** PDF-06 raised to Must. The ask is a **live connection** (two running systems exchanging
    exercise content), beyond the shared file format already delivered (#499/#518). **Decided (Tom, 10/21): Cadence
    drives Pulse.** Cadence owns the MSEL and the clock and pushes injects and clock changes into Pulse; Pulse fires
-   them and reports back. The clock seam exists: #678 made the server exercise clock authoritative
+   them and reports back. Seam note (added 10/29): #678 made the server exercise clock authoritative
    (`GET /api/clock` + `ScenarioClockChanged` push), and `IExerciseClock` was designed swappable, so a Cadence-linked
    clock provider plugs in there. Still to design before stories: auth between the two products and the shared
    inject-identity contract. CTL-012 / E9 (Phase 4) is the epic home and is pulled forward by this.
 4. **508 attestation:** PDF-12, Must.
 5. **Back-pocket injects:** PDF-13, Must, December.
 6. **Due-outs:** PDF-DO1..DO3, tracked tasks.
-7. **Bug:** PDF-BUG, Must. **Fixed by PR #678** (merged 10/29); no issue by decision. Root cause: noise posts were stamped by the server clock (frozen during a Freeze) while other posts used the browser wall clock, so feeds sorted noise below the top. Fix: every live post is stamped with the server clock, browsers sync to it, and the Live World cap and the unknown-author pill path are hardened.
+7. **Bug:** PDF-BUG, Must. **Fixed by PR #678** (merged 10/29); no issue (Tom, 10/21). Root cause: noise posts were stamped by the server clock (frozen during a Freeze) while other posts used the browser wall clock, so feeds sorted noise below the top. Fix: every live post is stamped with the server clock, browsers sync to it, and the Live World cap and the unknown-author pill path are hardened.
 
 ## Notes from the 10/15 analysis
 

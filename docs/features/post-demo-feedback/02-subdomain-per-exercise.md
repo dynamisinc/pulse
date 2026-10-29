@@ -18,13 +18,19 @@ exercise cannot change its host name after creation. UAT serves one host, bound 
 This story makes the subdomain the normal way an exercise is addressed, with no manual infra step per exercise.
 
 ## Acceptance Criteria
-- [ ] Given an environment with a configured base domain, when a controller creates an exercise with slug `exercise-a`,
+- [ ] Given an environment with a configured base domain, when a controller creates an exercise with host name `exercise-a`,
       then `exercise-a.<env-host>` resolves to that exercise with no manual DNS or certificate step (wildcard DNS record
-      and wildcard certificate for `*.<env-host>`, provisioned through **Azure Front Door**; one cert, not one binding per exercise).
+      and wildcard certificate for `*.<env-host>`, served by **Azure Front Door**; one cert, not one binding per exercise. Front Door managed certificates do not
+      cover wildcard domains, so the certificate is a wildcard cert held in Key Vault and referenced by Front Door; the
+      story names its issuer and an automated renewal owner, and provisioning is fully automatic, so no per-exercise lead time).
 - [ ] Given a wildcard cert and DNS in place, when an exercise is created, then the host name is validated (DNS-label
       rules, reserved names blocked such as `www`, `api`, `staff`, `admin`; unique per environment) and stored on
       `Exercise.Hostname`; the host lifecycle is decided (Tom, 10/21): kept while the exercise is
-      archived, freed when it is deleted, and a rename keeps the old host as an alias that still resolves to the same exercise.
+      archived, freed when it is deleted, and changing an exercise's host name ("rename" means the host name, not the
+      display name, which never affects routing) keeps the old host as an alias that still resolves to the same exercise.
+      Aliases count toward uniqueness and the reserved-name list, and are deleted with the exercise. A freed host (or alias)
+      is held for a quarantine period before another exercise may claim it (proposed default 30 days; confirm with Tom), so a stale link or QR card never lands a participant
+      in a different exercise (XC-001).
 - [ ] Given a request on an unknown or deleted exercise subdomain, when it reaches the API, then scope stays unset
       (fail closed, zero rows; an archived exercise's host still resolves and keeps its existing archived behavior) and the participant sees a neutral "exercise not found" page with no exercise list and no
       platform branding (COR-004, COR-008).
@@ -44,11 +50,13 @@ This story makes the subdomain the normal way an exercise is addressed, with no 
 
 ## Out of Scope
 Customer-branded custom domains beyond what 08 already supports (their cert automation is a follow-up); changing an
-exercise's slug after creation beyond the rename-with-alias rule; multi-region DNS; the Cadence connection (PDF-06).
+exercise's host name beyond the rename-with-alias rule; multi-region DNS; the Cadence connection (PDF-06).
 
 ## Technical Notes
 Backend: reuse `Features/ExerciseResolution/` and `IExerciseContext`; do not add a second resolver. Infra: wildcard cert
-and DNS through **Azure Front Door** (decided, Tom 10/21; App Service managed certs do not issue wildcards). Alias hosts
+and DNS through **Azure Front Door** (decided, Tom 10/21). Neither App Service nor Front Door managed certs issue
+wildcards, so the cert is bring-your-own in Key Vault (a CA with Key Vault auto-renewal, or an ACME renewal job);
+the builder confirms the issuer with Tom before provisioning. Alias hosts
 need a small alias table checked by the resolver. Frontend: the API base URL must follow the page origin (today
 `VITE_API_URL` is fixed), or the API must be served from each subdomain; this is the main open design point. See
 `implementation.md`, Decision PDF-D6 (decided).

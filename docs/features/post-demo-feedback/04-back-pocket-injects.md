@@ -22,7 +22,7 @@ must not be swept by a time-jump batch disposition (CTL-015). Reusing `held` wou
       automatically and is excluded from time-jump batch disposition and from pending/overdue counts.
 - [ ] Given a Reserve item, when a controller chooses Fire (confirm required), then it publishes through the same post funnel
       as any inject with the firing controller recorded and moves to `fired`; Edit-then-fire and Skip work as for other items.
-- [ ] Given the run-sheet import, when a row carries a reserve marker (column or value to be decided), then it imports as
+- [ ] Given the run-sheet import, when a row carries a reserve marker (the marker's column or value is decided by the builder in the story's PR and documented in the import guide), then it imports as
       Reserve; without the marker it behaves as today.
 - [ ] Given the exercise ends, when the report/export is produced, then fired reserve items are labelled "Reserve (fired)" and
       unused ones "Reserve (unused)", so the after-action review shows what was held back.
@@ -39,6 +39,8 @@ injects (CTL-012).
 Staff world, COBRA components only. Likely one new column (migration) on the inject item, a vocabulary entry, a console
 section and an import-column mapping. Interacts with `demo-feedback/23` (mark as fired): Mark fired from Reserve is allowed.
 Decided (Tom, 10/21): an unused reserve item stays `pending` (status untouched) and shows as "Reserve (unused)" in the report.
+Every "pending" count, time-jump disposition and overdue check filters on `IsReserve = false`; the status alone never
+distinguishes a reserve item.
 
 ## Dependencies
 inject-queue `06`/`07`, `demo-feedback/10` (run sheet import), `demo-feedback/23`. Part of the December release.
