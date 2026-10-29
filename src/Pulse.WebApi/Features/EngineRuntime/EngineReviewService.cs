@@ -2175,7 +2175,7 @@ public sealed partial class EngineReviewTickHost : BackgroundService
     /// <see cref="EngineReviewTickSignal"/> wakes the tick. A countdown expires against its exercise's scenario minute,
     /// so nothing can expire while nothing counts down or while every counting-down exercise's clock is frozen or not
     /// started. Every write that starts a countdown wakes the tick, and so does every clock change (a
-    /// <c>WakeOnClockChange</c> listener), so an idle tick does no database work and the serverless database can
+    /// <c>WakeOnClockChange</c> observer), so an idle tick does no database work and the serverless database can
     /// auto-pause between exercises — Freeze included.
     /// </summary>
     public static readonly TimeSpan IdleSleep = Timeout.InfiniteTimeSpan;

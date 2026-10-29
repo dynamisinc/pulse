@@ -47,7 +47,7 @@ public sealed class IdleBackgroundWorkCompositionRootTests
         Field(scope.ServiceProvider.GetRequiredService<EngineReviewService>(), "_tickSignal").Should().BeSameAs(
             signal, "a re-roll that restarts a countdown must wake the tick (the parameter is optional, so only this proves DI supplies it)");
 
-        ClockListenerSignals(factory).Should().Contain(signal, "a clock that starts or unfreezes can make a countdown progress");
+        ClockObserverSignals(factory).Should().Contain(signal, "a clock that starts or unfreezes can make a countdown progress");
         SweepSignals(factory).Should().Contain(signal);
     }
 
@@ -63,7 +63,7 @@ public sealed class IdleBackgroundWorkCompositionRootTests
         Field(scope.ServiceProvider.GetRequiredService<WhiteNoiseService>(), "_pacerSignal").Should().BeSameAs(
             signal, "level and pool changes must wake the pacer");
 
-        ClockListenerSignals(factory).Should().Contain(signal, "leaving Freeze unfreezes the clock, which must wake the pacer");
+        ClockObserverSignals(factory).Should().Contain(signal, "leaving Freeze unfreezes the clock, which must wake the pacer");
         SweepSignals(factory).Should().Contain(signal);
     }
 
@@ -98,12 +98,12 @@ public sealed class IdleBackgroundWorkCompositionRootTests
     private static IEnumerable<WakeSignal> SweepSignals(WiringProbeFactory factory) =>
         ((IEnumerable<WakeSignal>)Field(Hosted<BackgroundWorkSafetySweep>(factory), "_signals")!).ToList();
 
-    private static IEnumerable<WakeSignal> ClockListenerSignals(WiringProbeFactory factory)
+    private static IEnumerable<WakeSignal> ClockObserverSignals(WiringProbeFactory factory)
     {
         var clock = factory.Services.GetRequiredService<IExerciseClock>();
         clock.Should().BeOfType<ExerciseClockService>();
-        var listeners = (IEnumerable<IExerciseClockChangeListener>)Field(clock, "_listeners")!;
-        return listeners.OfType<WakeOnClockChange>().Select(listener => (WakeSignal)Field(listener, "_signal")!).ToList();
+        var observers = (IEnumerable<IExerciseClockChangeObserver>)Field(clock, "_observers")!;
+        return observers.OfType<WakeOnClockChange>().Select(observer => (WakeSignal)Field(observer, "_signal")!).ToList();
     }
 
     private static object? Field(object target, string name)

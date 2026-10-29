@@ -31,7 +31,7 @@ public static class BackgroundWorkServiceCollectionExtensions
         services.AddSingleton<WakeSignal>(provider => provider.GetRequiredService<TSignal>());
         if (wakeOnClockChange)
         {
-            services.AddSingleton<IExerciseClockChangeListener>(
+            services.AddSingleton<IExerciseClockChangeObserver>(
                 provider => new WakeOnClockChange(provider.GetRequiredService<TSignal>()));
         }
 

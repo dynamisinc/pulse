@@ -25,7 +25,7 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
 {
     private readonly TimeProvider _timeProvider;
     private readonly IExerciseClockChangeSink _changeSink;
-    private readonly IExerciseClockChangeListener[] _listeners;
+    private readonly IExerciseClockChangeObserver[] _observers;
     private readonly ConcurrentDictionary<Guid, ExerciseClockState> _clocks = new();
 
     /// <summary>Creates the native clock over <paramref name="timeProvider"/> with no persistence hook.</summary>
@@ -47,23 +47,24 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
     }
 
     /// <summary>
-    /// Creates the native clock, telling <paramref name="changeSink"/> and then every one of
-    /// <paramref name="listeners"/> after every anchor change.
+    /// Creates the native clock over <paramref name="timeProvider"/>, telling <paramref name="changeSink"/> after
+    /// every anchor change and every <paramref name="observers"/> entry after every state change (including a
+    /// <see cref="Restore"/> and a <see cref="Clear"/>; fix/noise-new-posts-clock's <c>ScenarioClockChanged</c> push).
     /// </summary>
     /// <param name="timeProvider">The time source scenario time advances against; injected for testability.</param>
     /// <param name="changeSink">Told after every Start/Freeze/Unfreeze/Jump; must never block or throw.</param>
-    /// <param name="listeners">Also told after every change (e.g. to wake sleeping background services).</param>
+    /// <param name="observers">Told after every state change; each must never block or throw.</param>
     public ExerciseClockService(
         TimeProvider timeProvider,
         IExerciseClockChangeSink changeSink,
-        IEnumerable<IExerciseClockChangeListener> listeners)
+        IEnumerable<IExerciseClockChangeObserver> observers)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(changeSink);
-        ArgumentNullException.ThrowIfNull(listeners);
+        ArgumentNullException.ThrowIfNull(observers);
         _timeProvider = timeProvider;
         _changeSink = changeSink;
-        _listeners = listeners.ToArray();
+        _observers = [.. observers];
     }
 
     /// <inheritdoc />
@@ -139,7 +140,8 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
         var downtime = utcNow - anchor.WallAnchorUtc;
         var elapsed = anchor.Frozen || downtime < TimeSpan.Zero ? banked : banked + downtime;
 
-        // Re-anchored at NOW in this process (monotonic + UTC together); deliberately no change notification.
+        // Re-anchored at NOW in this process (monotonic + UTC together); deliberately no SINK notification (the row
+        // it came from is already current) — only the observers hear it, so connected clients learn the restored state.
         _clocks[exerciseId] = new ExerciseClockState(
             anchor.ScenarioStart,
             anchor.TimeZone,
@@ -147,18 +149,46 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
             _timeProvider.GetTimestamp(),
             utcNow,
             anchor.Frozen);
+        NotifyObservers(exerciseId);
     }
 
     /// <inheritdoc />
-    public bool Clear(Guid exerciseId) => _clocks.TryRemove(exerciseId, out _);
+    public bool Clear(Guid exerciseId)
+    {
+        // No sink notification (the reset deletes the row itself); observers hear the clock go back to unstarted.
+        var cleared = _clocks.TryRemove(exerciseId, out _);
+        if (cleared)
+        {
+            NotifyObservers(exerciseId);
+        }
 
-    /// <summary>Tells the sink, then every listener, that <paramref name="exerciseId"/>'s anchor changed.</summary>
+        return cleared;
+    }
+
+    /// <summary>An anchor change: the persistence sink first, then the observers.</summary>
     private void NotifyChanged(Guid exerciseId)
     {
         _changeSink.ClockChanged(exerciseId);
-        foreach (var listener in _listeners)
+        NotifyObservers(exerciseId);
+    }
+
+    /// <summary>
+    /// Tells every observer. An observer is contracted never to throw; a misbehaving one is still contained here so
+    /// it can never fail a mutator that has ALREADY applied (nor starve the observers after it).
+    /// </summary>
+    private void NotifyObservers(Guid exerciseId)
+    {
+        foreach (var observer in _observers)
         {
-            listener.ClockChanged(exerciseId);
+            try
+            {
+                observer.ClockChanged(exerciseId);
+            }
+#pragma warning disable CA1031 // The clock change has applied; an observer fault must never surface through the mutator.
+            catch (Exception)
+            {
+            }
+#pragma warning restore CA1031
         }
     }
 

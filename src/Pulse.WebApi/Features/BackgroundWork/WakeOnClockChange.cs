@@ -5,13 +5,14 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// <summary>
 /// Wakes a <see cref="WakeSignal"/> whenever any exercise clock changes. A service that treats "no exercise clock is
 /// running" as idle (nothing it watches can progress) registers one, so a clock that starts or unfreezes — the reaction
-/// loop's first tick, leaving Freeze — wakes it. Never blocks or throws (<see cref="WakeSignal.Wake"/> is a TryWrite).
+/// loop's first tick, leaving Freeze — wakes it. An <see cref="IExerciseClockChangeObserver"/>, so it composes with the
+/// persistence sink and the other observers; it never blocks or throws (<see cref="WakeSignal.Wake"/> is a TryWrite).
 /// </summary>
-public sealed class WakeOnClockChange : IExerciseClockChangeListener
+public sealed class WakeOnClockChange : IExerciseClockChangeObserver
 {
     private readonly WakeSignal _signal;
 
-    /// <summary>Creates the listener.</summary>
+    /// <summary>Creates the observer.</summary>
     /// <param name="signal">The signal to wake.</param>
     public WakeOnClockChange(WakeSignal signal)
     {

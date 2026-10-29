@@ -249,24 +249,24 @@ public sealed class IdleBackgroundWorkTests
         }
     }
 
-    // ---- The clock's change listeners ------------------------------------------------------------------------------
+    // ---- Waking on clock changes -----------------------------------------------------------------------------------
 
     [Fact]
-    public void Clock_TellsEveryListener_OnStartFreezeUnfreezeAndJump_ButNotOnARestore()
+    public async Task WakeOnClockChange_WakesTheSleeper_WhenAClockStartsOrUnfreezes()
     {
-        var changes = new List<Guid>();
-        var clock = new ExerciseClockService(TimeProvider.System, new NullExerciseClockChangeSink(), [new RecordingListener(changes)]);
+        // The clock's observers (IExerciseClockChangeObserver) are told after every state change; the wake observer
+        // turns each into a wake, so a sleeper that treats "no clock running" as idle hears the clock come back.
+        var signal = new WakeSignal();
+        var clock = new ExerciseClockService(TimeProvider.System, new NullExerciseClockChangeSink(), [new WakeOnClockChange(signal)]);
         var exerciseId = Guid.NewGuid();
 
         clock.Start(exerciseId, DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
-        clock.Freeze(exerciseId);
-        clock.Unfreeze(exerciseId);
-        clock.Jump(exerciseId, 10);
-        changes.Should().Equal([exerciseId, exerciseId, exerciseId, exerciseId]);
+        (await IsWoken(signal)).Should().BeTrue("the reaction loop's first tick starts the clock");
 
-        // Restore runs at start-up, before any sleeper's first sweep, and is deliberately silent (as for the sink).
-        clock.Restore(Guid.NewGuid(), clock.GetAnchor(exerciseId)!);
-        changes.Should().HaveCount(4);
+        clock.Freeze(exerciseId);
+        await IsWoken(signal); // drain: a freeze wakes too, harmlessly (the sleeper re-checks and sleeps again)
+        clock.Unfreeze(exerciseId);
+        (await IsWoken(signal)).Should().BeTrue("leaving Freeze unfreezes the clock");
     }
 
     // ---- The safety sweep ------------------------------------------------------------------------------------------
@@ -311,7 +311,7 @@ public sealed class IdleBackgroundWorkTests
     }
 
     [Fact]
-    public void AddWakeSignal_IsIdempotent_AndAddsAClockListenerOnlyWhenAsked()
+    public void AddWakeSignal_IsIdempotent_AndAddsAClockObserverOnlyWhenAsked()
     {
         var services = new ServiceCollection();
         services.AddWakeSignal<EngineReviewTickSignal>(wakeOnClockChange: true);
@@ -320,7 +320,7 @@ public sealed class IdleBackgroundWorkTests
 
         services.Count(d => d.ServiceType == typeof(EngineReviewTickSignal)).Should().Be(1);
         services.Count(d => d.ServiceType == typeof(WakeSignal)).Should().Be(2);
-        services.Count(d => d.ServiceType == typeof(IExerciseClockChangeListener)).Should().Be(
+        services.Count(d => d.ServiceType == typeof(IExerciseClockChangeObserver)).Should().Be(
             1, "the inject runner paces on the wall clock, so only the review tick listens for clock changes");
     }
 
@@ -435,11 +435,5 @@ public sealed class IdleBackgroundWorkTests
 
             return false;
         }
-    }
-
-    /// <summary>Records every clock change it is told about.</summary>
-    private sealed class RecordingListener(List<Guid> changes) : IExerciseClockChangeListener
-    {
-        public void ClockChanged(Guid exerciseId) => changes.Add(exerciseId);
     }
 }

@@ -684,6 +684,50 @@ public class PostWriteEndpointTests
         document.RootElement.TryGetProperty("actingHumanId", out _).Should().BeFalse();
     }
 
+    [RequiresDockerFact]
+    public async Task WithAFrozenServerClock_HttpPostsAreStampedWithIt_AndOnlyAStaffBackdateKeepsTheClientValue()
+    {
+        // fix/noise-new-posts-clock §3 over the REAL pipeline: the clock is the host's own singleton, frozen at a scenario
+        // instant far from the client's value, and "backdate" binds from the JSON body.
+        var world = await SeedWorldAsync();
+        await using var factory = CreateFactory();
+        var clock = factory.Services.GetRequiredService<Pulse.WebApi.Features.EngineRuntime.Clock.IExerciseClock>();
+        // After the client's 14:00Z, so the backdated value is genuinely EARLIER than the clock (W-003 clamps later ones).
+        var scenarioStart = new DateTimeOffset(2033, 6, 14, 18, 0, 0, TimeSpan.Zero);
+        clock.Start(world.Exercise, scenarioStart, TimeZoneInfo.Utc);
+        clock.Freeze(world.Exercise);
+        clock.Jump(world.Exercise, 20);
+        var frozenAt = clock.CurrentScenarioTime(world.Exercise)!.Value;
+        var client = DateTimeOffset.Parse("2033-06-14T09:00:00-05:00", System.Globalization.CultureInfo.InvariantCulture);
+
+        using var participant = factory.CreateClientFor(world.Host, world.ParticipantToken);
+        using var staff = factory.CreateClientFor(world.Host, world.StaffToken);
+
+        var participantBody = ValidRequestBody(world.ParticipantPersona, "participant");
+        participantBody["backdate"] = true;
+        var staffBody = ValidRequestBody(world.OtherPersona, "controller-as-persona");
+        var backdatedBody = ValidRequestBody(world.OtherPersona, "controller-as-persona", text: "Backdated");
+        backdatedBody["backdate"] = true;
+
+        var participantPost = await participant.PostAsync(PostsUri, JsonContent(participantBody));
+        var staffPost = await staff.PostAsync(PostsUri, JsonContent(staffBody));
+        var backdatedPost = await staff.PostAsync(PostsUri, JsonContent(backdatedBody));
+        participantPost.StatusCode.Should().Be(HttpStatusCode.Created);
+        staffPost.StatusCode.Should().Be(HttpStatusCode.Created);
+        backdatedPost.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        await using var read = _fixture.CreateContext();
+        var stored = await read.Posts.IgnoreQueryFilters().Where(p => p.ExerciseId == world.Exercise)
+            .ToDictionaryAsync(p => p.Id, p => p.CreatedScenarioTime);
+        stored[await ReadPostIdAsync(participantPost)].Should().Be(frozenAt, "a participant's backdate is ignored, never honoured");
+        stored[await ReadPostIdAsync(staffPost)].Should().Be(frozenAt, "a staff post without backdate takes the server clock");
+        stored[await ReadPostIdAsync(backdatedPost)].Should().Be(client, "a staff controller-as-persona backdate keeps its value");
+
+        using var staffDocument = JsonDocument.Parse(await staffPost.Content.ReadAsStringAsync());
+        DateTimeOffset.Parse(staffDocument.RootElement.GetProperty("scenarioTime").GetString()!, System.Globalization.CultureInfo.InvariantCulture)
+            .Should().Be(frozenAt, "the 201 echoes the stamped time");
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------

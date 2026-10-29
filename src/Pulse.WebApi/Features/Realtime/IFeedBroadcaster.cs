@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Realtime;
 
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
@@ -113,5 +114,25 @@ public interface IFeedBroadcaster
     /// <returns>A task that completes when the change has been dispatched.</returns>
     Task BroadcastPostEngagementChangedAsync(
         Guid exerciseId, PostEngagementChangedDto change, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that its scenario clock changed (fix/noise-new-posts-clock): a Start, Freeze,
+    /// Unfreeze, Jump, startup restore or reset. The payload is ONLY <see cref="ScenarioClockChangedDto"/>
+    /// (<c>ScenarioClockChanged { exerciseId, started, frozen, scenarioTime, serverTime }</c>): scenario time and the server wall
+    /// clock at the same read, never the pause tier or who changed it (XC-002). It goes to the exercise-wide group
+    /// (participants AND staff, who are members of it) only while <c>IsLivePushOpen</c> holds; otherwise to the staff
+    /// group only (#375, see the type remarks), so staff consoles receive it in every state, exactly once.
+    /// </summary>
+    /// <remarks>
+    /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate the
+    /// server clock keep compiling unchanged. <c>SignalRFeedBroadcaster</c> implements the real fan-out.
+    /// </remarks>
+    /// <param name="exerciseId">The exercise whose clock changed (COR-001 scope).</param>
+    /// <param name="clock">The frame: the clock state read at send time plus the exercise id (W-001).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastScenarioClockChangedAsync(
+        Guid exerciseId, ScenarioClockChangedDto clock, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

@@ -40,7 +40,7 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// (<see cref="WhiteNoisePacerOptions.IdleSleep"/>, indefinitely by default) instead of sweeping every second. The
 /// writes that can make an exercise able to post wake it through <see cref="WhiteNoisePacerSignal"/>: a level change
 /// and a pool change in <see cref="WhiteNoiseService"/>, after they commit, and every exercise clock change (a
-/// <c>WakeOnClockChange</c> listener — leaving Freeze unfreezes the clock). Sweeping every second while idle kept the
+/// <c>WakeOnClockChange</c> observer — leaving Freeze unfreezes the clock). Sweeping every second while idle kept the
 /// serverless database from ever auto-pausing. A lifecycle that is not staged or live is read per exercise from the
 /// database, so an exercise past EndEx with noise left on still ticks; turn noise off to let the pacer sleep.
 /// </para>

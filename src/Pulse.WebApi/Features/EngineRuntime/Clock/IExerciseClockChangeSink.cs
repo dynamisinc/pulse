@@ -19,19 +19,6 @@ public interface IExerciseClockChangeSink
 }
 
 /// <summary>
-/// Told, like <see cref="IExerciseClockChangeSink"/>, that an exercise's clock anchor changed — but any number may be
-/// registered (the sink is a single slot the persistence slice owns). Background services that sleep while no exercise
-/// clock is running register one, so a clock that starts or unfreezes wakes them (idle-db-autopause). Same contract:
-/// never block, never throw.
-/// </summary>
-public interface IExerciseClockChangeListener
-{
-    /// <summary>Told that exercise <paramref name="exerciseId"/>'s clock anchor changed.</summary>
-    /// <param name="exerciseId">The exercise whose clock changed.</param>
-    void ClockChanged(Guid exerciseId);
-}
-
-/// <summary>
 /// The default <see cref="IExerciseClockChangeSink"/>: does nothing. Registered with <c>TryAddSingleton</c> by
 /// <see cref="ExerciseClockServiceCollectionExtensions.AddExerciseClock"/>, and replaced by
 /// <c>AddExerciseRuntimePersistence()</c> (story 18) with the queue that writes the anchor through.
@@ -42,4 +29,29 @@ public sealed class NullExerciseClockChangeSink : IExerciseClockChangeSink
     public void ClockChanged(Guid exerciseId)
     {
     }
+}
+
+/// <summary>
+/// Told, synchronously and AFTER the in-memory apply, that exercise <paramref name="exerciseId"/>'s clock state
+/// changed — the multi-registration hook beside the single <see cref="IExerciseClockChangeSink"/>
+/// (fix/noise-new-posts-clock). The persistence slice owns (and replaces) the one sink; observers are additive, so a
+/// second consumer (the <c>ScenarioClockChanged</c> push) composes with the write-through instead of displacing it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>When.</b> After every <see cref="IExerciseClock.Start"/>, <see cref="IExerciseClock.Freeze"/>,
+/// <see cref="IExerciseClock.Unfreeze"/> and <see cref="IExerciseClock.Jump"/> (like the sink), AND after
+/// <see cref="IExerciseClockPersistence.Restore"/> (the startup rehydrate) and <see cref="IExerciseClockPersistence.Clear"/>
+/// (the runtime reset) — neither of which tells the sink, because those writes are already current.
+/// </para>
+/// <para>
+/// <b>Contract: never block, never throw.</b> The same rule as the sink: the clock's mutators run inside
+/// <c>PauseTierRegistry</c>'s lock, so an implementation only QUEUES work and logs its own failures.
+/// </para>
+/// </remarks>
+public interface IExerciseClockChangeObserver
+{
+    /// <summary>Records that exercise <paramref name="exerciseId"/>'s clock state changed.</summary>
+    /// <param name="exerciseId">The exercise whose clock changed.</param>
+    void ClockChanged(Guid exerciseId);
 }

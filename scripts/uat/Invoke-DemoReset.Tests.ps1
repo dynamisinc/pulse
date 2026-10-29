@@ -189,6 +189,32 @@ Describe 'Invoke-DemoReset.ps1' {
             $byName['Test-DemoReady.ps1']['Json'] | Should -BeTrue
             (Split-Path -Parent $byName['Test-DemoReady.ps1']['JsonPath']) | Should -Be $run.LogFile.DirectoryName
         }
+
+        It 'passes -AllowLiveProvider to the pre-flight only, and only when given' {
+            $run = Invoke-Reset -Extra @{ AllowLiveProvider = $true }
+            $byName = @{}; foreach ($s in $global:ResetFake.Scripts) { $byName[$s.Name] = $s.Arguments }
+            $byName['Test-DemoReady.ps1']['AllowLiveProvider'] | Should -BeTrue
+            foreach ($other in 'Reset-DemoState.ps1', 'Clear-DemoContent.ps1', 'Seed-DemoContent.ps1') { $byName[$other].ContainsKey('AllowLiveProvider') | Should -BeFalse }
+
+            $global:ResetFake.Scripts.Clear()
+            $run = Invoke-Reset
+            $byName = @{}; foreach ($s in $global:ResetFake.Scripts) { $byName[$s.Name] = $s.Arguments }
+            $byName['Test-DemoReady.ps1'].ContainsKey('AllowLiveProvider') | Should -BeFalse
+        }
+    }
+
+    Describe 'Script entry: every parameter reaches the run splat (PR #674 adversarial review W1)' {
+        It 'the script-level $runArguments carries each of the script''s parameters' {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptFile, [ref] $null, [ref] $null)
+            $parameters = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            $splat = $ast.EndBlock.Statements |
+                Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.VariablePath.UserPath -eq 'runArguments' } |
+                Select-Object -First 1
+            $splat | Should -Not -BeNullOrEmpty
+            $keys = @($splat.Right.Expression.KeyValuePairs | ForEach-Object { $_.Item1.Value })
+            $parameters | Should -Not -BeNullOrEmpty
+            foreach ($name in $parameters) { $keys | Should -Contain $name -Because "-$name must reach the run, or the script silently ignores it" }
+        }
     }
 
     Describe '-ApiHost is normalized once, before any request (PR #548 review)' {
