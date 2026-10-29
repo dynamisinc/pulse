@@ -26,6 +26,7 @@ using Pulse.WebApi.Features.Injects.Import;         // demo-feedback 03
 using Pulse.WebApi.Features.Exports;                // demo-feedback 02
 using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
 using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
+using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -293,6 +294,10 @@ builder.Services.AddExerciseReport();           // demo-feedback 29 GET /api/sta
 builder.Services.AddInjectImport();             // demo-feedback 03 POST /api/injects/import
 builder.Services.AddPostPins();                 // demo-feedback 04 personal + exercise pins, GET /api/feed/pinned
 builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool + pacer, /api/staff/noise*
+
+// December channels release (channels-foundation, FC-9.10): the one channels DI seam. Story 01 registers nothing (its
+// schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
+builder.Services.AddChannels();
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed

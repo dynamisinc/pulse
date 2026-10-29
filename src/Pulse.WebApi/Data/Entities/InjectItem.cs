@@ -120,6 +120,14 @@ public sealed class InjectItem : IExerciseScoped
     /// <remarks>Schema only (demo-feedback story 01); the import that writes it is story 03.</remarks>
     public string? ExternalRef { get; set; }
 
+    /// <summary>
+    /// The <see cref="ContentItem"/> a <c>content</c> inject publishes (channels-foundation story 16), else <c>null</c>.
+    /// A SAME-EXERCISE composite foreign key (<c>(ExerciseId, ContentItemId)</c> → <c>(ExerciseId, Id)</c>), so the
+    /// database refuses another exercise's item. Schema only (story 01's M1, Q-28): existing <c>post</c>/<c>burst</c>
+    /// rows read <c>null</c> and nothing uses it until story 16.
+    /// </summary>
+    public Guid? ContentItemId { get; set; }
+
     /// <summary>The child posts, including soft-deleted ones; readers order by sequence and exclude deleted rows.</summary>
     public IList<InjectItemPost> Posts { get; set; } = new List<InjectItemPost>();
 }
