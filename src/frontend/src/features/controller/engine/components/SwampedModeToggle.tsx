@@ -52,6 +52,7 @@ import { timeoutAutoSendState, type TimeoutAutoSendState } from '../models/effec
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { LeadOnlyNote } from './LeadOnlyNote'
 
 /**
  * Banner wording per state (text + icon always; the icon is rendered by the banner). Only
@@ -124,7 +125,7 @@ export function SwampedModeToggle() {
   // mode is actually off and the trigger unmounts) on the non-lead note.
   const confirmRef = useRef<HTMLButtonElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const noteRef = useRef<HTMLParagraphElement | null>(null)
+  const noteRef = useRef<HTMLDivElement | null>(null)
   const restoreTriggerFocus = useRef(false)
   const confirmedOff = useRef(false)
 
@@ -356,14 +357,14 @@ export function SwampedModeToggle() {
       )}
 
       {canControl && !isLead && !swampedMode && (
-        <Typography
+        // Compact (#787): a long inline sentence wrapped the 1180px command band for non-leads.
+        <LeadOnlyNote
           ref={noteRef}
-          tabIndex={-1}
-          data-testid="swamped-mode-non-lead-note"
-          sx={{ fontSize: 10.5, color: chrome.inkFaint }}
-        >
-          Only the lead controller can enable swamped mode.
-        </Typography>
+          focusable
+          testId="swamped-mode-non-lead-note"
+          label="Swamped: lead only"
+          reason="Only the lead controller can enable swamped mode."
+        />
       )}
     </Stack>
   )

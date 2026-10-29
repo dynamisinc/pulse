@@ -17,6 +17,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Media;
+using Pulse.WebApi.Features.Media.Documents;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Helpers;
@@ -128,7 +129,8 @@ internal sealed class UploadHarness : IDisposable
         bool staffAssigned = true,
         bool exerciseHasScenarioTime = true,
         IHttpContextAccessor? httpContextAccessor = null,
-        ILogger<MediaUploadService>? logger = null)
+        ILogger<MediaUploadService>? logger = null,
+        IDocumentUploadAuthorizer? documentAuthorizer = null)
     {
         ExerciseId = Guid.NewGuid();
         ExerciseContext = new ExerciseContext { CurrentExerciseId = scopeResolved ? ExerciseId : null };
@@ -193,6 +195,8 @@ internal sealed class UploadHarness : IDisposable
             Clock,
             Time,
             Microsoft.Extensions.Options.Options.Create(Options),
+            new PdfDenyListScanner(),
+            documentAuthorizer ?? new DenyAllDocumentUploadAuthorizer(),
             logger ?? NullLogger<MediaUploadService>.Instance);
     }
 
@@ -240,7 +244,29 @@ internal sealed class UploadHarness : IDisposable
         return await Service.UploadAsync(contentType, body);
     }
 
+    public async Task<MediaUploadResult> UploadDocumentAsync(System.Net.Http.MultipartFormDataContent form)
+    {
+        var (contentType, body) = await MediaTestFiles.Serialize(form);
+        return await Service.UploadDocumentAsync(contentType, body);
+    }
+
     public void Dispose() => Db.Dispose();
+}
+
+/// <summary>A document authorizer with a fixed answer that records every request it was asked about.</summary>
+internal sealed class RecordingDocumentAuthorizer : IDocumentUploadAuthorizer
+{
+    private readonly bool _allow;
+
+    public RecordingDocumentAuthorizer(bool allow) => _allow = allow;
+
+    public List<DocumentUploadRequest> Requests { get; } = [];
+
+    public Task<bool> CanUploadAsync(DocumentUploadRequest request, CancellationToken cancellationToken)
+    {
+        Requests.Add(request);
+        return Task.FromResult(_allow);
+    }
 }
 
 /// <summary>

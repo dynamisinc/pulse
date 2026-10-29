@@ -70,6 +70,28 @@ internal static class MediaTestFiles
 
     public static byte[] Pdf() => Pad("%PDF-1.7\n"u8.ToArray(), 256);
 
+    /// <summary>A small, well-formed, benign PDF (header, two objects, trailer, <c>%%EOF</c>) — accepted by the scan.</summary>
+    public static byte[] BenignPdf() => Encoding.Latin1.GetBytes(
+        "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"
+        + "trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+
+    /// <summary>A PDF whose catalog runs JavaScript on open — rejected by the deny-list scan.</summary>
+    public static byte[] JavaScriptPdf() => Encoding.Latin1.GetBytes(
+        "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /JavaScript /JS (app.alert\\(1\\)) >> >>\nendobj\n"
+        + "trailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+
+    /// <summary>An Office Open XML (zip) container — a .docx by its bytes.</summary>
+    public static byte[] Docx() => Pad([.. "PK"u8.ToArray(), 0x03, 0x04, 0x14, 0x00, 0x06, 0x00, .. "[Content_Types].xml"u8.ToArray()], 256);
+
+    /// <summary>A legacy Office (OLE2 compound file) header — a .doc/.xls by its bytes.</summary>
+    public static byte[] OleCompoundFile() => Pad([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], 256);
+
+    /// <summary>Markup first, then a PDF header — an HTML/PDF polyglot; never typed as a document.</summary>
+    public static byte[] HtmlThenPdf() => [.. "<html><body>"u8.ToArray(), .. BenignPdf()];
+
+    /// <summary>A Windows executable header, then a PDF header inside the first 1024 bytes.</summary>
+    public static byte[] ExeThenPdf() => [.. WindowsExe().Take(64), .. BenignPdf()];
+
     /// <summary>A PNG signature followed by markup — must sniff (and be stored) strictly as image/png.</summary>
     public static byte[] PngScriptPolyglot() =>
         [.. Png(32), .. "<html><script>alert(document.domain)</script></html>"u8.ToArray()];
@@ -89,6 +111,8 @@ internal static class MediaTestFiles
         ["mp4-avc1", IsoBmff("avc1"), "video", "video/mp4", "mp4"],
         ["mp4-m4v", IsoBmff("M4V "), "video", "video/mp4", "mp4"],
         ["webm", WebM(), "video", "video/webm", "webm"],
+        ["pdf", Pdf(), "document", "application/pdf", "pdf"],
+        ["pdf-benign", BenignPdf(), "document", "application/pdf", "pdf"],
     ];
 
     /// <summary>Every disallowed, empty or truncated input.</summary>
@@ -100,7 +124,11 @@ internal static class MediaTestFiles
         ["html", Html()],
         ["windows-exe", WindowsExe()],
         ["elf", Elf()],
-        ["pdf", Pdf()],
+        ["docx", Docx()],
+        ["ole-doc", OleCompoundFile()],
+        ["html-then-pdf", HtmlThenPdf()],
+        ["exe-then-pdf", ExeThenPdf()],
+        ["pdf-without-version", Pad("%PDF-x"u8.ToArray(), 64)],
         ["plain-text", Encoding.UTF8.GetBytes("hello world, this is not an image")],
         ["truncated-jpeg", new byte[] { 0xFF, 0xD8 }],
         ["truncated-png", Png().Take(5).ToArray()],

@@ -7,6 +7,7 @@ using Azure.Storage.Sas;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Media.Documents;
 
 /// <summary>
 /// The source of Azure user-delegation keys — the ONLY key material a read SAS is ever signed with. A user
@@ -243,7 +244,8 @@ public sealed class UserDelegationKeyCache : IDisposable
 /// <summary>
 /// The production <see cref="IMediaUrlSigner"/>: a USER-DELEGATION read SAS for exactly one blob — <c>sp=r</c>,
 /// <c>sr=b</c>, <c>spr=https</c>, the response <c>Content-Type</c> pinned to the stored (sniffed) type with an
-/// <c>inline</c> disposition, and the bucketed expiry (<see cref="MediaSasExpiry"/>). Scoped (it reads the
+/// <c>inline</c> disposition — or, for a <see cref="MediaKinds.Document"/>, <c>application/pdf</c> with an
+/// <c>attachment</c> disposition (never inline) — and the bucketed expiry (<see cref="MediaSasExpiry"/>). Scoped (it reads the
 /// request's <see cref="IExerciseContext"/>); the key cache it signs with is a singleton.
 /// </summary>
 /// <remarks>
@@ -341,6 +343,9 @@ public sealed class BlobMediaUrlSigner : IMediaUrlSigner
             throw new InvalidOperationException("Refusing to sign a malformed media blob name.");
         }
 
+        // press-room story 02: a document is NEVER inline — application/pdf + attachment are pinned in the signature,
+        // so a client cannot rewrite them (any change to rsct/rscd invalidates the SAS).
+        var isDocument = string.Equals(asset.Kind, MediaKinds.Document, StringComparison.Ordinal);
         var sas = new BlobSasBuilder
         {
             BlobContainerName = _containerName,
@@ -348,8 +353,8 @@ public sealed class BlobMediaUrlSigner : IMediaUrlSigner
             Resource = "b",
             ExpiresOn = expiresOn,
             Protocol = SasProtocol.Https,
-            ContentType = asset.ContentType,
-            ContentDisposition = InlineDisposition,
+            ContentType = isDocument ? DocumentDownload.ContentType : asset.ContentType,
+            ContentDisposition = isDocument ? DocumentDownload.ContentDisposition(asset.OriginalFileName) : InlineDisposition,
         };
         sas.SetPermissions(BlobSasPermissions.Read);
 

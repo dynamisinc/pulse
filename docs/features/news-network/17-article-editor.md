@@ -23,7 +23,7 @@ patterns (D5): dense, keyboard-first, COBRA.
 Story templates (18); bulk import; the paired-post/alert/inject/schedule controls themselves (foundation 17 owns them; this editor only supplies fields); Beat picker (E9); E8 drafting; multi-author collaboration.
 
 ## Technical Notes
-Staff world. Files: `src/frontend/src/features/controller/content/article/{ArticleEditor,BodyEditor,MediaInserter,PostEmbedPicker,BreakingField}.tsx` — a subfolder the foundation story 17 does not own (E4 owns only this subfolder; the foundation shell imports nothing from it except through the registry). Picks the rich-text library already in the dependency set if one exists; otherwise the choice is an open question (see `feature.md`). Runs on foundation mocks until 07 lands.
+Staff world. Files: `src/frontend/src/features/controller/content/article/{ArticleEditor,BodyEditor,MediaInserter,PostEmbedPicker,BreakingField}.tsx` — a subfolder the foundation story 17 does not own (E4 owns only this subfolder; the foundation shell imports nothing from it except through the registry). **Rich-text library: Tiptap** (Q-13 decided, Tom, 10/29); shared with press 07, so whichever of the two lands first adds the dependency and the other reuses it. Emit only the story-01 allowlist via a Tiptap schema restricted to it. Runs on foundation mocks until 07 lands.
 
 ## Dependencies
 E4 01 (payload/validation), 18 (templates picker import); foundation 17 (shell + `registerContentKindEditor`), 07 (staff API), 14. Can run with 16, 19.

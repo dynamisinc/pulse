@@ -31,7 +31,7 @@ D4 STORY-UPDATES items this feature ticks when built: PRS-002, PRS-003, PRS-004,
 | # | Story | Requirement(s) | Stack | Wave | Effort | Status | Issue |
 |---|-------|----------------|-------|------|--------|--------|-------|
 | 01 | [Release kind, press contracts and org newsrooms](01-release-kind-and-org-newsrooms.md) | PRS-010/012, PRS-001, PRS-005 (model), XC-004 (vocabulary) | fullstack | 3 | M | Not Started | #738 |
-| 02 | [`document` media kind: download-only PDF attachment (sniff, size cap, deny-list scan, attachment-only serve)](02-document-media-kind.md) | PRS-002, NFR-004, Q3 | backend | 1 | M | Not Started | #739 |
+| 02 | [`document` media kind: download-only PDF attachment (sniff, size cap, deny-list scan, attachment-only serve)](02-document-media-kind.md) | PRS-002, NFR-004, Q3 | backend | 1 | M | In Review | #739 |
 | 03 | [Inline PDF page rendering](03-inline-pdf-rendering.md) — **Deferred (post-December, Q-03)** | PRS-002, NFR-001, NFR-004 | frontend | — | (M) | Deferred (post-December) | — (no issue) |
 | 04 | [Release author API: orgs, drafts, autosave, edit timeline](04-release-author-api.md) | PRS-001, PRS-004, COR-018 | backend | 3 | L | Not Started | #740 |
 | 05 | [Publish, embargo, revise and cross-post API](05-publish-embargo-revise-api.md) | PRS-003, PRS-005, PRS-013, PRS-022 (publish), D4-002 | backend | 4 | L | Not Started | #741 |

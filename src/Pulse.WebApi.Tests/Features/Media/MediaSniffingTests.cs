@@ -19,7 +19,7 @@ public sealed class MediaSniffingTests
     public void Sniff_RecognisesEveryAllowedType_ByItsLeadingBytes(
         string label, byte[] bytes, string kind, string contentType, string extension)
     {
-        var head = bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.HeadLength));
+        var head = bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.ReadHeadLength));
 
         var sniffed = MediaSniffer.Sniff(head);
 
@@ -33,7 +33,7 @@ public sealed class MediaSniffingTests
     [MemberData(nameof(MediaTestFiles.DisallowedTypes), MemberType = typeof(MediaTestFiles))]
     public void Sniff_RejectsEveryDisallowedEmptyOrTruncatedInput(string label, byte[] bytes)
     {
-        var head = bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.HeadLength));
+        var head = bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.ReadHeadLength));
 
         MediaSniffer.Sniff(head).Should().BeNull(
             "{0} is not an allowed media type by its leading bytes — the endpoint answers 415 for it", label);
@@ -75,4 +75,48 @@ public sealed class MediaSniffingTests
             .Should().HaveCount(MediaSniffer.HeadLength);
         MediaSniffer.Sniff(MediaTestFiles.WebM().AsSpan(0, MediaSniffer.HeadLength))!.Kind.Should().Be("video");
     }
+
+    // ---- press-room story 02: PDF by magic bytes ----------------------------------------------------------------
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\r\n\r\n")]
+    [InlineData("\u001b%-12345X@PJL JOB\r\n")]
+    public void Sniff_TypesAPdfHeader_AtTheStartOrAfterAnInertPrefix_AsADocument(string prefix)
+    {
+        var bytes = System.Text.Encoding.Latin1.GetBytes(prefix).Concat(MediaTestFiles.BenignPdf()).ToArray();
+
+        var sniffed = MediaSniffer.Sniff(bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.ReadHeadLength)));
+
+        sniffed.Should().Be(new SniffedMediaType("document", "application/pdf", "pdf"));
+    }
+
+    [Fact]
+    public void Sniff_FindsAPdfHeaderEndingAtTheWindowEdge_ButNotOneStartingPastIt()
+    {
+        byte[] At(int offset) => [.. Enumerable.Repeat((byte)' ', offset), .. MediaTestFiles.BenignPdf()];
+
+        var last = At(MediaSniffer.DocumentHeaderWindow - 1);
+        var past = At(MediaSniffer.DocumentHeaderWindow);
+
+        MediaSniffer.Sniff(last.AsSpan(0, MediaSniffer.ReadHeadLength))!.Kind.Should().Be("document", "a header starting at byte 1023 is in the window");
+        MediaSniffer.Sniff(past.AsSpan(0, MediaSniffer.ReadHeadLength)).Should().BeNull("a header starting at byte 1024 is not");
+    }
+
+    [Theory]
+    [InlineData("<!-- %PDF-1.7 -->")]
+    [InlineData("<svg>")]
+    [InlineData("<?xml version=\"1.0\"?>")]
+    [InlineData("a > b")]
+    public void Sniff_RejectsAPdfHeaderBehindMarkup(string prefix)
+    {
+        var bytes = System.Text.Encoding.Latin1.GetBytes(prefix).Concat(MediaTestFiles.BenignPdf()).ToArray();
+
+        MediaSniffer.Sniff(bytes.AsSpan(0, Math.Min(bytes.Length, MediaSniffer.ReadHeadLength))).Should().BeNull(
+            "markup before the header is an HTML/SVG/XML polyglot, never a document");
+    }
+
+    [Fact]
+    public void ReadHeadLength_CoversAHeaderStartingAnywhereInTheWindow() =>
+        MediaSniffer.ReadHeadLength.Should().BeGreaterThanOrEqualTo(MediaSniffer.DocumentHeaderWindow - 1 + "%PDF-1.7".Length);
 }
