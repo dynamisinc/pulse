@@ -78,8 +78,10 @@ describe('primitives: static rules', () => {
     const body = code(source)
     for (const banned of CLOCK_BANS) expect(body).not.toMatch(banned)
     // Every Intl date formatter is pinned to an explicit zone (never the browser's).
-    for (const match of body.matchAll(/new\s+Intl\s*\.\s*DateTimeFormat\s*\(/g)) {
-      expect(body.slice(match.index, match.index + 200)).toMatch(/timeZone/)
+    // (With or without `new`; reading the BROWSER's zone back out is banned outright.)
+    expect(body).not.toMatch(/resolvedOptions\s*\(\s*\)\s*\.\s*timeZone/)
+    for (const match of body.matchAll(/\bIntl\s*\.\s*DateTimeFormat\s*\(/g)) {
+      expect(body.slice(match.index, match.index + 200)).toMatch(/\btimeZone\b/)
     }
   })
 

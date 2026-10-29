@@ -106,7 +106,7 @@ function wrapTablesForScroll(container: HTMLElement): void {
     region.className = styles.tableScroll ?? ''
     region.setAttribute('role', 'region')
     region.setAttribute('tabindex', '0')
-    const caption = table.querySelector('caption')?.textContent?.trim()
+    const caption = table.querySelector(':scope > caption')?.textContent?.trim()
     region.setAttribute('aria-label', caption ? `Table: ${caption}` : 'Table')
     table.replaceWith(region)
     region.appendChild(table)

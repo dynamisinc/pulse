@@ -46,14 +46,23 @@ export const BODY_ALLOWED_ATTRIBUTES: readonly string[] = [
 /** https, http, mailto, tel, or a host-relative path / fragment / query. Nothing else. */
 const ALLOWED_URI = /^(?:(?:https?|mailto|tel):|[/#?])/i
 
-/** Whitespace and control characters a browser ignores inside a URL (`java\tscript:`). */
+/** Every whitespace / control character; stripped for the SCHEME test only (`java\tscript:`). */
 // eslint-disable-next-line no-control-regex
 const URI_WHITESPACE = /[\u0000-\u0020\u00a0\u1680\u180e\u2000-\u2029\u205f\u3000]/g
 
+/**
+ * The href exactly as the browser's URL parser will see it: C0 controls and spaces
+ * trimmed from both ends, tab / LF / CR removed anywhere (`/\t/evil.example` IS
+ * `//evil.example`). Inner spaces are kept: the browser percent-encodes them.
+ */
+export function browserNormaliseHref(href: string): string {
+  // eslint-disable-next-line no-control-regex
+  return href.replace(/^[\u0000- ]+|[\u0000- ]+$/g, '').replace(/[\t\n\r]/g, '')
+}
+
 /** A host-relative path that stays on this host (not `//host` or `/\host`). */
 export function isInSimHref(href: string): boolean {
-  // Browsers drop tabs / newlines inside a URL, so `/\t/evil.example` IS `//evil.example`.
-  const normalised = href.replace(URI_WHITESPACE, '')
+  const normalised = browserNormaliseHref(href)
   return normalised.startsWith('/') && !normalised.startsWith('//') && !normalised.startsWith('/\\')
 }
 
@@ -85,7 +94,7 @@ purifier.addHook('afterSanitizeAttributes', node => {
   if (node.nodeName === 'A') {
     // Store the href exactly as the browser will resolve it (no tabs / newlines), so what
     // was classified below is what gets followed.
-    const href = (node.getAttribute('href') ?? '').replace(URI_WHITESPACE, '')
+    const href = browserNormaliseHref(node.getAttribute('href') ?? '')
     if (node.hasAttribute('href')) node.setAttribute('href', href)
     node.setAttribute('rel', 'noopener noreferrer')
     if (isInSimHref(href)) {

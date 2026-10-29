@@ -171,3 +171,17 @@ describe('sanitizeBodyHtml: link edge cases (cold review)', () => {
       .toBe('<pulse-post data-id="p"></pulse-post>')
   })
 })
+
+describe('sanitizeBodyHtml: href normalisation follows the browser (re-review W-001)', () => {
+  it.each([
+    ['https://example.org/Situation Report.pdf', 'https://example.org/Situation Report.pdf'],
+    ['mailto:desk@example.org?subject=Flood update', 'mailto:desk@example.org?subject=Flood update'],
+    ['  /news/daily/flood  ', '/news/daily/flood'],
+    ['/news/\tdaily/flo\nod', '/news/daily/flood'],
+  ])('%j is stored as %j', (raw, stored) => {
+    const a = new DOMParser()
+      .parseFromString(sanitizeBodyHtml(`<a href="${raw}">x</a>`), 'text/html')
+      .querySelector('a')
+    expect(a?.getAttribute('href')).toBe(stored)
+  })
+})

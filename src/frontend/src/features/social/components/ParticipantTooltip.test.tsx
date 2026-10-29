@@ -312,7 +312,11 @@ describe('ParticipantTooltip — participant skin, not MUI or COBRA', () => {
   })
 
   it('reads the participant token palette (composed, since the portal leaves the frame)', () => {
-    expect(sheet).toMatch(/composes:\s*tokens from '\.\.\/theme\/social\.module\.css'/)
+    // The sheet lives in core/media/player since channels-foundation 14; it still composes
+    // Social's token class (an absolute-from-src relative path; a stale one breaks vite build).
+    expect(sheet).toMatch(
+      /composes:\s*tokens from '\.\.\/\.\.\/\.\.\/features\/social\/theme\/social\.module\.css'/,
+    )
     expect(sheet).toContain('background: var(--pc-ink-muted)')
     expect(sheet).toContain('color: var(--pc-bg)')
     // Hoverable (WCAG 1.4.13): the bubble takes the pointer.

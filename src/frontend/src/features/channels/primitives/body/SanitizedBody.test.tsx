@@ -104,3 +104,11 @@ describe('SanitizedBody: tables', () => {
     expect(region.contains(screen.getByRole('table'))).toBe(true)
   })
 })
+
+describe('SanitizedBody: nested table captions', () => {
+  it('names the region from the table\'s OWN caption, not a nested table\'s', () => {
+    renderBody('<table><tbody><tr><td><table><caption>Inner</caption><tbody><tr><td>x</td></tr></tbody></table></td></tr></tbody></table>')
+    expect(screen.getByRole('region', { name: 'Table' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Table: Inner' })).toBeInTheDocument()
+  })
+})
