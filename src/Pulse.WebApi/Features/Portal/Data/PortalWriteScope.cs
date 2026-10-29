@@ -12,7 +12,7 @@ using Pulse.WebApi.Data;
 /// The context's central write guard refuses only an empty <c>ExerciseId</c>. <c>ExerciseId</c> is a concurrency token on
 /// both portal tables, so a stub that names the caller's OWN exercise for another exercise's row id matches no row. But a
 /// row that itself carries another exercise's id (for example a stub <c>{ Id = A's id, ExerciseId = A }</c> attached under
-/// B) passes the context on INSERT, UPDATE and DELETE alike. This check is what refuses it, the way
+/// B) passes the context on INSERT, UPDATE and DELETE alike (given the row's current <c>Version</c>, the other token). This check is what refuses it, the way
 /// <c>ParticipantPostProjector</c> refuses a post outside the scope.
 /// </para>
 /// <para>

@@ -16,9 +16,10 @@ using Pulse.WebApi.Tests.Data;
 /// <list type="bullet">
 ///   <item><description>a read under exercise B never returns A's config or resources, and an unresolved scope reads
 ///   nothing (config "absent", no resources, an empty AAR export);</description></item>
-///   <item><description>a write naming the wrong exercise is refused: an insert by <see cref="PortalWriteScope"/>, an
-///   update or delete by the <c>ExerciseId</c> concurrency token, a bulk update by the filter, an empty id by the
-///   central guard;</description></item>
+///   <item><description>a write naming the wrong exercise is refused: a stub claiming B for A's row by the
+///   <c>ExerciseId</c> concurrency token; any row naming another exercise (insert, update or delete) by
+///   <see cref="PortalWriteScope"/>, with an unguarded control showing the context alone lets it through; a bulk update by
+///   the filter; an empty id by the central guard;</description></item>
 ///   <item><description>a deleted resource is retained with <c>DeletedAt</c>, hidden from normal reads and the limit
 ///   count, and present in the AAR export;</description></item>
 ///   <item><description>an exercise with no config reads "absent" and the read creates no row; the database allows one
@@ -132,10 +133,31 @@ public class PortalDataIsolationTests
             await update.Should().ThrowAsync<ExerciseScopeViolationException>("nor change A's row with a stub naming A");
         }
 
+        // Control: the same two writes WITHOUT the check reach the database under B. This is the gap in the context's
+        // central guard (it refuses only an empty id) that PortalWriteScope closes; it also proves the refused writes above
+        // would otherwise have landed. When the orchestrator's follow-up makes the central guard compare rows against the
+        // resolved scope, these unguarded writes start throwing: flip this control to assert that.
+        var victim = await SeedAsync(ChannelRows.PortalResource(exerciseA));
+        var rawInsert = ChannelRows.PortalResource(exerciseA);
+        await using (var rawB = _fixture.CreateContext(scopeB))
+        {
+            rawB.Add(rawInsert);
+            var rawStub = ChannelRows.PortalResource(exerciseA);
+            rawStub.Id = victim.Id;
+            rawB.Attach(rawStub);
+            rawStub.Title = "Hijacked";
+            await rawB.SaveChangesAsync();
+        }
+
         await using var verify = _fixture.CreateContext();
-        (await verify.PortalResources.IgnoreQueryFilters().AnyAsync(r => r.Id == insert.Id)).Should().BeFalse();
+        (await verify.PortalResources.IgnoreQueryFilters().AnyAsync(r => r.Id == insert.Id)).Should().BeFalse(
+            "the guarded insert was refused");
         (await verify.PortalResources.IgnoreQueryFilters().SingleAsync(r => r.Id == resourceA.Id)).Title
-            .Should().Be(resourceA.Title);
+            .Should().Be(resourceA.Title, "the guarded stub update was refused");
+        (await verify.PortalResources.IgnoreQueryFilters().AnyAsync(r => r.Id == rawInsert.Id)).Should().BeTrue(
+            "control: the unguarded insert naming A lands under B");
+        (await verify.PortalResources.IgnoreQueryFilters().SingleAsync(r => r.Id == victim.Id)).Title
+            .Should().Be("Hijacked", "control: the unguarded stub naming A lands under B");
     }
 
     [RequiresDockerFact]
