@@ -256,6 +256,8 @@ public sealed class RoleMatrixTests
         Probe("POST /api/injects/{id:guid}/unskip", ControllerOnly);
         Probe("POST /api/injects/{id:guid}/retry", ControllerOnly);
         Probe("POST /api/injects/{itemId:guid}/mark-fired", ControllerOnly);
+        Probe("POST /api/alerts", ControllerOnly); // channels-foundation 10: raise an in-fiction alert
+        Probe("POST /api/alerts/{id:guid}/clear", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
