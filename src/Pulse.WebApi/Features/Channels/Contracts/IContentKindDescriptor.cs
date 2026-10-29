@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Channels.Contracts;
 
 using System.Text.Json.Nodes;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 
 /// <summary>
 /// FC-7, what a content kind contributes (the interface is channels-foundation story 02's; the
@@ -12,10 +13,6 @@ using Pulse.WebApi.Data;
 /// Descriptors are <b>scoped</b> DI services, so validation can read the exercise's own data (zone existence,
 /// supersession) through <see cref="PayloadValidationContext"/>. Validation is async-only: no synchronous
 /// payload validation is offered (weather FU-3).
-/// <para>
-/// <b>Pending F01 (#697):</b> FC-7's <c>ResolvePublishOptions(ContentItem) → PublishOptions?</c> (a default member
-/// returning null; FC-7a step 3) is added in a follow-up commit once the <c>ContentItem</c> entity is on main.
-/// </para>
 /// </remarks>
 public interface IContentKindDescriptor
 {
@@ -55,6 +52,14 @@ public interface IContentKindDescriptor
     /// <param name="payload">The stored payload.</param>
     /// <returns>The participant-safe projection.</returns>
     JsonObject ProjectPayload(JsonObject payload);
+
+    /// <summary>
+    /// Step (3) of FC-7a: publish options derived from the item itself (e.g. weather reads its payload
+    /// <c>delivery</c> block), used only when neither the call nor the persisted options supply any.
+    /// </summary>
+    /// <param name="item">The item being published.</param>
+    /// <returns>The options, or null (the default) for none.</returns>
+    PublishOptions? ResolvePublishOptions(ContentItem item) => null;
 }
 
 /// <summary>What <see cref="IContentKindDescriptor.ValidatePayloadAsync"/> may read.</summary>

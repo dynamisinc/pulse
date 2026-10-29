@@ -9,12 +9,12 @@ using System.Text.Json.Serialization;
 /// </summary>
 /// <remarks>
 /// FC-7a resolution in the funnel: <b>first non-null wins, no merging</b> — (1) the options on the call,
-/// (2) the persisted <c>PublishOptionsJson</c>, (3) <c>IContentKindDescriptor.ResolvePublishOptions</c>,
+/// (2) the persisted <c>PublishOptionsJson</c>, (3) <see cref="IContentKindDescriptor.ResolvePublishOptions"/>,
 /// (4) none.
 /// </remarks>
 public sealed record PublishOptions
 {
-    /// <summary>Post a link card as the outlet's paired persona (<c>IPairedSocialPoster</c>), or null.</summary>
+    /// <summary>Post a link card as the outlet's paired persona (<see cref="IPairedSocialPoster"/>), or null.</summary>
     [JsonPropertyName("pairedPost")]
     public PairedPostOptions? PairedPost { get; init; }
 

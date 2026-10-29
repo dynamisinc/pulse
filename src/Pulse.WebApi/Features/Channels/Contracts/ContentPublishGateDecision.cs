@@ -1,9 +1,7 @@
 namespace Pulse.WebApi.Features.Channels.Contracts;
 
-// The value types of FC-7's IContentPublishGate. The interface itself
-// (EvaluateAsync(ContentItem, PublishContext) -> ContentPublishGateDecision) is pending F01 (#697): it lands in a
-// follow-up commit once the ContentItem entity is on main. A gate runs before PublishAsync / ScheduleAsync changes
-// state; Hold is a 409 "held" with state unchanged.
+// The value types of FC-7's IContentPublishGate (IContentPublishGate.cs). A gate runs before PublishAsync /
+// ScheduleAsync changes state; Hold is a 409 "held" with state unchanged.
 
 /// <summary>The action a gate is asked about.</summary>
 public sealed record PublishContext

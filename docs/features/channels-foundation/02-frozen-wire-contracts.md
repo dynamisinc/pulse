@@ -20,8 +20,7 @@ FC-8). This story turns that document into code on both sides so a drift is a co
 
 > **Build note (F02, #794; orchestrator option B):** the four FC-7 members typed on F01's `ContentItem` entity
 > (`IContentKindDescriptor.ResolvePublishOptions`, `IContentPublishGate`, `IContentPublishedObserver`,
-> `IPairedSocialPoster`) land in a follow-up commit on the same PR once F01 (#697) merges. The "Seams declared" AC
-> is not complete until then.
+> `IPairedSocialPoster`) landed in their own commit on the same PR after F01 (#697, PR #796) merged.
 
 ## Out of Scope
 Implementations of any seam; endpoints; the broadcaster implementation (story 09); skin token values (story 13 / E4); kind-specific payload shapes (each channel's descriptor).

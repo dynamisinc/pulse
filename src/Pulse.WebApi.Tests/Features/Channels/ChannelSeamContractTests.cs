@@ -5,13 +5,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Contracts;
 
 /// <summary>
 /// Channels-foundation story 02 (#698), AC "Seams declared": the FC-7 interfaces exist under their frozen names, with
-/// the shapes downstream stories build against. Reflection only: implementations are the owning stories'. The four
-/// ContentItem-typed seams (ResolvePublishOptions, IContentPublishGate, IContentPublishedObserver, IPairedSocialPoster)
-/// are pending F01 (#697) and get their tests with them.
+/// the shapes downstream stories build against. Reflection only: implementations are the owning stories'.
 /// </summary>
 public class ChannelSeamContractTests
 {
@@ -19,7 +18,10 @@ public class ChannelSeamContractTests
     [InlineData(typeof(IContentPublishService))]
     [InlineData(typeof(IContentKindDescriptor))]
     [InlineData(typeof(ISanitizerProfileRegistry))]
+    [InlineData(typeof(IContentPublishGate))]
+    [InlineData(typeof(IContentPublishedObserver))]
     [InlineData(typeof(IAlertRaiser))]
+    [InlineData(typeof(IPairedSocialPoster))]
     [InlineData(typeof(IInSimLinkResolver))]
     [InlineData(typeof(IContentPermalinks))]
     [InlineData(typeof(ISkinOverridesValidator))]
@@ -39,6 +41,43 @@ public class ChannelSeamContractTests
         validate.Should().ContainSingle().Which.Name.Should().Be("ValidatePayloadAsync");
         validate[0].ReturnType.Should().Be(typeof(Task<PayloadValidationResult>));
         validate[0].GetParameters().Select(p => p.ParameterType).Should().Contain(typeof(PayloadValidationContext));
+    }
+
+    [Fact]
+    public void KindDescriptor_ResolvePublishOptions_DefaultsToNull()
+    {
+        var method = typeof(IContentKindDescriptor).GetMethod(nameof(IContentKindDescriptor.ResolvePublishOptions));
+
+        method.Should().NotBeNull();
+        method!.IsAbstract.Should().BeFalse("ResolvePublishOptions is a default (null) member, FC-7a");
+        method.ReturnType.Should().Be(typeof(PublishOptions));
+        method.GetParameters().Select(p => p.ParameterType).Should().Equal(typeof(ContentItem));
+    }
+
+    [Theory]
+    [InlineData(typeof(IContentPublishGate), nameof(IContentPublishGate.EvaluateAsync))]
+    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnPublishedAsync))]
+    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRevisedAsync))]
+    [InlineData(typeof(IContentPublishedObserver), nameof(IContentPublishedObserver.OnRetractedAsync))]
+    [InlineData(typeof(IPairedSocialPoster), nameof(IPairedSocialPoster.PostLinkCardAsync))]
+    public void EntitySeam_TakesTheF01ContentItemFirst(Type seam, string member)
+    {
+        var method = seam.GetMethod(member)!;
+
+        method.GetParameters()[0].ParameterType.Should().Be(typeof(ContentItem), "FC-7 types these seams on the entity");
+        typeof(Task).IsAssignableFrom(method.ReturnType).Should().BeTrue("every FC-7 entity seam is async");
+    }
+
+    [Fact]
+    public void Observer_RevisedAndRetractedAreDefaultNoOps()
+    {
+        // Only OnPublishedAsync is abstract, so an E8/E10 observer that cares about publishes alone stays small.
+        typeof(IContentPublishedObserver).GetMethod(nameof(IContentPublishedObserver.OnPublishedAsync))!
+            .IsAbstract.Should().BeTrue();
+        typeof(IContentPublishedObserver).GetMethod(nameof(IContentPublishedObserver.OnRevisedAsync))!
+            .IsAbstract.Should().BeFalse();
+        typeof(IContentPublishedObserver).GetMethod(nameof(IContentPublishedObserver.OnRetractedAsync))!
+            .IsAbstract.Should().BeFalse();
     }
 
     [Fact]
