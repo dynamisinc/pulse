@@ -71,6 +71,16 @@ export interface PostCardProps {
   post: PostView
   /** `'readOnly'` = observer session (COR-015): controls absent, counts inert. */
   variant?: PostCardVariant
+  /**
+   * The EMBEDDED read-only card (channels-foundation 21, COR-015): the whole engagement
+   * row (reply / repost / like / pin / edit, and the counts with it) is ABSENT from the
+   * DOM and the a11y tree, not disabled. What another channel renders when it shows a
+   * post inside its own page (the portal stream, a news embed). The author, time, body,
+   * media, link card and "Edited" marker are unchanged, and `onOpen` / `onOpenProfile` /
+   * `onHashtagOpen` still work when supplied. Omitted (the default): the card renders
+   * exactly as before.
+   */
+  readOnly?: boolean
   /** Fires when the card body (header/text/media — not the action row) is activated. */
   onOpen?: (id: string) => void
   /**

@@ -41,6 +41,12 @@
  * In `variant === 'readOnly'` (COR-015/D1-011, observer sessions) the interactive
  * controls are ABSENT — not disabled — and the counts render as inert text.
  *
+ * EMBEDDED READ-ONLY (channels-foundation 21). With `readOnly`, `<PostActions>` is not
+ * mounted at all: no reply / repost / like / pin / edit control and no count text, so
+ * nothing of the row reaches the DOM or the a11y tree. The rest of the anatomy is the
+ * same. The row normally seeds `editedPostsStore` with the card's `edited` summary; with
+ * no row the card seeds it itself, so the header's "Edited" marker still shows.
+ *
  * Scenario time (COR-053): the relative "2h ago" string and the absolute tooltip
  * render in `PostHeader` via `useScenarioTime()`, bound to
  * `useExerciseContext().timeZone`. Never wall-clock.
@@ -71,7 +77,8 @@
  * `theme/social.module.css`'s header for the theming model).
  */
 
-import { useId } from 'react'
+import { useId, useLayoutEffect } from 'react'
+import { editedPostsStore } from '../../edit/editedPostsStore'
 import { usePinnedForAll } from '../../pinned/exercisePinState'
 import { Avatar } from '../Avatar'
 import { PinnedMarker } from './PinnedMarker'
@@ -87,6 +94,7 @@ import styles from './PostCard.module.css'
 export function PostCard({
   post,
   variant = 'full',
+  readOnly = false,
   onOpen,
   onReply,
   onHashtagOpen,
@@ -105,6 +113,12 @@ export function PostCard({
   // A personal pin (`post.viewer.pinned`) never reaches here (DF-6: private).
   const pinnedForAll = usePinnedForAll(post.id, post.pinnedForAll === true)
   const markerId = useId()
+
+  // Read-only embed: `PostActions` (which seeds the "Edited" overlay store) is absent, so
+  // the card seeds it, in a layout effect like the row does, so "Edited" shows in one paint.
+  useLayoutEffect(() => {
+    if (readOnly) editedPostsStore.noteBase(post.id, post.edited, post.text)
+  }, [readOnly, post.id, post.edited, post.text])
 
   return (
     <article
@@ -146,7 +160,7 @@ export function PostCard({
           <PostLinkCard linkPreview={post.linkPreview} />
         </div>
 
-        <PostActions post={post} variant={variant} onReply={onReply} />
+        {!readOnly && <PostActions post={post} variant={variant} onReply={onReply} />}
       </div>
     </article>
   )
