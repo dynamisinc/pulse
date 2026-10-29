@@ -8,8 +8,8 @@
  *    (never `:root`; `display: contents` keeps the wrapper out of layout,
  *    custom properties still inherit; the `BrandThemeProvider` precedent);
  *  - a per-scope MUI theme built from the tokens (never COBRA, never MUI's
- *    default look), through a nested `ThemeProvider` that replaces, not
- *    merges with, any outer theme;
+ *    default look), through a nested `ThemeProvider` given a function theme,
+ *    so it replaces, not merges with, any outer theme;
  *  - the skin's self-hosted fonts, loaded lazily on mount (`./fonts.ts`).
  *
  * Every token set passes `finalizeSkinTokens` first, so the a11y floor and
@@ -54,14 +54,21 @@ export function SkinScope({ scopeId, tokens, skinKey, children }: SkinScopeProps
   const theme = useTheme()
   const outerTheme = parent?.outerTheme ?? theme
 
-  // `registryVersion` is a dependency on purpose: ext schemas registered after
-  // mount change what `finalizeSkinTokens` keeps.
+  // Keyed on the token VALUES, not the object identity, so a caller passing an inline
+  // literal does not rebuild the theme every render. `registryVersion` is a dependency on
+  // purpose: ext schemas registered after mount change what `finalizeSkinTokens` keeps.
+  const tokensKey = JSON.stringify(tokens)
   const finalTokens = useMemo(
     () => finalizeSkinTokens(tokens, skinKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tokens, skinKey, registryVersion],
+    [tokensKey, skinKey, registryVersion],
   )
-  const muiTheme = useMemo(() => buildSkinMuiTheme(finalTokens), [finalTokens])
+  // A function theme: MUI shallow-merges an OBJECT theme over the outer one, which would
+  // carry an outer theme's custom keys (COBRA's) into the skin. A function replaces it.
+  const muiTheme = useMemo(() => {
+    const theme = buildSkinMuiTheme(finalTokens)
+    return () => theme
+  }, [finalTokens])
   const cssVars = useMemo(() => buildSkinCssVars(finalTokens), [finalTokens])
   const parentVarNames = parent?.cssVarNames
   const cssVarNames = useMemo(

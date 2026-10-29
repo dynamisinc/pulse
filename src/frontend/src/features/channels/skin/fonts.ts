@@ -58,10 +58,13 @@ function pageOrigin(): string {
  */
 export function fontFaceProblem(face: SkinFontFace, origin: string = pageOrigin()): string | null {
   if (!FAMILY.test(face.family)) return `font family "${face.family}" is not a plain family name`
-  const src = face.src.trim()
+  const src = face.src
   if (/^(data|blob):/i.test(src)) {
     return `font "${face.family}" is a ${src.slice(0, src.indexOf(':'))}: URI; ` +
       'fonts must be self-hosted files (CSP font-src \'self\')'
+  }
+  if (/[\s"'()\\]/.test(src)) {
+    return `font "${face.family}" src contains whitespace, quotes, parentheses or backslashes`
   }
   let url: URL
   try {
@@ -112,6 +115,9 @@ export function loadSkinFonts(faces: readonly SkinFontFace[]): void {
     added.set(key, fontFace)
     document.fonts.add(fontFace)
     fontFace.load().catch(() => {
+      // Free it so a later scope mount can retry (e.g. after a transient network failure).
+      added.delete(key)
+      document.fonts.delete(fontFace)
       reportSkinIssue(`font-load:${key}`, `font "${face.family}" (${face.src}) failed to load; ` +
         'the stack falls back to its generic family')
     })

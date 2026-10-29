@@ -91,6 +91,19 @@ describe('registerSkinTokens', () => {
     expect(getSkinTokens('the-scoop')).toBe(tabloid)
   })
 
+  it('rejects the whole registration when its fonts are bad, leaving no half-registered skin', () => {
+    const bad = [{ family: 'Oswald', src: 'https://fonts.gstatic.com/o.woff2' }]
+    expect(() => registerSkinTokens('newsline7', tokensWith('#0f2749'), { fonts: bad })).toThrow(/fonts/)
+    expect(getSkinTokens('newsline7')).toBeUndefined()
+  })
+
+  it('does not silently ignore different fonts on an identical re-registration', () => {
+    const tokens = tokensWith('#0f2749')
+    registerSkinTokens('newsline7', tokens, { fonts: [{ family: 'Oswald', src: '/a.woff2' }] })
+    expect(() => registerSkinTokens('newsline7', tokens, { fonts: [{ family: 'Anton', src: '/b.woff2' }] }))
+      .toThrow(/already registered/)
+  })
+
   it('registers fonts passed as an option', () => {
     const faces = [{ family: 'Oswald', src: '/assets/oswald-abc.woff2', weight: '200 700' }]
     registerSkinTokens('newsline7', tokensWith('#0f2749'), { fonts: faces })
@@ -114,6 +127,8 @@ describe('registerSkinFonts (the font contract)', () => {
     ['a third-party CDN', 'https://fonts.gstatic.com/s/oswald/v1/oswald.woff2', /this origin/],
     ['a protocol-relative CDN', '//cdn.example.com/oswald.woff2', /this origin/],
     ['a non-woff2 file', '/assets/oswald.ttf', /woff2/],
+    ['a src with a quote', '/a".woff2', /quotes/],
+    ['a src with whitespace', ' /assets/oswald.woff2', /whitespace/],
   ])('rejects %s', (_name, src, message) => {
     expect(fontFaceProblem({ family: 'Oswald', src }, ORIGIN)).toMatch(message)
     expect(() => registerSkinFonts('newsline7', [{ family: 'Oswald', src }])).toThrow(/fonts rejected/)

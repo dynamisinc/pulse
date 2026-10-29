@@ -77,6 +77,8 @@ describe('OutletSkinTokens schema', () => {
     expect(isFontStack("'Oswald'")).toBe(false)
     expect(isFontStack('x; background: url(https://evil.example/f.woff2), serif')).toBe(false)
     expect(isFontStack('')).toBe(false)
+    expect(isFontStack('"Foo, serif')).toBe(false)
+    expect(isFontStack("'Foo\", serif")).toBe(false)
   })
 
   it('rejects CANNOT-list keys at the type level', () => {

@@ -45,6 +45,8 @@ export function SkinResetBoundary({ children }: SkinResetBoundaryProps) {
   const skin = useContext(SkinContext)
   const theme = useTheme()
   const outerTheme = skin?.outerTheme ?? theme
+  // A function theme replaces the skin theme outright (an object would be merged over it).
+  const restoreTheme = useMemo(() => () => outerTheme, [outerTheme])
   const varNames = skin?.cssVarNames
 
   const style = useMemo(() => {
@@ -71,7 +73,7 @@ export function SkinResetBoundary({ children }: SkinResetBoundaryProps) {
 
   return (
     <SkinContext.Provider value={undefined}>
-      <ThemeProvider theme={outerTheme}>
+      <ThemeProvider theme={restoreTheme}>
         <div data-skin-reset="" style={style}>
           {children}
         </div>

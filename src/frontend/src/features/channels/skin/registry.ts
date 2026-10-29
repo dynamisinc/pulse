@@ -128,16 +128,27 @@ export function registerSkinTokens(
     skinDevError(`skin "${skinKey}" uses clutter, which only the "${TABLOID_SKIN_KEY}" skin may use`)
     return
   }
+  // Fonts are validated before anything is stored: a bad face never half-registers a skin.
+  const fontProblems = (options.fonts ?? [])
+    .map(face => fontFaceProblem(face))
+    .filter(p => p !== null)
+  if (fontProblems.length > 0) {
+    skinDevError(`skin "${skinKey}" fonts rejected: ${fontProblems.join('; ')}`)
+    return
+  }
   const existing = tokens.get(skinKey)
   if (existing && !existing.stub) {
     if (!sameJson(existing.tokens, skinTokens)) {
       skinDevError(`skin "${skinKey}" is already registered`)
+      return
     }
+    // Identical tokens: still route the fonts through, so different fonts error, not vanish.
+    if (options.fonts) registerSkinFonts(skinKey, options.fonts)
     return
   }
   tokens.set(skinKey, { tokens: skinTokens, stub: false })
-  if (options.fonts) registerSkinFonts(skinKey, options.fonts)
   changed()
+  if (options.fonts) registerSkinFonts(skinKey, options.fonts)
 }
 
 /**

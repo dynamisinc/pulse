@@ -11,6 +11,7 @@ import {
   contrastRatio,
   onColor,
   relativeLuminance,
+  textSafeAccent,
 } from './contrast'
 import type { OutletSkinPalette } from './schema'
 import { NEUTRAL_SKIN_TOKENS } from './tokens/neutral'
@@ -74,6 +75,14 @@ describe('applyContrastFloor', () => {
     const result = applyContrastFloor(scoop, NEUTRAL)
     expect(result.violations).toEqual([])
     expect(result.palette).toEqual(scoop)
+  })
+
+  it('gives MUI a text-safe accent: the accent if 4.5:1 on bg and surface, else the link', () => {
+    expect(textSafeAccent({ ...NEUTRAL, accent: '#0f2749' })).toBe('#0f2749')
+    // Pink on white (~3.4:1) is fine as a fill or large mark but not as body-size text.
+    const pink = { ...NEUTRAL, accent: '#ff3399' }
+    expect(contrastRatio('#ff3399', '#ffffff')).toBeLessThan(AA_BODY)
+    expect(textSafeAccent(pink)).toBe(NEUTRAL.link)
   })
 
   it('falls back to the whole neutral palette when a clamp cannot settle', () => {

@@ -16,7 +16,8 @@
  */
 
 import { createTheme, type Theme } from '@mui/material/styles'
-import { onColor } from './contrast'
+import { onColor, textSafeAccent } from './contrast'
+import { getSkinExtension } from './registry'
 import type { OutletSkinTokens } from './schema'
 
 /** The fixed body size (NFR-001 floor; not a token). */
@@ -89,9 +90,14 @@ export function buildSkinCssVars(tokens: OutletSkinTokens): Record<string, strin
     [SKIN_CSS_VARS.playerTint]: media.playerTint,
     [SKIN_CSS_VARS.onPlayerTint]: onColor(media.playerTint),
   }
+  // Only keys the namespace schema declares `color` (and so AA-checked by `finalizeSkinTokens`).
   for (const [ns, bag] of Object.entries(tokens.ext ?? {})) {
+    const keys = getSkinExtension(ns)?.keys
     for (const [key, value] of Object.entries(bag)) {
-      if (typeof value === 'string' && HEX.test(value)) vars[skinExtColorVar(ns, key)] = value
+      const isColorKey = keys !== undefined && Object.hasOwn(keys, key) && keys[key]?.type === 'color'
+      if (isColorKey && typeof value === 'string' && HEX.test(value)) {
+        vars[skinExtColorVar(ns, key)] = value
+      }
     }
   }
   return vars
@@ -100,6 +106,7 @@ export function buildSkinCssVars(tokens: OutletSkinTokens): Record<string, strin
 /** The per-scope MUI theme for a finalized token set. */
 export function buildSkinMuiTheme(tokens: OutletSkinTokens): Theme {
   const { type, palette, density } = tokens
+  const textAccent = textSafeAccent(palette)
   const hedTransform = type.hedCase === 'uppercase' ? 'uppercase' : 'none'
   const hedCaps = type.hedCase === 'small-caps' ? 'small-caps' : 'normal'
   const heading = {
@@ -110,7 +117,10 @@ export function buildSkinMuiTheme(tokens: OutletSkinTokens): Theme {
   return createTheme({
     palette: {
       mode: 'light',
-      primary: { main: palette.accent, contrastText: onColor(palette.accent) },
+      // MUI draws primary/secondary as body-size text, so both use the text-safe accent;
+      // the raw accent is the `--pulse-skin-accent` fill. Neither is MUI's stock palette.
+      primary: { main: textAccent, contrastText: onColor(textAccent) },
+      secondary: { main: textAccent, contrastText: onColor(textAccent) },
       background: { default: palette.bg, paper: palette.surface },
       text: { primary: palette.text, secondary: palette.text },
       divider: palette.rule,

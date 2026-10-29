@@ -25,8 +25,17 @@ registerSkinTokens('newsline7', tokens, { fonts })
 | `registerSkinFonts(key, faces)` | Self-hosted **`.woff2` from this origin** only: no `data:`/`blob:` URI, no CDN (CSP `font-src 'self'`, story 23). Import the file with `?url`. Faces load lazily, with `font-display: swap`, when a scope for the key mounts. |
 | `registerSkinExtension(ns, { keys })` | `ns` is `news`, `press`, `weather` or `portal`. Keys are `string`, `number`, `boolean`, `string[]`, `enum` or `color`. Undeclared keys and unregistered namespaces are dropped (reported in dev). `color` keys are AA-checked (`against: 'bg' \| 'surface'`, `large` for 3:1). Mirror the keys in F03's `ISkinOverridesValidator`. |
 
+Two dev-time notes:
+- **HMR.** Editing a registered token file re-runs it with new values, which is a "second, different
+  registration" and throws; reload the page after a token edit.
+- **Small fonts.** Vite inlines assets under 4 KiB as `data:` URIs, which the registry (and CSP) reject.
+  Story 23 sets `assetsInlineLimit` so fonts are never inlined; until it is on your branch, import tiny
+  subsets with `?no-inline`.
+
 Token files name font **stacks** only, and every stack must end in a generic family (`serif`,
-`sans-serif`, `monospace`, `system-ui`, …) so a missing or blocked face falls back cleanly.
+`sans-serif`, `monospace`, `system-ui`, …) so a missing or blocked face falls back cleanly. Keeping
+the swap's layout shift within tolerance (choosing metric-compatible fallbacks, or `size-adjust`) is
+the skin author's job and a manual check in each skin story; the system does not measure it.
 
 ## Mounting a skin
 
@@ -46,8 +55,10 @@ colours as `skinExtColorVar(ns, key)`.
 ### What every mounted skin gets, whatever the tokens say (the CANNOT list)
 
 - **AA contrast.** Each pair in `CONTRAST_PAIRS` (text and link on bg and surface at 4.5:1, accent and
-  breaking on bg at 3:1) is clamped to the neutral palette if it fails, with a report in dev. Text on an
+  breaking on bg and surface at 3:1) is clamped to the neutral palette if it fails, with a report in dev. Text on an
   accent, breaking or player fill uses the derived `--pulse-skin-on-*` (black or white, always ≥ 4.5:1).
+  The accent is a fill or large mark; for body-size accent text the MUI theme's `primary` uses the
+  accent only when it reaches 4.5:1, and the link colour otherwise.
 - **Body size** `max(1rem, 16px)`: fixed, not a token.
 - **Clutter** is honoured only for `the-scoop`.
 - **No platform copy.** The system renders no text. `breaking.vocabulary` is the outlet's own label, and

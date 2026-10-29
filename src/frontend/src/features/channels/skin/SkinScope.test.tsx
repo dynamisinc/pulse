@@ -5,14 +5,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
-import { useTheme } from '@mui/material/styles'
+import { ThemeProvider, createTheme, useTheme, type Theme } from '@mui/material/styles'
 import { OutletSkinScope } from './OutletSkinScope'
 import { SkinScope } from './SkinScope'
-import { registerSkinTokens, resetSkinRegistryForTests } from './registry'
+import { registerSkinExtension, registerSkinTokens, resetSkinRegistryForTests } from './registry'
 import { resetSkinReportsForTests } from './report'
 import { resetSkinFontsForTests } from './fonts'
 import { useSkin } from './skinContext'
-import { SKIN_CSS_VARS } from './theme'
+import { SKIN_CSS_VARS, skinExtColorVar } from './theme'
 import type { OutletSkinTokens } from './schema'
 import { NEUTRAL_SKIN_TOKENS } from './tokens/neutral'
 
@@ -61,6 +61,8 @@ afterEach(() => {
   resetSkinReportsForTests()
   resetSkinFontsForTests()
   vi.unstubAllGlobals()
+  // The font tests stub `document.fonts`; remove the stub so it cannot leak.
+  delete (document as { fonts?: unknown }).fonts
 })
 
 describe('SkinScope', () => {
@@ -117,6 +119,30 @@ describe('SkinScope', () => {
     expect(screen.getByTestId('inner-probe').dataset.muiPrimary).toBe('#9a3412')
     expect(screen.getByTestId('outer-probe').dataset.muiPrimary).toBe('#0f2749')
     expect(scopeOf('inner-probe').style.getPropertyValue(SKIN_CSS_VARS.fontBody)).toBe('Arial, sans-serif')
+  })
+
+  it('does not inherit custom keys from an outer (e.g. COBRA-style) theme', () => {
+    function CustomKeyProbe() {
+      const theme = useTheme() as Theme & { cssStyling?: unknown }
+      return <span data-testid="custom" data-has-custom={String(theme.cssStyling !== undefined)} />
+    }
+    const outer = { ...createTheme(), cssStyling: { staff: true } }
+    render(
+      <ThemeProvider theme={outer}>
+        <SkinScope scopeId="portal" tokens={tokensWith('#0f2749')}><CustomKeyProbe /></SkinScope>
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId('custom').dataset.hasCustom).toBe('false')
+  })
+
+  it('publishes only schema-declared colour ext keys as CSS variables', () => {
+    registerSkinExtension('news', {
+      keys: { chipColor: { type: 'color', large: true }, label: { type: 'string' } },
+    })
+    const tokens = { ...tokensWith('#0f2749'), ext: { news: { chipColor: '#c8102e', label: '#ffff00' } } }
+    render(<SkinScope scopeId="n" tokens={tokens}><Probe id="ext" /></SkinScope>)
+    expect(scopeOf('ext').style.getPropertyValue(skinExtColorVar('news', 'chipColor'))).toBe('#c8102e')
+    expect(scopeOf('ext').style.getPropertyValue(skinExtColorVar('news', 'label'))).toBe('')
   })
 
   it('applies the a11y floor to a token object handed straight in', () => {
@@ -214,7 +240,10 @@ describe('fonts load lazily', () => {
       }
     }
     vi.stubGlobal('FontFace', FailingFontFace)
-    Object.defineProperty(document, 'fonts', { value: { add: vi.fn() }, configurable: true })
+    Object.defineProperty(document, 'fonts', {
+      value: { add: vi.fn(), delete: vi.fn() },
+      configurable: true,
+    })
     registerSkinTokens('newsline7', tokensWith('#0f2749'), {
       fonts: [{ family: 'Oswald', src: '/assets/oswald-abc.woff2' }],
     })
@@ -226,6 +255,14 @@ describe('fonts load lazily', () => {
     expect(screen.getByTestId('still-here')).toBeInTheDocument()
     await vi.waitFor(() => {
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/font "Oswald" .* failed to load/))
-    })
+    }, { timeout: 5000 })
+    // The failed face is released, so the next scope mount retries it.
+    expect(document.fonts.delete).toHaveBeenCalledTimes(1)
+    render(
+      <OutletSkinScope outlet={{ slug: 'n', skinKey: 'newsline7', skinOverrides: null }}>
+        <span />
+      </OutletSkinScope>,
+    )
+    expect(document.fonts.add).toHaveBeenCalledTimes(2)
   })
 })

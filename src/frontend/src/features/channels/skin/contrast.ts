@@ -82,7 +82,22 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   { fg: 'breaking', bg: 'bg', min: AA_LARGE, why: 'the breaking banner fill on the page' },
   { fg: 'text', bg: 'surface', min: AA_BODY, why: 'body text on a surface' },
   { fg: 'link', bg: 'surface', min: AA_BODY, why: 'links on a surface' },
+  { fg: 'accent', bg: 'surface', min: AA_LARGE, why: 'accent marks and large text on a surface' },
+  { fg: 'breaking', bg: 'surface', min: AA_LARGE, why: 'the breaking banner fill on a surface' },
 ]
+
+/**
+ * The accent when it is legible as NORMAL-size text on both `bg` and
+ * `surface` (4.5:1); otherwise the `link` colour, which the floor already
+ * holds to 4.5:1 on both. MUI draws `primary.main` as body-size text (text
+ * buttons, tabs, `color="primary"`), so the MUI theme uses this, while the
+ * raw accent stays available as a fill / large mark (`--pulse-skin-accent`).
+ */
+export function textSafeAccent(palette: OutletSkinPalette): string {
+  const legible = contrastRatio(palette.accent, palette.bg) >= AA_BODY &&
+    contrastRatio(palette.accent, palette.surface) >= AA_BODY
+  return legible ? palette.accent : palette.link
+}
 
 /** The result of applying the floor to a palette. */
 export interface ContrastFloorResult {

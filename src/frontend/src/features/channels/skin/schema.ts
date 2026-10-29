@@ -71,6 +71,10 @@ export const GENERIC_FONT_FAMILIES = [
   'ui-serif', 'ui-sans-serif', 'ui-monospace',
 ] as const
 
+/** One family in a stack: a plain name, or a name in matching single or double quotes. */
+const FAMILY = /[A-Za-z0-9][A-Za-z0-9 -]*/.source
+const FAMILY_NAME = new RegExp(`^(?:${FAMILY}|'${FAMILY}'|"${FAMILY}")$`)
+
 /**
  * A CSS font stack: comma-separated family names, no declarations, no
  * `url(...)`, ending in a generic family. Token files name stacks only; the
@@ -80,7 +84,7 @@ export function isFontStack(value: string): boolean {
   if (value.length === 0 || value.length > 200) return false
   if (/[;{}<>()\\]/.test(value)) return false
   const parts = value.split(',').map(p => p.trim())
-  if (parts.some(p => p.length === 0)) return false
+  if (!parts.every(p => FAMILY_NAME.test(p))) return false
   const last = parts[parts.length - 1]?.toLowerCase() ?? ''
   return (GENERIC_FONT_FAMILIES as readonly string[]).includes(last)
 }

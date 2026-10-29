@@ -63,7 +63,7 @@ export function mergeSkinTokens(skinKey: string, overrides?: unknown): MergedSki
   const parsed = skinOverridesSchema.safeParse(overrides)
   if (!parsed.success) {
     reportSkinIssue(
-      `bad-overrides:${skinKey}:${JSON.stringify(overrides)}`,
+      `bad-overrides:${skinKey}:${describeIssues(parsed.error)}`,
       `skinOverrides for "${skinKey}" ignored: ${describeIssues(parsed.error)}`,
     )
     return { skinKey: key, tokens: base }
@@ -118,7 +118,7 @@ function finalizeExt(
   label: string,
 ): Record<string, SkinExtBag> | undefined {
   if (!ext) return undefined
-  if (JSON.stringify(ext).length > SKIN_EXT_MAX_BYTES) {
+  if (new TextEncoder().encode(JSON.stringify(ext)).length > SKIN_EXT_MAX_BYTES) {
     reportSkinIssue(`ext-size:${label}`, `${label}: ext is over ${SKIN_EXT_MAX_BYTES} bytes; ignored`)
     return undefined
   }
@@ -171,7 +171,7 @@ export function finalizeSkinTokens(
   const parsed = outletSkinTokensSchema.safeParse(tokens)
   const valid: OutletSkinTokens = parsed.success ? tokens : NEUTRAL_SKIN_TOKENS
   if (!parsed.success) {
-    reportSkinIssue(`bad-tokens:${label}:${JSON.stringify(tokens)}`,
+    reportSkinIssue(`bad-tokens:${label}:${describeIssues(parsed.error)}`,
       `${label} does not match OutletSkinTokens (${describeIssues(parsed.error)}); using the neutral skin`)
   }
 
@@ -187,7 +187,7 @@ export function finalizeSkinTokens(
 
   const floor = applyContrastFloor(valid.palette, NEUTRAL_SKIN_TOKENS.palette)
   if (floor.violations.length > 0) {
-    reportSkinIssue(`contrast:${label}:${JSON.stringify(valid.palette)}`,
+    reportSkinIssue(`contrast:${label}:${floor.violations.join('|')}`,
       `${label} palette clamped to the AA floor: ${floor.violations.join('; ')}`)
   }
 
