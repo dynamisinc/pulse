@@ -6,3 +6,4 @@
 
 export * from './contract'
 export { USE_MOCK_CHANNELS, withChannelsMock } from './mocks'
+export * from './skin'
