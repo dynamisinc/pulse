@@ -32,6 +32,11 @@ vi.mock('@/core/exerciseContext', () => ({
   }),
 }))
 
+let previewActive = false
+vi.mock('@/features/staffShell/previewContext', () => ({
+  useOptionalPreview: () => (previewActive ? { active: true } : undefined),
+}))
+
 const mockGet = vi.mocked(api.get)
 
 type Flags = Partial<Record<'social' | 'portal' | 'news' | 'press' | 'weather', boolean>>
@@ -70,6 +75,7 @@ function makeWrapper(queryClient: QueryClient) {
 
 beforeEach(() => {
   mockGet.mockReset()
+  previewActive = false
 })
 
 describe('useEnabledChannels', () => {
@@ -178,7 +184,35 @@ describe('<ChannelRoute>', () => {
 
     renderRoute('news')
 
-    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading')
+    expect(screen.queryByTestId('channel-not-found')).not.toBeInTheDocument()
+  })
+
+  it('holds a cached "disabled" until the refetch answers, so a fresh enable never flashes not-found', async () => {
+    const queryClient = newQueryClient()
+    respondWith({ social: true })
+    const first = renderRoute('news', queryClient)
+    expect(await screen.findByTestId('channel-not-found')).toBeInTheDocument()
+    first.unmount()
+
+    let answer: (value: unknown) => void = () => {}
+    mockGet.mockReturnValue(new Promise(resolve => { answer = resolve }) as never)
+    renderRoute('news', queryClient)
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByTestId('channel-not-found')).not.toBeInTheDocument()
+
+    answer({ data: navConfig({ social: true, news: true }), status: 200 })
+    expect(await screen.findByText('news channel content')).toBeInTheDocument()
+  })
+
+  it('lets a staged staff preview render a disabled channel (staff are not blocked)', async () => {
+    previewActive = true
+    respondWith({ social: true })
+
+    renderRoute('news')
+
+    expect(await screen.findByText('news channel content')).toBeInTheDocument()
     expect(screen.queryByTestId('channel-not-found')).not.toBeInTheDocument()
   })
 

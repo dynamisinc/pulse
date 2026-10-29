@@ -14,22 +14,27 @@
  * **Live.** This observer uses `staleTime: 0`, so mounting a guarded channel
  * route refetches: a planner's toggle applies on the participant's next
  * navigation without a reload. The shell nav sees the refreshed entry too.
+ * `isRefreshing` is true while that refetch is in flight over cached data, so
+ * the guard can hold a not-found until the fresh answer lands.
  *
  * **Fail closed.** While loading, `status` is `'loading'` (the guard renders a
  * quiet placeholder, never a premature not-found). On error it resolves to the
  * shell's documented safe default, Social only, exactly what `useChannelNav`
  * falls back to — so a disabled channel is never served because a request
- * failed.
+ * failed. (The shared query client retries once first, so the fallback lands
+ * after that retry.)
  *
  * Exercise-scoped (XC-001): the exercise id keys the cache only; the server
  * scopes by session. World: participant. No UI here.
  */
 
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useExerciseContext } from '@/core/exerciseContext'
 import {
   channelNavConfigQueryKey,
   fetchChannelNavConfig,
+  type ChannelNavConfig,
 } from '@/features/participant-shell/channelNavConfig'
 
 /** The pilot default (Master §4): Social only. Also the fail-closed fallback. */
@@ -42,31 +47,39 @@ export interface EnabledChannels {
   readonly enabledIds: ReadonlySet<string>
   /** Whether `channelId` is enabled. Always `false` while loading. */
   readonly isEnabled: (channelId: string) => boolean
+  /** A refetch is in flight over cached data (the cached answer may be stale). */
+  readonly isRefreshing: boolean
 }
 
-const LOADING: EnabledChannels = {
-  status: 'loading',
-  enabledIds: new Set(),
-  isEnabled: () => false,
+function toEnabledIds(config: ChannelNavConfig): ReadonlySet<string> {
+  return new Set(config.channels.map(channel => channel.id))
 }
 
-function ready(enabledIds: ReadonlySet<string>): EnabledChannels {
-  return { status: 'ready', enabledIds, isEnabled: channelId => enabledIds.has(channelId) }
+function resolve(enabledIds: ReadonlySet<string> | null, isRefreshing: boolean): EnabledChannels {
+  if (enabledIds === null) {
+    return { status: 'loading', enabledIds: new Set(), isEnabled: () => false, isRefreshing }
+  }
+  return {
+    status: 'ready',
+    enabledIds,
+    isEnabled: channelId => enabledIds.has(channelId),
+    isRefreshing,
+  }
 }
-
-const DEFAULT_READY = ready(DEFAULT_ENABLED_CHANNEL_IDS)
 
 /** The enabled participant channels for the resolved exercise (see module header). */
 export function useEnabledChannels(): EnabledChannels {
   const { exerciseId } = useExerciseContext()
 
-  const { data, isError } = useQuery({
+  const { data, isError, isFetching } = useQuery({
     queryKey: channelNavConfigQueryKey(exerciseId),
     queryFn: fetchChannelNavConfig,
     staleTime: 0,
-    select: config => new Set(config.channels.map(channel => channel.id)) as ReadonlySet<string>,
   })
 
-  if (data) return ready(data)
-  return isError ? DEFAULT_READY : LOADING
+  const enabledIds = useMemo(() => (data ? toEnabledIds(data) : null), [data])
+  const resolvedIds = enabledIds ?? (isError ? DEFAULT_ENABLED_CHANNEL_IDS : null)
+  const isRefreshing = isFetching && enabledIds !== null
+
+  return useMemo(() => resolve(resolvedIds, isRefreshing), [resolvedIds, isRefreshing])
 }

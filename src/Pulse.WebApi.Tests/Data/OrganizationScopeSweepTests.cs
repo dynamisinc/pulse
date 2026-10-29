@@ -143,7 +143,9 @@ public sealed class OrganizationScopeSweepTests
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
         // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
         // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
-        ["ResolvedScope"] = 31,
+        // channels-foundation 08 (#704): +1 for ChannelEnablement.IsEnabledAsync — the enablement gate's read of the
+        // resolved exercise's EnabledChannels by the IExerciseContext id.
+        ["ResolvedScope"] = 32,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

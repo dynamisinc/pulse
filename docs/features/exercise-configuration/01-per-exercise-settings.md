@@ -97,8 +97,8 @@ because the client change is purely additive.
 > **Update (channels-foundation 08, #704).** The shared participant-route filter now exists:
 > `Features/Channels/Enablement/` (`IChannelEnablement` + the `RequireChannelEnabled(channelId)` endpoint
 > filter) reads the resolved exercise's enabled set through `ChannelCatalog.ResolveEnabled`, the same rule
-> as `GET /api/channel-nav-config`, and 404s a disabled channel's routes for participants (staff pass). Every
-> E3–E6 participant route is wrapped in it (FC-4), and the client guard is `<ChannelRoute>`
+> as `GET /api/channel-nav-config`, and 404s a disabled channel's routes for participants (assigned staff pass).
+> Every E3–E6 participant route must be wrapped in it (FC-4), and the client guard is `<ChannelRoute>`
 > (`features/channels/routing`). **Social is deliberately not gated yet** (channels-foundation Q4): applying
 > `.RequireChannelEnabled("social")` to `/api/feed`, `/api/threads`, `/api/posts` is the one-line follow-up.
 > The analysis below is kept for history.

@@ -111,6 +111,23 @@ public sealed class ChannelEnablementGateHostTests
     }
 
     [RequiresDockerFact]
+    public async Task Staff_NotAssignedToTheExercise_AreGatedLikeAParticipant()
+    {
+        var exercise = await SeedExerciseAsync(enabledChannels: null);
+        var elsewhere = await SeedExerciseAsync("social,news,press,weather,portal");
+        var unassigned = await _seed.SeedStaffSessionAsync(exercise.Id, [(elsewhere.Id, "controller")]);
+
+        using var host = new GateProbeFactory(_seed.ConnectionString);
+        using var client = host.CreateClientFor(exercise.Host, unassigned);
+
+        foreach (var channel in GatedChannels)
+        {
+            (await client.GetAsync(ProbeRoute(channel))).StatusCode.Should().Be(
+                HttpStatusCode.NotFound, "an assignment to another exercise must not open {0} here", channel);
+        }
+    }
+
+    [RequiresDockerFact]
     public async Task Toggle_AppliesOnTheNextRequest_AndTheNavConfigAgrees()
     {
         var exercise = await SeedExerciseAsync(enabledChannels: null);

@@ -8,14 +8,24 @@
  * 404 and never a blank page. "Disabled" means unreachable, not merely hidden:
  * the server gate (`RequireChannelEnabled`) 404s the channel's API the same way.
  *
- * While the enabled set is still loading it renders a quiet, accessible busy
- * placeholder rather than a premature not-found, so a deep link to an enabled
- * channel never flashes "Page not found".
+ * Until the guard has a current answer it renders a quiet, accessible busy
+ * placeholder rather than a premature not-found: on a cold cache, and when the
+ * cached set says "disabled" while the mount's refetch is still in flight (a
+ * planner may just have enabled it). A cached "enabled" renders at once; if the
+ * refetch says otherwise the guard switches to not-found, and the server 404s
+ * the channel's API meanwhile.
+ *
+ * **Staff preview passes** (AC "staff are not blocked"): inside a staged staff
+ * "Preview as participant" (`useOptionalPreview()`), the channel renders
+ * whatever the enabled set, matching the server filter's staff bypass, so a
+ * planner can preview a channel before enabling it. Only the preview context is
+ * read; nothing staff-world is rendered.
  *
  * World: participant. No COBRA, no MUI.
  */
 
 import type { ReactNode } from 'react'
+import { useOptionalPreview } from '@/features/staffShell/previewContext'
 import { ChannelNotFound } from './ChannelNotFound'
 import { useEnabledChannels } from './enabled'
 
@@ -28,17 +38,23 @@ export interface ChannelRouteProps {
 
 /** Renders `children` only when `channelId` is enabled for the resolved exercise. */
 export function ChannelRoute({ channelId, children }: ChannelRouteProps) {
-  const { status, isEnabled } = useEnabledChannels()
+  const preview = useOptionalPreview()
+  const { status, isEnabled, isRefreshing } = useEnabledChannels()
 
-  if (status === 'loading') {
+  if (preview?.active) return <>{children}</>
+
+  const enabled = isEnabled(channelId)
+  const pending = status === 'loading' || (!enabled && isRefreshing)
+
+  if (pending) {
     return (
-      <div role="status" aria-busy="true" aria-live="polite" style={{ minHeight: '50vh', padding: '48px 16px' }}>
+      <div role="status" style={{ minHeight: '50vh', padding: '48px 16px' }}>
         <span style={visuallyHidden}>Loading…</span>
       </div>
     )
   }
 
-  return isEnabled(channelId) ? <>{children}</> : <ChannelNotFound />
+  return enabled ? <>{children}</> : <ChannelNotFound />
 }
 
 const visuallyHidden = {

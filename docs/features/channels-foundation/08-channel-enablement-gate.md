@@ -28,17 +28,22 @@ Files: `Features/Channels/Enablement/**`, the `ChannelCatalog` edit in `Particip
   only), `ChannelEnablementEndpointFilter`, and `RequireChannelEnabled<TBuilder>(channelId)` (works on an endpoint or a
   route group; an uncatalogued id throws at mapping time). Registered from `AddChannels()`. The catalog edit adds
   `ChannelCatalog.IsCatalogued` and `ChannelCatalog.ResolveEnabled`; `GetChannelNavConfigAsync` now resolves through
-  `ResolveEnabled`, so the nav and the gate share one rule. A live **staff** session passes the filter (any staff
-  session; the handler's own role and scope gates still apply); participant and shared read-only sessions are gated.
+  `ResolveEnabled`, so the nav and the gate share one rule. A live **staff** session assigned to the resolved exercise passes the
+  filter (the handler's own role and scope gates still apply); participant, shared read-only and unassigned staff
+  sessions are gated.
   An unresolved scope 404s.
 - **Interface location:** FC-7 places seam interfaces in `Contracts/`, but story 02 did not ship
   `IChannelEnablement`, so it lives in `Enablement/` with its implementation.
 - **Client:** `features/channels/routing/` — `useEnabledChannels()` reads the shell's own nav-config query
   (`channelNavConfigQueryKey` + `fetchChannelNavConfig`, now exported from `participant-shell/channelNavConfig.ts`), with
-  `staleTime: 0` so a toggle applies on the next guarded mount; on error it falls back to Social only.
-  `<ChannelRoute channelId>` shows a busy placeholder while loading, then the children or `ChannelNotFound`.
+  `staleTime: 0` so a toggle applies on the next guarded mount; on a first-fetch error it falls back to Social only (a
+  failed refetch keeps the last answer; the server stays authoritative). `<ChannelRoute channelId>` shows a busy
+  placeholder while loading, and while a cached "disabled" is being refetched, then the children or `ChannelNotFound`.
+  Inside a staged staff "Preview as participant" (`useOptionalPreview()`) it renders the channel regardless (AC3).
 - **`ChannelNotFound`:** story 12 owns the final skinned version; this story ships a fiction-safe baseline in
-  `features/channels/routing/ChannelNotFound.tsx` (FC-8 `routing/`) that story 12 restyles in place.
+  `features/channels/routing/ChannelNotFound.tsx` (FC-8 `routing/`) that story 12 restyles in place. Handoff to 12: today an unknown participant path redirects to Social home
+  (`SocialRoutes` catch-all) while a disabled channel renders `ChannelNotFound`; 12's participant not-found should
+  converge the two so they are indistinguishable on the client as they are on the server.
 - **Tests:** `ChannelEnablementTests` (service, nav agreement, mapping), `ChannelEnablementGateHostTests` (real
   `Program` host + SQL: probe routes for news/press/weather/portal, staff/read-only, live toggle, isolation, Social
   ungated), `ChannelsCompositionRootWiringTests`, `features/channels/routing/enabled.test.tsx`.

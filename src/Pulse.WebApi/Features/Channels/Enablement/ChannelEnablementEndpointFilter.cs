@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Channels.Enablement;
 
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -9,11 +10,13 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Staff are not blocked.</b> A live staff session (console, preview-as-participant) passes whatever the enabled
-/// set: planners prepare and preview content before enabling a channel. This only skips the enablement check; it
-/// grants nothing else, and the wrapped handler's own scope and role gates still apply. Staff identity comes from
-/// <see cref="ICurrentStaffSessionAccessor"/>, which yields a session only for a live staff-kind row, so a
-/// participant or shared read-only session can never claim it.
+/// <b>Staff are not blocked.</b> A live staff session (console, preview-as-participant) ASSIGNED to the resolved
+/// exercise passes whatever the enabled set: planners prepare and preview content before enabling a channel. This
+/// only skips the enablement check; it grants nothing else, and the wrapped handler's own scope and role gates still
+/// apply. Staff identity and assignment come from <see cref="StaffAssignmentService"/> (over
+/// <see cref="ICurrentStaffSessionAccessor"/>, which yields a session only for a live staff-kind row), so a
+/// participant or shared read-only session can never claim it, and a staff session not assigned to this exercise
+/// is gated like a participant.
 /// </para>
 /// <para>
 /// <b>Indistinguishable 404 (XC-001/XC-002).</b> The result is <c>Results.NotFound()</c> with no body, what the host
@@ -39,14 +42,33 @@ internal sealed class ChannelEnablementEndpointFilter : IEndpointFilter
         var services = context.HttpContext.RequestServices;
         var cancellationToken = context.HttpContext.RequestAborted;
 
-        var staffSession = await services.GetRequiredService<ICurrentStaffSessionAccessor>()
-            .GetCurrentStaffSessionAsync(cancellationToken);
-        if (staffSession is not null)
+        if (await IsStaffAssignedToResolvedExerciseAsync(services, cancellationToken))
         {
             return await next(context);
         }
 
         var enabled = await services.GetRequiredService<IChannelEnablement>().IsEnabledAsync(_channelId, cancellationToken);
         return enabled ? await next(context) : Results.NotFound();
+    }
+
+    /// <summary>
+    /// The staff bypass: a live staff session ASSIGNED to the resolved exercise (the
+    /// <c>EngineCockpitStaffAuthorizationFilter</c> check). Anything else, including a staff session for another
+    /// exercise, is gated like a participant rather than refused, so it still gets the indistinguishable 404.
+    /// </summary>
+    private static async Task<bool> IsStaffAssignedToResolvedExerciseAsync(
+        IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        var assignments = await services.GetRequiredService<StaffAssignmentService>().GetAssignmentsAsync(cancellationToken);
+        if (assignments is null)
+        {
+            return false;
+        }
+
+        var scope = services.GetRequiredService<IExerciseContext>().CurrentExerciseId;
+        return scope is { } exerciseId
+            && exerciseId != Guid.Empty
+            && assignments.Any(a => Guid.TryParse(a.ExerciseId, out var id) && id == exerciseId);
     }
 }

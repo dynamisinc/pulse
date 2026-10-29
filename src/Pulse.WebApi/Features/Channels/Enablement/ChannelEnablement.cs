@@ -58,6 +58,8 @@ public sealed class ChannelEnablement : IChannelEnablement
 
         if (_enabled is null)
         {
+            // org-scope-exempt(ResolvedScope): the id is IExerciseContext.CurrentExerciseId (server-resolved), never a
+            // request value, so this enablement read cannot reach another exercise or another customer.
             var stored = await _dbContext.Exercises
                 .AsNoTracking()
                 .Where(e => e.Id == scope.Value)
