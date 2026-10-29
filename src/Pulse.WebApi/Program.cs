@@ -544,6 +544,7 @@ app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapRuntimeStateReset();   // demo-feedback/18 POST /api/steering/runtime-state/reset (S-5; controller only)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
+app.MapChannels();            // channels-foundation routes (10: /api/alerts/history; POST /api/alerts(+/{id}/clear), controller)
 
 // Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
 // the controller-role filter on every mutation). MapPostPins() stays at TOP LEVEL on purpose: a view-only session

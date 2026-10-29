@@ -3,12 +3,18 @@ namespace Pulse.WebApi.Tests.Features.Channels;
 using System;
 using System.Linq;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
+using Pulse.WebApi.Features.Channels.Alerts;
+using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Features.ExerciseConfiguration;
 using Xunit;
 
 /// <summary>
@@ -18,9 +24,9 @@ using Xunit;
 /// exercise filter — and that the <c>AddChannels()</c> seam later stories fill is safe to compose.
 /// </summary>
 /// <remarks>
-/// Story 01 registers no service of its own (schema only), so there is no route or service to find yet; stories 03+ extend
-/// this file as they fill <c>AddChannels()</c>. Resolving the context only needs the host to BUILD, so it is fed a dummy,
-/// never-connecting connection string.
+/// Story 01 registered no service of its own (schema only); stories 03+ extend this file as they fill
+/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 10: the alert source and the <c>/api/alerts*</c> routes).
+/// Resolving the context only needs the host to BUILD, so it is fed a dummy, never-connecting connection string.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
 {
@@ -50,12 +56,47 @@ public sealed class ChannelsCompositionRootWiringTests
     }
 
     [Fact]
-    public void AddChannels_IsIdempotentAndRegistersNothingYet()
+    public void AddChannels_IsIdempotent_RegisteringTheAlertSourceOnce()
     {
         var services = new ServiceCollection();
 
         services.AddChannels().AddChannels().Should().BeSameAs(services);
-        services.Should().BeEmpty("story 01 is schema only; stories 03+ add their registrations to this seam");
+
+        services.Count(d => d.ServiceType == typeof(IAlertRaiser)).Should().Be(1);
+        services.Count(d => d.ServiceType == typeof(AlertService)).Should().Be(1);
+        services.Count(d => d.ServiceType == typeof(AlertReader)).Should().Be(1);
+        services.Count(d => d.ServiceType == typeof(IPlatformAlertNotifier)).Should().Be(1);
+        services.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AlertExpirySweeper))
+            .Should().Be(1, "story 10's expiry sweep runs once per host");
+    }
+
+    [Fact]
+    public void ProgramCs_WiresTheAlertSource_AndItsRoutes()
+    {
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<IAlertRaiser>().Should().BeOfType<AlertService>();
+        scope.ServiceProvider.GetRequiredService<IPlatformAlertNotifier>().Should().BeOfType<NullPlatformAlertNotifier>(
+            "the SOC-072 bridge is a no-op until notifications story 03 replaces it");
+        scope.ServiceProvider.GetRequiredService<ParticipantShellConfigService>().Should().NotBeNull(
+            "GET /api/alerts delegates to the alert source, so the shell config service must still resolve");
+        factory.Services.GetServices<IHostedService>().OfType<AlertExpirySweeper>().Should().ContainSingle();
+
+        var routes = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .SelectMany(e => (e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? [])
+                .Select(method => $"{method} {e.RoutePattern.RawText}"))
+            .ToList();
+
+        routes.Should().Contain(new[]
+        {
+            "GET /api/alerts",
+            "GET /api/alerts/history",
+            "POST /api/alerts",
+            "POST /api/alerts/{id:guid}/clear",
+        });
     }
 
     /// <summary>Boots the real <c>Program</c> host with a dummy, never-connecting connection string. Overrides nothing else.</summary>

@@ -1,5 +1,7 @@
 namespace Pulse.WebApi.Features.Channels;
 
+using Pulse.WebApi.Features.Channels.Alerts;
+
 /// <summary>
 /// The channels foundation's one DI entry point (FC-9.10), called once from the orchestrator-owned <c>Program.cs</c>.
 /// </summary>
@@ -17,6 +19,22 @@ public static class ChannelsServiceCollectionExtensions
     public static IServiceCollection AddChannels(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        services.AddChannelAlerts(); // story 10: the alert source, IAlertRaiser and the expiry sweep
         return services;
+    }
+
+    /// <summary>
+    /// Maps the channels foundation's routes, called once from <c>Program.cs</c> (the route twin of
+    /// <see cref="AddChannels"/>): later foundation stories add their <c>Map*</c> calls here, not to <c>Program.cs</c>.
+    /// </summary>
+    /// <param name="endpoints">The route builder.</param>
+    /// <returns>The same route builder, for chaining.</returns>
+    public static IEndpointRouteBuilder MapChannels(this IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        endpoints.MapChannelAlerts(); // story 10: GET /api/alerts/history; POST /api/alerts, /api/alerts/{id}/clear
+        return endpoints;
     }
 }
