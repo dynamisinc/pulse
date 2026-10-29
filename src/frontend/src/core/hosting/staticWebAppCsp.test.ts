@@ -125,7 +125,7 @@ describe.each(POLICIES)('the %s header', (name, policy) => {
 })
 
 describe('staticwebapp.config.json — the CSP reaches every document', () => {
-  it('is a global header, not a per-route one, so navigationFallback responses carry it', () => {
+  it('comes from globalHeaders only: no route rule sets or overrides a CSP header', () => {
     for (const rule of CONFIG.routes ?? []) {
       const names = Object.keys(rule.headers ?? {})
 

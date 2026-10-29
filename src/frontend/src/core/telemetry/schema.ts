@@ -36,12 +36,8 @@
  */
 
 import { z } from 'zod'
-
-// No JIT: zod 4 probes for `new Function` to compile object parsers. The host CSP
-// (channels-foundation story 23) allows no `'unsafe-eval'`, so the probe logs a violation
-// (zod catches the error and falls back, so it is noise, not breakage). This module is the
-// app's only zod consumer; a second one must import it first, or move this call to startup.
-z.config({ jitless: true })
+// Before any schema is built: no zod JIT under the host CSP (story 23).
+import '@/core/config/zodConfig'
 
 // ---------------------------------------------------------------------------
 // Sub-schemas

@@ -31,7 +31,8 @@ None. Must merge before F13's font loading is exercised (CW2) — hence CW1. Can
 **Where the policy lives.** The SPA is served by Azure Static Web Apps, so the headers are `globalHeaders` in
 `src/frontend/public/staticwebapp.config.json`. Global headers reach every response, including
 `navigationFallback` documents and the `/join` route rules (those add their own headers on top). The .NET API is a
-separate origin that serves JSON, so it carries no document CSP. `vite preview` reads the same `globalHeaders`, so a
+separate origin that serves only API responses (`Program.cs` maps no static files or SPA fallback), so it gets no
+document CSP here. `vite preview` reads the same `globalHeaders`, so a
 production build can be checked locally. The dev server (5198) gets no CSP, because the React Refresh preamble is an
 inline script. `build.assetsInlineLimit` never inlines a font, because `font-src 'self'` blocks `data:` fonts.
 
@@ -42,8 +43,10 @@ inline script. `build.assetsInlineLimit` never inlines a font, because `font-src
   style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data: blob:; media-src 'self' https: blob:;
   connect-src 'self' https: wss:; manifest-src 'self' blob:; worker-src 'self'; frame-src 'none'; object-src 'none';
   base-uri 'self'; form-action 'self'`. It soaks on UAT, where the real cross-origin API, SignalR and SAS media are
-  exercised. Promote it to the enforced header in a later change, once UAT shows no reports. No reporting endpoint
-  exists yet, so violations show only in the browser console.
+  exercised. No reporting endpoint exists yet, so violations show only in the browser console. Promotion is
+  therefore gated on an explicit **manual UAT sweep**, not on "no reports": with devtools open, walk the participant
+  feed (compose, media upload, link preview, video), the portal, the staff console and report, and the join/login
+  forms (`form-action`), with a live SignalR connection. Promote only if the console shows no CSP messages.
 
 **AC2 is measured against the prior state and the enforced header.** The host sent no CSP before this story, so
 nothing is loosened. The enforced header has no `unsafe-*`. The one `unsafe-*` in the report-only baseline,
@@ -60,11 +63,14 @@ nothing is loosened. The enforced header has no `unsafe-*`. The one `unsafe-*` i
   (manifest-src).
 - `img-src data:`: the brand `apple-touch-icon`.
 - `script-src` is `'self'` only, with no `'unsafe-eval'`. zod 4 probes `new Function` for its JIT, so
-  `core/telemetry/schema.ts` sets `z.config({ jitless: true })` to keep that probe from tripping the policy.
+  `core/config/zodConfig.ts` (imported first in `main.tsx` and by `core/telemetry/schema.ts`) sets
+  `z.config({ jitless: true })` to keep that probe from tripping the policy.
 
 **For the promotion change.** Add `frame-ancestors 'none'`. Browsers ignore it in a report-only header, so it is left
 out of the baseline. Also add a `report-to` endpoint if one exists by then. When previewing against a local
-`http://localhost` API, the report-only `connect-src` logs reports; that is expected.
+`http://localhost` API, the report-only `connect-src` logs reports; that is expected. The service worker answers an
+offline navigation with its cached `index.html`, which keeps the headers it was cached with, so a tightened policy
+reaches an offline or stale-shell participant only after the worker updates.
 
 **Manual check (AC3).** Production build with `VITE_USE_MOCK_DATA=true`, served by `vite preview`. Both headers were
 present on the documents and on `/assets/*.woff2`. The browser console showed **no CSP messages (enforced or
