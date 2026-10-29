@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.Identity.EasyLogin;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
@@ -95,8 +96,9 @@ public sealed class EasyLoginWireTests
         var previousUi = CultureInfo.CurrentUICulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(name);
-            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(name);
+            var culture = WithItsOwnCalendar(name);
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = culture;
             action();
         }
         finally
@@ -104,5 +106,24 @@ public sealed class EasyLoginWireTests
             CultureInfo.CurrentCulture = previous;
             CultureInfo.CurrentUICulture = previousUi;
         }
+    }
+
+    /// <summary>
+    /// <paramref name="name"/>'s culture, with its own non-Gregorian calendar selected when its DEFAULT is Gregorian.
+    /// The hazard this suite proves must not depend on the runner's culture data: newer ICU/CLDR data makes Gregorian
+    /// the default for ar-SA, which silently turned the Umm al-Qura case into a Gregorian one (the precondition test
+    /// caught it on CI, 2026-10-29). The calendar is chosen from the culture's OWN optional calendars, so it is always
+    /// valid for it; a culture with no non-Gregorian calendar (en-US, tr-TR) is left exactly as it is.
+    /// </summary>
+    private static CultureInfo WithItsOwnCalendar(string name)
+    {
+        var culture = new CultureInfo(name);
+        if (culture.DateTimeFormat.Calendar is GregorianCalendar
+            && culture.OptionalCalendars.FirstOrDefault(calendar => calendar is not GregorianCalendar) is { } own)
+        {
+            culture.DateTimeFormat.Calendar = own;
+        }
+
+        return culture;
     }
 }
