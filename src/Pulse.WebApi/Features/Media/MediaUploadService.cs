@@ -12,6 +12,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.Media.Documents;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Follows;
 
@@ -24,7 +25,10 @@ public enum MediaUploadOutcome
     /// <summary>401 — no exercise scope is resolved.</summary>
     ScopeUnresolved,
 
-    /// <summary>403 — authenticated, but neither staff nor a persona-bound participant.</summary>
+    /// <summary>
+    /// 403 — authenticated, but neither staff nor a persona-bound participant; or (documents) a participant the
+    /// <see cref="IDocumentUploadAuthorizer"/> does not allow.
+    /// </summary>
     Forbidden,
 
     /// <summary>400 — a malformed request or hint.</summary>
@@ -38,16 +42,22 @@ public enum MediaUploadOutcome
 
     /// <summary>503 — no media store is configured, or the stored asset's read URL could not be signed (the row stays).</summary>
     StoreUnavailable,
+
+    /// <summary>422 — a document the structural deny-list scan rejected (<see cref="MediaUploadResult.Reason"/>).</summary>
+    Rejected,
 }
 
 /// <summary>The result of <see cref="MediaUploadService.UploadAsync"/>.</summary>
 public sealed class MediaUploadResult
 {
-    private MediaUploadResult(MediaUploadOutcome outcome, MediaAssetView? view, string? error)
+    private MediaUploadResult(
+        MediaUploadOutcome outcome, MediaAssetView? view, string? error, DocumentUploadView? document = null, string? reason = null)
     {
         Outcome = outcome;
         View = view;
         Error = error;
+        Document = document;
+        Reason = reason;
     }
 
     /// <summary>The outcome.</summary>
@@ -59,10 +69,27 @@ public sealed class MediaUploadResult
     /// <summary>The client-facing message for a 4xx outcome (never discloses another exercise's data).</summary>
     public string? Error { get; }
 
+    /// <summary>The 201 body of a document upload, on <see cref="MediaUploadOutcome.Created"/>.</summary>
+    public DocumentUploadView? Document { get; }
+
+    /// <summary>The <see cref="DocumentRejectionReasons"/> code, on <see cref="MediaUploadOutcome.Rejected"/>.</summary>
+    public string? Reason { get; }
+
     /// <summary>A successful upload.</summary>
     /// <param name="view">The 201 body.</param>
     /// <returns>The result.</returns>
     public static MediaUploadResult Created(MediaAssetView view) => new(MediaUploadOutcome.Created, view, null);
+
+    /// <summary>A successful document upload.</summary>
+    /// <param name="document">The 201 body.</param>
+    /// <returns>The result.</returns>
+    public static MediaUploadResult CreatedDocument(DocumentUploadView document) =>
+        new(MediaUploadOutcome.Created, null, null, document);
+
+    /// <summary>A document the structural scan rejected.</summary>
+    /// <param name="reason">The reason code.</param>
+    /// <returns>The result.</returns>
+    public static MediaUploadResult Rejected(string reason) => new(MediaUploadOutcome.Rejected, null, null, null, reason);
 
     /// <summary>A failed upload.</summary>
     /// <param name="outcome">The failure outcome.</param>
@@ -110,6 +137,15 @@ public sealed class MediaUploadResult
 /// is logged (the ACCOUNT — the same key the <c>media-upload</c> rate limit partitions on — kind and bytes) for
 /// abuse forensics. The post that later attaches it emits the XC-004 event.
 /// </para>
+/// <para>
+/// <b>Documents (press-room story 02).</b> <see cref="UploadDocumentAsync"/> is the ONLY way a PDF enters the
+/// pipeline (<see cref="UploadAsync"/> still answers 415 for one). A participant must also pass the
+/// <see cref="IDocumentUploadAuthorizer"/> (default deny) before the body is read; staff follow the staff rule. The
+/// file streams to the store through a <see cref="ScanningReadStream"/> under
+/// <see cref="MediaUploadOptions.DocumentMaxBytes"/>, so the deny-list scan sees every byte without the file ever
+/// being buffered; a rejected scan answers 422 with a reason code, and — as for every pre-commit failure — the
+/// streamed blob is deleted and no row is written.
+/// </para>
 /// </remarks>
 public sealed partial class MediaUploadService
 {
@@ -131,7 +167,6 @@ public sealed partial class MediaUploadService
     /// <summary>The largest accepted duration hint in seconds.</summary>
     public const double MaxDurationSec = 3600;
 
-    private const string ParticipantSessionKind = "participant";
     private const string KindField = "kind";
     private const string WidthField = "width";
     private const string HeightField = "height";
@@ -158,6 +193,8 @@ public sealed partial class MediaUploadService
     private readonly IExerciseClock _exerciseClock;
     private readonly TimeProvider _timeProvider;
     private readonly MediaUploadOptions _options;
+    private readonly IDocumentScanner _documentScanner;
+    private readonly IDocumentUploadAuthorizer _documentAuthorizer;
     private readonly ILogger<MediaUploadService> _logger;
 
     /// <summary>Creates the service.</summary>
@@ -172,6 +209,8 @@ public sealed partial class MediaUploadService
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="options">The upload limits.</param>
+    /// <param name="documentScanner">The document deny-list scanner.</param>
+    /// <param name="documentAuthorizer">Who, as a participant, may upload a document.</param>
     /// <param name="logger">Diagnostics logger (never logs token material).</param>
     public MediaUploadService(
         PulseDbContext dbContext,
@@ -185,6 +224,8 @@ public sealed partial class MediaUploadService
         IExerciseClock exerciseClock,
         TimeProvider timeProvider,
         IOptions<MediaUploadOptions> options,
+        IDocumentScanner documentScanner,
+        IDocumentUploadAuthorizer documentAuthorizer,
         ILogger<MediaUploadService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -198,6 +239,8 @@ public sealed partial class MediaUploadService
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(documentScanner);
+        ArgumentNullException.ThrowIfNull(documentAuthorizer);
         ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
@@ -211,15 +254,32 @@ public sealed partial class MediaUploadService
         _exerciseClock = exerciseClock;
         _timeProvider = timeProvider;
         _options = options.Value;
+        _documentScanner = documentScanner;
+        _documentAuthorizer = documentAuthorizer;
         _logger = logger;
     }
 
-    /// <summary>Runs one upload.</summary>
+    /// <summary>Runs one image/video upload (<c>POST /api/media</c>). A PDF is 415 here.</summary>
     /// <param name="contentType">The request's <c>Content-Type</c> (must be <c>multipart/form-data</c> with a boundary).</param>
     /// <param name="body">The request body, read once, forward-only.</param>
     /// <param name="cancellationToken">Cancels the upload.</param>
     /// <returns>The outcome.</returns>
-    public async Task<MediaUploadResult> UploadAsync(string? contentType, Stream body, CancellationToken cancellationToken = default)
+    public Task<MediaUploadResult> UploadAsync(string? contentType, Stream body, CancellationToken cancellationToken = default) =>
+        UploadCoreAsync(UploadRoute.Media, contentType, body, cancellationToken);
+
+    /// <summary>
+    /// Runs one document upload (<c>POST /api/media/documents</c>, press-room story 02): a PDF only, under the
+    /// document ceiling, deny-list scanned while streaming; the 201 carries <see cref="MediaUploadResult.Document"/>.
+    /// </summary>
+    /// <param name="contentType">The request's <c>Content-Type</c> (must be <c>multipart/form-data</c> with a boundary).</param>
+    /// <param name="body">The request body, read once, forward-only.</param>
+    /// <param name="cancellationToken">Cancels the upload.</param>
+    /// <returns>The outcome.</returns>
+    public Task<MediaUploadResult> UploadDocumentAsync(string? contentType, Stream body, CancellationToken cancellationToken = default) =>
+        UploadCoreAsync(UploadRoute.Document, contentType, body, cancellationToken);
+
+    private async Task<MediaUploadResult> UploadCoreAsync(
+        UploadRoute route, string? contentType, Stream body, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(body);
 
@@ -235,8 +295,20 @@ public sealed partial class MediaUploadService
         // 2. Who is uploading — staff first (a staff session may carry a persona too; staff must be ASSIGNED to this
         //    exercise), then a POSITIVE allowlist on the participant kind. Anything else is authenticated but has
         //    nobody to upload as.
-        var uploader = await ResolveUploaderAsync(exerciseId, cancellationToken);
+        var uploader = await MediaCallerResolution.ResolveAsync(
+            _staffSessionAccessor, _sessionPersonaAccessor, _staffAssignments, exerciseId, cancellationToken);
         if (uploader is null)
+        {
+            return MediaUploadResult.Failed(MediaUploadOutcome.Forbidden);
+        }
+
+        // Documents: a participant needs the feature's explicit permission (default deny), checked before the body
+        // is read; staff follow the staff upload rule already applied (endpoint filter + the assignment re-check).
+        if (route == UploadRoute.Document
+            && !uploader.IsStaff
+            && (uploader.PersonaId is not { } personaId
+                || !await _documentAuthorizer.CanUploadAsync(
+                    new DocumentUploadRequest(exerciseId, uploader.HumanId, personaId), cancellationToken)))
         {
             return MediaUploadResult.Failed(MediaUploadOutcome.Forbidden);
         }
@@ -253,7 +325,7 @@ public sealed partial class MediaUploadService
             return MediaUploadResult.Failed(MediaUploadOutcome.Invalid, "The request must be multipart/form-data with a 'file' part.");
         }
 
-        var upload = new UploadState();
+        var upload = new UploadState { Route = route };
         try
         {
             var failure = await ReadBodyAsync(boundary, body, exerciseId, upload, cancellationToken);
@@ -279,6 +351,12 @@ public sealed partial class MediaUploadService
             // Hoisted so the log argument is a plain local read (CA1873).
             var account = AccountKey();
             LogUploaded(asset.Id, exerciseId, account, asset.Kind, asset.Bytes);
+
+            if (route == UploadRoute.Document)
+            {
+                // { mediaId, fileName, sizeBytes } only — nothing to sign (a download URL is minted where it is read).
+                return MediaUploadResult.CreatedDocument(DocumentUploadView.FromAsset(asset));
+            }
 
             var toSign = hints.Poster is null ? new[] { asset } : new[] { asset, hints.Poster };
             IReadOnlyDictionary<Guid, string> urls;
@@ -416,7 +494,7 @@ public sealed partial class MediaUploadService
         upload.FileSeen = true;
 
         // The type is decided from these bytes ALONE — the part's filename and Content-Type header are not inputs.
-        var head = new byte[MediaSniffer.HeadLength];
+        var head = new byte[MediaSniffer.ReadHeadLength];
         var headLength = await section.Body.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, cancellationToken);
         if (headLength == 0)
         {
@@ -424,11 +502,15 @@ public sealed partial class MediaUploadService
         }
 
         var sniffed = MediaSniffer.Sniff(head.AsSpan(0, headLength));
-        if (sniffed is null)
+        var isDocument = sniffed?.Kind == MediaKinds.Document;
+        if (sniffed is null || isDocument != (upload.Route == UploadRoute.Document))
         {
+            // The route decides which kinds it takes: a PDF on /api/media is exactly as unsupported as before.
             return MediaUploadResult.Failed(
                 MediaUploadOutcome.UnsupportedMediaType,
-                "Unsupported file type. Allowed: JPEG, PNG, GIF, WebP images and MP4, WebM videos.");
+                upload.Route == UploadRoute.Document
+                    ? "Unsupported file type. Allowed: PDF documents."
+                    : "Unsupported file type. Allowed: JPEG, PNG, GIF, WebP images and MP4, WebM videos.");
         }
 
         upload.Sniffed = sniffed;
@@ -437,7 +519,12 @@ public sealed partial class MediaUploadService
             return MediaUploadResult.Failed(MediaUploadOutcome.UnsupportedMediaType, KindMismatchRejection);
         }
 
-        var maxBytes = sniffed.Kind == MediaKinds.Video ? _options.VideoMaxBytes : _options.ImageMaxBytes;
+        var maxBytes = sniffed.Kind switch
+        {
+            MediaKinds.Video => _options.VideoMaxBytes,
+            MediaKinds.Document => _options.DocumentMaxBytes,
+            _ => _options.ImageMaxBytes,
+        };
         var assetId = Guid.NewGuid();
         var blobName = MediaBlobNames.Build(exerciseId, assetId, sniffed.Extension);
 
@@ -445,13 +532,33 @@ public sealed partial class MediaUploadService
             HeaderUtilities.RemoveQuotes(disposition.FileNameStar).Value
             ?? HeaderUtilities.RemoveQuotes(disposition.FileName).Value,
             sniffed.Extension);
+        if (isDocument)
+        {
+            upload.OriginalFileName = DocumentDownload.NormalizeFileName(upload.OriginalFileName);
+        }
 
         // A store that fails mid-save deletes its OWN partial (IMediaStore contract) — and a store that refuses an
         // existing name must not have that blob deleted by us. So the blob becomes ours to clean up (the caller's
         // finally, unless the row commits) only once SaveAsync has COMPLETED.
-        var content = new PrefixedReadStream(head.AsMemory(0, headLength), section.Body);
+        Stream content = new PrefixedReadStream(head.AsMemory(0, headLength), section.Body);
+        var scan = isDocument ? _documentScanner.Begin() : null;
+        if (scan is not null)
+        {
+            content = new ScanningReadStream(content, scan);
+        }
+
         var bytes = await _store.SaveAsync(blobName, sniffed.ContentType, content, maxBytes, cancellationToken);
         upload.Stored = new StoredFile(assetId, blobName, bytes);
+
+        if (scan is not null && scan.Complete() is { Accepted: false, Reason: { } reason })
+        {
+            // Stored is already set, so the caller's finally deletes this blob; the rest of the body is not read. Only
+            // the reason code is logged and returned — never the matched token or its offset. Hoisted (CA1873).
+            var account = AccountKey();
+            LogDocumentRejected(exerciseId, account, reason);
+            return MediaUploadResult.Rejected(reason);
+        }
+
         return null;
     }
 
@@ -465,6 +572,13 @@ public sealed partial class MediaUploadService
         }
 
         var isVideo = upload.Sniffed!.Kind == MediaKinds.Video;
+        if (upload.Sniffed.Kind == MediaKinds.Document
+            && (upload.Fields.ContainsKey(WidthField) || upload.Fields.ContainsKey(HeightField)
+                || upload.Fields.ContainsKey(DurationField) || upload.Fields.ContainsKey(PosterField)))
+        {
+            return ValidatedHints.Fail(MediaUploadResult.Failed(
+                MediaUploadOutcome.Invalid, "width, height, durationSec and posterMediaId apply to images and videos only."));
+        }
 
         if (!TryParseDimension(upload, WidthField, out var width) || !TryParseDimension(upload, HeightField, out var height))
         {
@@ -565,38 +679,6 @@ public sealed partial class MediaUploadService
         return asset;
     }
 
-    /// <summary>Resolves the uploading human: staff by <c>StaffUserId</c>, participant by a positive kind allowlist.</summary>
-    private async Task<Uploader?> ResolveUploaderAsync(Guid exerciseId, CancellationToken cancellationToken)
-    {
-        var staff = await _staffSessionAccessor.GetCurrentStaffSessionAsync(cancellationToken);
-        if (staff is not null)
-        {
-            // COR-005: the staff caller must be assigned to THIS exercise — re-checked explicitly, exactly as
-            // EngineCockpitStaffAuthorizationFilter does for the library, never trusted from the active selection.
-            var assignments = await _staffAssignments.GetAssignmentsAsync(cancellationToken);
-            var assigned = assignments?.Any(
-                assignment => Guid.TryParse(assignment.ExerciseId, out var assignedExerciseId) && assignedExerciseId == exerciseId) == true;
-            if (!assigned)
-            {
-                return null;
-            }
-
-            // Same value PostAttributionResolver stamps as a staff post's ActingHumanId (COR-018).
-            return new Uploader("staff", staff.StaffUserId.ToString());
-        }
-
-        var participant = await _sessionPersonaAccessor.GetCurrentSessionPersonaAsync(cancellationToken);
-        if (participant is not null
-            && string.Equals(participant.Kind, ParticipantSessionKind, StringComparison.Ordinal)
-            && participant.ExerciseId == exerciseId
-            && !string.IsNullOrWhiteSpace(participant.ActingHumanId))
-        {
-            return new Uploader(ParticipantSessionKind, participant.ActingHumanId);
-        }
-
-        return null;
-    }
-
     /// <summary>
     /// The uploading ACCOUNT for the log line — the same key the <c>media-upload</c> rate limit partitions on
     /// (<c>participant:{AccountId}</c> / <c>staff:{StaffUserId}</c>), so a log search lines up with a 429.
@@ -606,12 +688,17 @@ public sealed partial class MediaUploadService
             ? MediaUploadRateLimiterPolicy.PartitionKeyFor(httpContext)
             : "unknown";
 
-    private static MediaUploadResult TooLarge(UploadState upload) =>
+    private MediaUploadResult TooLarge(UploadState upload) =>
         MediaUploadResult.Failed(
             MediaUploadOutcome.TooLarge,
-            upload.Sniffed?.Kind == MediaKinds.Video
-                ? "The video is too large."
-                : "The file is too large.");
+            upload.Sniffed?.Kind switch
+            {
+                MediaKinds.Video => "The video is too large.",
+                MediaKinds.Document => string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The PDF is too large. The limit is {_options.DocumentMaxBytes / (1024 * 1024)} MB."),
+                _ => "The file is too large.",
+            });
 
     private static bool KindHintMatches(UploadState upload) =>
         upload.Sniffed is null
@@ -744,8 +831,21 @@ public sealed partial class MediaUploadService
         Message = "Media asset {AssetId} in exercise {ExerciseId} was stored, but its read URL could not be signed; answering 503.")]
     private partial void LogSigningFailedAfterCommit(Exception exception, Guid assetId, Guid exerciseId);
 
-    /// <summary>The uploading human and the kind of account behind them.</summary>
-    private sealed record Uploader(string AccountKind, string HumanId);
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Information,
+        Message = "Document upload rejected by the structural scan in exercise {ExerciseId} by account {Account}: {Reason}.")]
+    private partial void LogDocumentRejected(Guid exerciseId, string account, string reason);
+
+    /// <summary>Which route an upload came in on — and so which kinds it accepts.</summary>
+    private enum UploadRoute
+    {
+        /// <summary><c>POST /api/media</c>: images and videos.</summary>
+        Media,
+
+        /// <summary><c>POST /api/media/documents</c>: PDFs only.</summary>
+        Document,
+    }
 
     /// <summary>The blob written for this request (deleted unless the row commits).</summary>
     private sealed record StoredFile(Guid AssetId, string BlobName, long Bytes);
@@ -759,6 +859,8 @@ public sealed partial class MediaUploadService
     /// <summary>The mutable per-request parse state.</summary>
     private sealed class UploadState
     {
+        public UploadRoute Route { get; init; }
+
         public Dictionary<string, string> Fields { get; } = new(StringComparer.Ordinal);
 
         public bool FileSeen { get; set; }

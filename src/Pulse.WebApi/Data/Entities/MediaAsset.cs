@@ -10,6 +10,12 @@ public static class MediaKinds
 
     /// <summary>A video clip (mp4 / webm, by magic bytes).</summary>
     public const string Video = "video";
+
+    /// <summary>
+    /// A download-only PDF attachment (press-room story 02, by magic bytes). Never rendered inline: it is signed
+    /// with an <c>attachment</c> disposition and is not an allowed kind on a post, a poster or an avatar.
+    /// </summary>
+    public const string Document = "document";
 }
 
 /// <summary>
@@ -56,7 +62,7 @@ public sealed class MediaAsset : IExerciseScoped
     /// <summary>The owning exercise run (COR-001). Non-nullable; the write-guard rejects <see cref="Guid.Empty"/>.</summary>
     public Guid ExerciseId { get; set; }
 
-    /// <summary>The media kind — <see cref="MediaKinds.Image"/> or <see cref="MediaKinds.Video"/>.</summary>
+    /// <summary>The media kind — <see cref="MediaKinds.Image"/>, <see cref="MediaKinds.Video"/> or <see cref="MediaKinds.Document"/>.</summary>
     public required string Kind { get; set; }
 
     /// <summary>The SNIFFED canonical MIME type (never the client's header or file extension). Staff-only.</summary>
