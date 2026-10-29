@@ -77,13 +77,20 @@ public interface IDocumentScan
 /// </para>
 /// <para>
 /// <b>The one relaxation, and why.</b> Inside a FILTERED stream body (entered at a <c>&gt;&gt; stream</c> keyword
-/// followed by an end-of-line, outside any comment or string, when a <c>/Filter</c> name appeared since the object
+/// followed by an end-of-line, outside any comment or string, when a <c>/Filter</c> key whose value names a filter —
+/// <c>/Filter /X</c> or <c>/Filter [/X …]</c>, never <c>[]</c> or an indirect reference — appeared since the object
 /// began; left at <c>endstream</c>) the two-character names <c>/JS</c>, <c>/AA</c> and <c>/EF</c> count only when they
 /// sit in a run of text (the eight bytes before the <c>/</c> and the byte after the name are printable ASCII or
 /// whitespace). Compressed stream data is effectively random, and a random three-byte <c>/JS</c> followed by a delimiter
 /// occurs about once every ~130 MB per name; without this rule a 20 MB photo-heavy PDF would be falsely rejected roughly
 /// one time in five. An UNFILTERED stream (an uncompressed object stream, say) gets no relaxation at all, and every
-/// longer deny-listed name is matched in stream data unconditionally.
+/// longer deny-listed name is matched in stream data unconditionally. The cost of that strictness: a large UNFILTERED
+/// binary stream (a raw bitmap or font) can be falsely rejected, at roughly the rate above.
+/// </para>
+/// <para>
+/// <b>The trailer rule is a heuristic, not a polyglot guarantee.</b> Only whitespace (or a DOS end-of-file 0x1A) may
+/// follow the last <c>%%EOF</c>, but a payload that itself ends in <c>%%EOF</c> (a ZIP whose comment is that text, say)
+/// passes. It is harmless here: the file is only ever served as an attachment named <c>.pdf</c>.
 /// </para>
 /// <para>
 /// <b>Best-effort, by decision — friction, not a defence against a deliberate attacker.</b> Anything inside an ENCODED
@@ -202,12 +209,21 @@ internal sealed class PdfDenyListScan : IDocumentScan
     private bool _keywordOverflow;
     private int _endStreamMatched;
     private bool _filterSeenInObject;
+    private FilterValue _filterValue;
     private bool _streamFiltered;
 
     // ---- trailer ----
     private int _eofMatched;
     private long _lastEofEnd = -1;
     private bool _payloadAfterEof;
+
+    /// <summary>Where the lexer is in judging a <c>/Filter</c> key's value.</summary>
+    private enum FilterValue
+    {
+        None,
+        AwaitingValue,
+        InArray,
+    }
 
     private enum LexState
     {
@@ -323,7 +339,7 @@ internal sealed class PdfDenyListScan : IDocumentScan
             _lastEofEnd = _position;
             _payloadAfterEof = false;
         }
-        else if (_lastEofEnd >= 0 && !IsWhitespace(value))
+        else if (_lastEofEnd >= 0 && !IsWhitespace(value) && value != 0x1A)
         {
             // Anything but whitespace after the last marker is another payload (a later "%%EOF" clears it).
             _payloadAfterEof = true;
@@ -401,6 +417,13 @@ internal sealed class PdfDenyListScan : IDocumentScan
             _nameStartedInFilteredStream = _state == LexState.StreamBody && _streamFiltered;
             _nameStartedInNormal = _state == LexState.Normal;
             _textRunAtSlash = _textRun;
+
+            // A name right after "/Filter" (or after "/Filter [") is a real filter: the stream is encoded.
+            if (_nameStartedInNormal && _filterValue != FilterValue.None)
+            {
+                _filterSeenInObject = true;
+                _filterValue = FilterValue.None;
+            }
         }
     }
 
@@ -426,11 +449,12 @@ internal sealed class PdfDenyListScan : IDocumentScan
             return;
         }
 
-        // A /Filter key in real syntax (not a comment, string or stream) marks the object's stream as encoded — the
-        // only kind of stream the short-name relaxation applies to.
+        // A /Filter key in real syntax (not a comment, string or stream) whose VALUE names a filter marks the object's
+        // stream as encoded — the only kind of stream the short-name relaxation applies to. The value is judged by the
+        // next token (see StepName / StepNormal): "/Name" or "[/Name …]" counts; "[]" (no filter) does not.
         if (_nameStartedInNormal && !_nameOverflow && _name.AsSpan(0, _nameLength).SequenceEqual("Filter"u8))
         {
-            _filterSeenInObject = true;
+            _filterValue = FilterValue.AwaitingValue;
         }
 
         // Every dictionary key is a name, so most names are checked; the length gate skips the allocation for the
@@ -515,6 +539,16 @@ internal sealed class PdfDenyListScan : IDocumentScan
 
     private void StepNormal(byte value)
     {
+        // The /Filter value: "[" opens an array that may still name a filter; a "/" was already judged by StepName;
+        // anything else that is not whitespace ("]", "<<", a number, "null", an indirect reference, a comment) is not a
+        // filter name the scan can trust, so the stream stays strict.
+        if (_filterValue != FilterValue.None && value != (byte)'/' && !IsWhitespace(value))
+        {
+            _filterValue = value == (byte)'[' && _filterValue == FilterValue.AwaitingValue
+                ? FilterValue.InArray
+                : FilterValue.None;
+        }
+
         if (_pendingLessThan)
         {
             _pendingLessThan = false;
@@ -595,6 +629,7 @@ internal sealed class PdfDenyListScan : IDocumentScan
         {
             // A /Filter belongs to the object it appears in.
             _filterSeenInObject = false;
+            _filterValue = FilterValue.None;
         }
 
         var opensBody = isStream && _lastTokenWasDictionaryEnd && terminator is 0x0A or 0x0D;

@@ -124,6 +124,24 @@ public sealed class PdfDenyListScannerTests
         Scan(fragment).Accepted.Should().BeFalse("a /Filter belongs to the object it appears in");
     }
 
+    [Theory]
+    [InlineData("/Filter []", false)]
+    [InlineData("/Filter [ ]", false)]
+    [InlineData("/Filter null", false)]
+    [InlineData("/Filter 9 0 R", false)]
+    [InlineData("/Filter /FlateDecode", true)]
+    [InlineData("/Filter/FlateDecode", true)]
+    [InlineData("/Filter [/ASCII85Decode /FlateDecode]", true)]
+    [InlineData("/Filter[/FlateDecode]", true)]
+    public void OnlyAFilterValueThatNamesAFilter_RelaxesTheStream(string filterEntry, bool relaxed)
+    {
+        // "/Filter []" is legal and means NO filter: such a stream is parsed as syntax, so it must stay strict.
+        var binary = new string('\x9C', 16);
+        var fragment = $"1 0 obj << {filterEntry} /Length 40 >>\nstream\n" + binary + "/AA\0" + binary + "\nendstream\nendobj";
+
+        Scan(fragment).Accepted.Should().Be(relaxed, "{0}", filterEntry);
+    }
+
     [Fact]
     public void AFilterInACommentOrString_DoesNotRelaxTheStream()
     {
@@ -222,7 +240,8 @@ public sealed class PdfDenyListScannerTests
     [Fact]
     public void AnIncrementalUpdate_EndsAtItsOwnEofMarker_AndIsAccepted()
     {
-        var pdf = "%PDF-1.7\n1 0 obj << >> endobj" + Trailer + "2 0 obj << >> endobj" + Trailer + "\r\n\0\0";
+        // Trailing CR/LF, NULs and a DOS end-of-file (0x1A) are not a payload.
+        var pdf = "%PDF-1.7\n1 0 obj << >> endobj" + Trailer + "2 0 obj << >> endobj" + Trailer + "\r\n\0\0\x1A";
 
         PdfDenyListScanner.Scan(Encoding.Latin1.GetBytes(pdf)).Should().Be(DocumentScanResult.Pass);
     }
