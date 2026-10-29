@@ -177,7 +177,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { registerSessionReset } from '@/core/auth/sessionReset'
-import { setExerciseClock } from '@/core/clock'
+import { isServerClockInstalled, serverExerciseClock, setExerciseClock } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
@@ -324,12 +324,23 @@ function getStoreSnapshot(): PauseStoreState {
  * installs the pausable clock and freezes it; leaving `freeze` resumes it (and
  * leaves it installed, preserving the offset). Every other transition leaves
  * `scenarioNow()` advancing.
+ *
+ * SERVER CLOCK (live sessions): when `core/clock`'s server-synced clock is the
+ * installed clock, the pausable clock is NOT installed — the freeze/resume here is
+ * an optimistic override on the server clock, superseded by the server's push.
+ * The pausable clock remains the mock-mode (no server) implementation.
  */
 function applyTier(next: PauseTier): PauseTransition | null {
   const from = storeState.tier
   if (from === next) return null
 
-  if (next === 'freeze') {
+  if (isServerClockInstalled()) {
+    // A live session: the SERVER clock is authoritative (fix/noise-new-posts-clock). The
+    // flip here is only OPTIMISTIC, so the header stops at once; the `ScenarioClockChanged`
+    // push (or the next read) replaces it. No second, competing in-tab clock is installed.
+    if (next === 'freeze') serverExerciseClock.optimisticFreeze()
+    else if (from === 'freeze') serverExerciseClock.optimisticResume()
+  } else if (next === 'freeze') {
     setExerciseClock(pausableExerciseClock)
     pausableExerciseClock.freeze()
   } else if (from === 'freeze') {
@@ -527,6 +538,7 @@ export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
  */
 export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
+  serverExerciseClock.clearOptimistic()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
   resyncStarted = false
   supersedeSequence = 0
@@ -545,6 +557,7 @@ export function resetPauseStateForTest(): void {
  */
 function resetPauseStateForSession(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
+  serverExerciseClock.clearOptimistic()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
   resyncStarted = false
   engineModeBeforePause = null

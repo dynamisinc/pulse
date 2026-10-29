@@ -62,6 +62,9 @@ public static class ExerciseLifecycleGatedRoutes
         // staff stay exempt like everywhere else on this list. /api/staff/media is NOT covered (staff surface).
         "/api/media",
 
+        // fix/noise-new-posts-clock: the server scenario clock read (scenario time only), gated like /api/personas.
+        "/api/clock",
+
         // All six participant-shell config GETs.
         "/api/shell-state",
         "/api/chrome-config",
