@@ -1,7 +1,7 @@
 /**
  * features/channels — the shared channels root (FC-8). Story 02 ships
- * `contract/` and `mocks/`; later foundation stories add `skin/`,
- * `primitives/`, `data/` and `routing/` exports here.
+ * `contract/` and `mocks/`, story 14 `primitives/`, story 13 `skin/`; later
+ * foundation stories add `data/` and `routing/` exports here.
  */
 
 export * from './contract'

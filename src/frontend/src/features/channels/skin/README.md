@@ -74,5 +74,7 @@ behaviour, comments and telemetry have **no token key at all**, so no skin can r
 
 Inside any scope, this boundary unsets every `--pulse-skin-*` variable, resets inherited type and colour
 to the participant base, restores the MUI theme from outside all scopes, and re-publishes the exercise
-brand (`--pulse-brand-*`). It must sit below `BrandThemeProvider`. An embed that needs the Social accent
+brand (`--pulse-brand-*`). It must sit below `BrandThemeProvider`. Inside a boundary, the F14 primitives see no `--pulse-skin-*` and
+use their own neutral `var()` fallbacks, not the brand colours, so keep them out of a reset placed on a
+dark brand surface. An embed that needs the Social accent
 (`--pulse-ac`) still mounts Social's own scope inside the boundary.
