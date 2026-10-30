@@ -305,10 +305,14 @@ public sealed partial class AlertService : IAlertRaiser
         await gate.WaitAsync(CancellationToken.None);
         try
         {
-            var time = await _reader.ReadTimeAsync(exerciseId, CancellationToken.None);
-            var active = await _reader.ReadActiveAsync(time.KnownScenarioTime, CancellationToken.None);
+            // Not the request token (a disconnect must not cancel a committed change's fan-out), but bounded: the gate is
+            // held across a real SignalR send, and one stalled send must not block every later change in the exercise
+            // or the expiry sweep. A timeout is logged like any broadcast fault; clients converge on their next read.
+            using var bound = new CancellationTokenSource(_options.BroadcastTimeout);
+            var time = await _reader.ReadTimeAsync(exerciseId, bound.Token);
+            var active = await _reader.ReadActiveAsync(time.KnownScenarioTime, bound.Token);
             await _broadcaster.BroadcastAlertsChangedAsync(
-                exerciseId, new AlertsChangedDto { Alerts = active }, CancellationToken.None);
+                exerciseId, new AlertsChangedDto { Alerts = active }, bound.Token);
         }
 #pragma warning disable CA1031 // A broadcast fault must never turn a committed alert into a failed request.
         catch (Exception ex)

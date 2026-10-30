@@ -32,7 +32,7 @@ internal sealed class AlertServiceHarness : IDisposable
 
     private readonly ServiceProvider _root;
 
-    public AlertServiceHarness(bool bridgeEnabled = true)
+    public AlertServiceHarness(bool bridgeEnabled = true, TimeSpan? broadcastTimeout = null)
     {
         Time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 29, 12, 0, 0, TimeSpan.Zero));
         Clock = new ExerciseClockService(Time);
@@ -51,7 +51,11 @@ internal sealed class AlertServiceHarness : IDisposable
         services.AddSingleton(Notifier);
         services.AddSingleton<IPlatformAlertNotifier>(provider => provider.GetRequiredService<RecordingPlatformNotifier>());
         services.AddSingleton<IOptions<ChannelAlertOptions>>(
-            Options.Create(new ChannelAlertOptions { PlatformNotificationBridgeEnabled = bridgeEnabled }));
+            Options.Create(new ChannelAlertOptions
+            {
+                PlatformNotificationBridgeEnabled = bridgeEnabled,
+                BroadcastTimeout = broadcastTimeout ?? TimeSpan.FromSeconds(10),
+            }));
         services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(
             StaffUserId is { } staff ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staff } : null));
         services.AddSingleton<AlertAnnouncementGate>();
@@ -128,6 +132,9 @@ internal sealed class RecordingAlertBroadcaster : IFeedBroadcaster
 
     public bool Throw { get; set; }
 
+    /// <summary>When set, a send never completes on its own: it ends only when its token is cancelled.</summary>
+    public bool Hang { get; set; }
+
     public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
@@ -137,6 +144,11 @@ internal sealed class RecordingAlertBroadcaster : IFeedBroadcaster
         if (Throw)
         {
             throw new InvalidOperationException("hub down");
+        }
+
+        if (Hang)
+        {
+            return Task.Delay(Timeout.Infinite, cancellationToken);
         }
 
         lock (Frames)

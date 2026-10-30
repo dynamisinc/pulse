@@ -22,6 +22,12 @@ public sealed class ChannelAlertOptions
     /// </summary>
     public TimeSpan SweepInterval { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// The bound on one post-commit <c>AlertsChanged</c> fan-out (active-set read + send), which runs under the
+    /// exercise's announcement gate. Default 10 s; a send that overruns is cancelled and logged, never retried.
+    /// </summary>
+    public TimeSpan BroadcastTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>The longest wait between sweeps while sweeps keep failing (doubling from the interval). Default 60 s.</summary>
     public TimeSpan MaxFailureBackoff { get; set; } = TimeSpan.FromSeconds(60);
 }

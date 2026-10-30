@@ -239,6 +239,28 @@ public sealed class AlertServiceTests : IDisposable
         active!.Alerts.Should().ContainSingle().Which.Id.Should().Be(alert.Id);
     }
 
+    [Fact]
+    public async Task AStalledBroadcast_IsBounded_SoLaterChangesAndTheBridgeStillProceed()
+    {
+        using var host = new AlertServiceHarness(broadcastTimeout: TimeSpan.FromMilliseconds(200));
+        var exercise = host.StartExercise();
+        host.Broadcaster.Hang = true;
+
+        var raise = Task.Run(async () =>
+        {
+            foreach (var headline in new[] { "one", "two" })
+            {
+                await host.InAsync(exercise, (alerts, _) =>
+                    alerts.RaiseAsync(AlertServiceHarness.Raise(headline: headline), AlertServiceHarness.Controller()));
+            }
+        });
+
+        (await Task.WhenAny(raise, Task.Delay(TimeSpan.FromSeconds(10)))).Should().BeSameAs(
+            raise, "a stalled send is cancelled at the bound, so it never blocks the next change behind the gate");
+        host.Notifier.Raised.Should().HaveCount(2, "the bridge still runs after a timed-out broadcast");
+        (await host.InAsync(exercise, (_, reader) => reader.GetActiveAsync()))!.Alerts.Should().HaveCount(2);
+    }
+
     // ---- clear ------------------------------------------------------------------------------------------
 
     [Fact]
