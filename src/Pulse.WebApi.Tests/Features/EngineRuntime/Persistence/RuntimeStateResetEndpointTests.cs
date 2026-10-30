@@ -19,6 +19,7 @@ using Microsoft.Extensions.Time.Testing;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Persistence;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
@@ -384,6 +385,7 @@ public sealed class RuntimeStateResetEndpointTests
             builder.Services.AddExerciseClock();
             builder.Services.AddPauseTierSteering();
             builder.Services.AddExerciseConfiguration();
+            builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
             builder.Services.AddExerciseLifecycle();
             builder.Services.AddSignalR();
             builder.Services.AddPauseParticipantOverlay();

@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -120,6 +121,7 @@ public sealed class ExerciseLifecycleTestHost : IAsyncDisposable
 
         // The feature under test, in the orchestrator's order: 01b's defaults first, this story after.
         builder.Services.AddExerciseConfiguration();
+        builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
         builder.Services.AddExerciseLifecycle();
         configureServices?.Invoke(builder.Services);
 

@@ -138,7 +138,7 @@ public class ParticipantShellEndpointsTests
 
         root.TryGetProperty("alerts", out var alerts).Should().BeTrue("the 'alerts' property must always be present");
         alerts.ValueKind.Should().Be(JsonValueKind.Array);
-        alerts.GetArrayLength().Should().Be(0, "Phase-1 has no active alerts");
+        alerts.GetArrayLength().Should().Be(0, "a fresh exercise has no active alerts");
     }
 
     [RequiresDockerFact]
