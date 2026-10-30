@@ -258,6 +258,13 @@ public sealed class RoleMatrixTests
         Probe("POST /api/injects/{itemId:guid}/mark-fired", ControllerOnly);
         Probe("POST /api/alerts", ControllerOnly); // channels-foundation 10: raise an in-fiction alert
         Probe("POST /api/alerts/{id:guid}/clear", ControllerOnly);
+
+        // channels-foundation 03 (#699): outlet registry writes are controller-only (story AC "Staff write").
+        Probe("POST /api/outlets", ControllerOnly);
+        Probe("PUT /api/outlets/{id:guid}", ControllerOnly);
+        Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
+        Probe("POST /api/outlets/reorder", ControllerOnly);
+        Probe("POST /api/outlets/defaults", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
