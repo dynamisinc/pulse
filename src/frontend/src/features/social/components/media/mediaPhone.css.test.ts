@@ -15,7 +15,7 @@ import { readSrcFile } from '@/test/readSource'
 
 const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '')
 const viewer = strip(readSrcFile('features/social/components/media/MediaViewer.module.css'))
-const video = strip(readSrcFile('features/social/components/media/VideoPlayer.module.css'))
+const video = strip(readSrcFile('core/media/player/VideoPlayer.module.css'))
 const composer = strip(readSrcFile('features/social/components/ComposerMedia.module.css'))
 
 /** The body of the first `@media (pointer: coarse) { ... }` block. */

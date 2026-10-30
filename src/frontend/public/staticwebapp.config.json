@@ -1,4 +1,8 @@
 {
+  "globalHeaders": {
+    "Content-Security-Policy": "font-src 'self'; object-src 'none'; base-uri 'self'",
+    "Content-Security-Policy-Report-Only": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss:; manifest-src 'self' blob:; worker-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+  },
   "routes": [
     {
       "route": "/join/*",

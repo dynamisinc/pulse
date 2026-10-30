@@ -13,6 +13,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Alerts;
+using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Xunit;
@@ -25,8 +26,9 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// Story 01 registered no service of its own (schema only); stories 03+ extend this file as they fill
-/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 10: the alert source and the <c>/api/alerts*</c> routes).
-/// Resolving the context only needs the host to BUILD, so it is fed a dummy, never-connecting connection string.
+/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 04: the publish funnel; story 10: the alert source and the
+/// <c>/api/alerts*</c> routes). Resolving the context only needs the host to BUILD, so it is fed a dummy,
+/// never-connecting connection string.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
 {
@@ -56,11 +58,13 @@ public sealed class ChannelsCompositionRootWiringTests
     }
 
     [Fact]
-    public void AddChannels_IsIdempotent_RegisteringTheAlertSourceOnce()
+    public void AddChannels_IsIdempotent()
     {
         var services = new ServiceCollection();
 
         services.AddChannels().AddChannels().Should().BeSameAs(services);
+        services.GroupBy(descriptor => (descriptor.ServiceType, descriptor.ImplementationType))
+            .Should().OnlyContain(group => group.Count() == 1, "a second AddChannels() registers nothing twice");
 
         services.Count(d => d.ServiceType == typeof(IAlertRaiser)).Should().Be(1);
         services.Count(d => d.ServiceType == typeof(AlertService)).Should().Be(1);
@@ -68,6 +72,36 @@ public sealed class ChannelsCompositionRootWiringTests
         services.Count(d => d.ServiceType == typeof(IPlatformAlertNotifier)).Should().Be(1);
         services.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AlertExpirySweeper))
             .Should().Be(1, "story 10's expiry sweep runs once per host");
+    }
+
+    [Fact]
+    public void ProgramCs_ResolvesThePublishFunnel_AndItsSeams()
+    {
+        // Story 04: the funnel, its projector, the profile registry and the startup check reach the REAL host through
+        // AddChannels(); no Program.cs edit.
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<IContentPublishService>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<ContentProjector>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IContentPermalinks>().Should().BeSameAs(ContentPermalinks.Instance);
+        var profiles = factory.Services.GetRequiredService<ISanitizerProfileRegistry>();
+        profiles.Contains(ISanitizerProfileRegistry.Plain).Should().BeTrue();
+        profiles.Contains(ISanitizerProfileRegistry.RichBasic).Should().BeTrue();
+        profiles.Contains(ISanitizerProfileRegistry.RichTables).Should().BeTrue();
+        factory.Services.GetServices<IHostedService>().OfType<ContentKindStartupCheck>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public void AKindNamingAnUnregisteredProfile_FailsHostStart()
+    {
+        using var factory = new WiringProbeFactory(services =>
+            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("article", "news", "article-rich")));
+
+        var start = () => factory.Services;
+
+        start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
     }
 
     [Fact]
@@ -106,9 +140,20 @@ public sealed class ChannelsCompositionRootWiringTests
         private const string DummyConnectionString =
             "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
-        public WiringProbeFactory()
+        private readonly Action<IServiceCollection>? _configure;
+
+        public WiringProbeFactory(Action<IServiceCollection>? configure = null)
         {
+            _configure = configure;
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);
+        }
+
+        protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+        {
+            if (_configure is not null)
+            {
+                builder.ConfigureServices(_configure);
+            }
         }
 
         protected override void Dispose(bool disposing)

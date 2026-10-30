@@ -141,10 +141,12 @@ public sealed class OrganizationScopeSweepTests
         // the same read the overlay GET performs, never a client-supplied id.
         // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
+        // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
         // channels-foundation/10 (#706): +1 for AlertReader.ReadTimeAsync — the alert source's ONE read of the exercise
         // row (time zone, persisted scenario instant) by the server-resolved scope (the request's, or the expiry sweep's
         // own per-exercise scope).
-        ["ResolvedScope"] = 31,
+        ["ResolvedScope"] = 32,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

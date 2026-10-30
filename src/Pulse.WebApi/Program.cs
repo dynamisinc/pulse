@@ -27,6 +27,7 @@ using Pulse.WebApi.Features.Exports;                // demo-feedback 02
 using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
 using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
+using Pulse.WebApi.Features.Weather;                // weather-source 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -298,6 +299,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 // December channels release (channels-foundation, FC-9.10): the one channels DI seam. Story 01 registers nothing (its
 // schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
 builder.Services.AddChannels();
+builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01); zones, read, delivery follow
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed

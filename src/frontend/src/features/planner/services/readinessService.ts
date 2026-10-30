@@ -136,6 +136,9 @@ function hasUniqueIds(items: readonly ReadinessItem[]): boolean {
  * is required-and-nullable: an absent key is rejected, matching the contract.
  * An empty `blocking` list is rejected too: the server always sends the full
  * checklist, so an empty one is a broken response, never "ready".
+ * The ids' single source is the server's `ExerciseReadinessService`: a story that
+ * adds an item must keep ids unique across both lists and never send an empty
+ * blocking list, or this guard (correctly) refuses the whole response.
  */
 export function isExerciseReadiness(value: unknown): value is ExerciseReadiness {
   if (typeof value !== 'object' || value === null) return false

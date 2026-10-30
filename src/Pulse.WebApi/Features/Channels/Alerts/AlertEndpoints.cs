@@ -41,6 +41,13 @@ public static class AlertEndpoints
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Idempotent as a whole: BindConfiguration is not TryAdd-based, so a second call would register its options
+        // configuration twice.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AlertService)))
+        {
+            return services;
+        }
+
         // TryAdd-based, so this converges with Program.cs's own AddExerciseClock() on one clock singleton.
         services.AddExerciseClock();
         services.AddOptions<ChannelAlertOptions>().BindConfiguration(ChannelAlertOptions.SectionName);

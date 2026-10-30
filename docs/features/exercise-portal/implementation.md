@@ -72,7 +72,8 @@ These route families are listed in foundation FC-4 § "Channel-owned route famil
 | `portal_view` | client (17) | `{ entityType: 'portal' }` | once per mount per session; labeled session-level in E10 |
 | `portal_module_click` | client (07 `trackClick`) | `{ entityType: 'portal_module', entityId: moduleId }` + `payload.contentId?` | one per link activation |
 | `resource_view` | client (15) | `{ entityType: 'portal_resource', entityId }` | |
-| `portal_config_changed` / `display_command` | server (03/16; `display_command` is Deferred with 08) | `{ entityType: 'portal' \| 'display', entityId }` | actor = the staff human; `payload.command` |
+| `portal_config_changed` | server (03, written from 16) | `{ entityType: 'portal', entityId: portalConfigId }` | actor = the staff human; `payload.fields` (changed field names only, never values) |
+| `display_command` | **Deferred** (server, 08) | `{ entityType: 'display', entityId: displayId }` | actor = the staff human; `payload.command` |
 | `display_session_started` | **Deferred** (server, 05) | `{ entityType: 'display', entityId: displayId }` | **PRT-041:** actor is `{ kind: 'display', displayId }`; **no person attribution, no `actingHumanId`** (review finding D9); the display client emits nothing (no double count) |
 
 ---
