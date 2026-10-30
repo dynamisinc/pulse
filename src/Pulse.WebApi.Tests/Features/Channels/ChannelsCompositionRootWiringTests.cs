@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Channels;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -13,8 +14,10 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
@@ -115,6 +118,26 @@ public sealed class ChannelsCompositionRootWiringTests
         var start = () => factory.Services;
 
         start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("-00:00:01")]
+    public void AlertOptions_ANonPositiveBroadcastTimeout_IsRefused(string timeout)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{ChannelAlertOptions.SectionName}:BroadcastTimeout"] = timeout,
+            })
+            .Build());
+        services.AddChannelAlerts();
+        using var provider = services.BuildServiceProvider();
+
+        var read = () => provider.GetRequiredService<IOptions<ChannelAlertOptions>>().Value;
+
+        read.Should().Throw<OptionsValidationException>().WithMessage("*BroadcastTimeout*");
     }
 
     [Fact]

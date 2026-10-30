@@ -257,6 +257,7 @@ public sealed class AlertServiceTests : IDisposable
 
         (await Task.WhenAny(raise, Task.Delay(TimeSpan.FromSeconds(10)))).Should().BeSameAs(
             raise, "a stalled send is cancelled at the bound, so it never blocks the next change behind the gate");
+        await raise; // surfaces a fault rather than letting WhenAny hide it
         host.Notifier.Raised.Should().HaveCount(2, "the bridge still runs after a timed-out broadcast");
         (await host.InAsync(exercise, (_, reader) => reader.GetActiveAsync()))!.Alerts.Should().HaveCount(2);
     }

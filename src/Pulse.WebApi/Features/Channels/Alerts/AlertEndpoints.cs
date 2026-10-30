@@ -50,7 +50,13 @@ public static class AlertEndpoints
 
         // TryAdd-based, so this converges with Program.cs's own AddExerciseClock() on one clock singleton.
         services.AddExerciseClock();
-        services.AddOptions<ChannelAlertOptions>().BindConfiguration(ChannelAlertOptions.SectionName);
+        services.AddOptions<ChannelAlertOptions>()
+            .BindConfiguration(ChannelAlertOptions.SectionName)
+            .Validate(
+                options => options.BroadcastTimeout > TimeSpan.Zero,
+                $"{ChannelAlertOptions.SectionName}:BroadcastTimeout must be a positive duration (zero cancels every "
+                + "AlertsChanged push; a negative or infinite value would hold the announcement gate unbounded).")
+            .ValidateOnStart();
         services.TryAddSingleton<IPlatformAlertNotifier, NullPlatformAlertNotifier>();
         services.TryAddSingleton<AlertAnnouncementGate>();
         services.TryAddScoped<AlertReader>();
