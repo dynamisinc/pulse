@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.ParticipantShell;
 
 /// <summary>
@@ -571,6 +572,7 @@ public sealed class ParticipantShellConfigService
     private readonly IChromeConfigProjection _chromeProjection;
     private readonly IShellVariantProjection _shellVariantProjection;
     private readonly IOverlayStateProjection _overlayStateProjection;
+    private readonly AlertReader _alerts;
 
     /// <summary>Creates the service over persistence, the resolved scope, and the three projections.</summary>
     /// <param name="dbContext">The persistence context the exercise row is read through.</param>
@@ -578,24 +580,28 @@ public sealed class ParticipantShellConfigService
     /// <param name="chromeProjection">The chrome-config projection (01b default; story 02 replaces it).</param>
     /// <param name="shellVariantProjection">The shell-variant projection (01b default; story 03 replaces it).</param>
     /// <param name="overlayStateProjection">The overlay-state projection (01b default; story 03 replaces it).</param>
+    /// <param name="alerts">The channels alert source's read side (channels-foundation story 10).</param>
     public ParticipantShellConfigService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IChromeConfigProjection chromeProjection,
         IShellVariantProjection shellVariantProjection,
-        IOverlayStateProjection overlayStateProjection)
+        IOverlayStateProjection overlayStateProjection,
+        AlertReader alerts)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(chromeProjection);
         ArgumentNullException.ThrowIfNull(shellVariantProjection);
         ArgumentNullException.ThrowIfNull(overlayStateProjection);
+        ArgumentNullException.ThrowIfNull(alerts);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _chromeProjection = chromeProjection;
         _shellVariantProjection = shellVariantProjection;
         _overlayStateProjection = overlayStateProjection;
+        _alerts = alerts;
     }
 
     /// <summary><c>GET /api/shell-state</c> — <c>null</c> when the scope is unresolved (the endpoint 401s).</summary>
@@ -687,18 +693,14 @@ public sealed class ParticipantShellConfigService
     }
 
     /// <summary>
-    /// <c>GET /api/alerts</c> — Phase-1 has no controller-driven alert publish (that is Phase 3), so this is
-    /// still the empty-but-present alert list. It keeps the scope check, and only the scope check, so it
-    /// fails closed identically to the other five without a pointless database round trip.
+    /// <c>GET /api/alerts</c> — the exercise's ACTIVE alerts, delegated to the channels alert source
+    /// (channels-foundation story 10, <see cref="AlertReader.GetActiveAsync"/>). <c>null</c> when the scope is
+    /// unresolved, so it fails closed identically to the other five.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The alerts body, or <c>null</c> to fail closed.</returns>
-    public Task<AlertsResponse?> GetAlertsAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return Task.FromResult(HasResolvedScope(out _) ? new AlertsResponse { Alerts = [] } : null);
-    }
+    public Task<ActiveAlertsResponse?> GetAlertsAsync(CancellationToken cancellationToken = default) =>
+        _alerts.GetActiveAsync(cancellationToken);
 
     /// <summary><c>GET /api/overlay-state</c> — <c>null</c> when the scope is unresolved (the endpoint 401s).</summary>
     /// <param name="cancellationToken">Cancellation token.</param>

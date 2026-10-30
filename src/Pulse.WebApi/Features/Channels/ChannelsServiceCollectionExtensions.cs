@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Channels;
 
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
@@ -47,6 +48,9 @@ public static class ChannelsServiceCollectionExtensions
         services.TryAddSingleton<OutletDefaultsCatalog>();
         services.TryAddScoped<ExerciseFactsReader>();
         services.TryAddScoped<OutletService>();
+
+        // Story 10: the alert source, IAlertRaiser and the expiry sweep.
+        services.AddChannelAlerts();
 
         services.AddChannelEnablement(); // 08: IChannelEnablement behind RequireChannelEnabled (FC-7)
         return services;

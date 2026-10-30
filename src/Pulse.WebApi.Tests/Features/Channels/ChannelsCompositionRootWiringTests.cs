@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Channels;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -8,19 +9,24 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
+using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
+using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Xunit;
 
@@ -34,9 +40,10 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// Story 01 registered no service of its own (schema only); stories 03+ extend this file as they fill
-/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 03: the outlet registry; story 04: the publish funnel; story 08: the enablement gate). Resolving
-/// services only needs the host to BUILD, so it is fed a dummy, never-connecting connection string; the anonymous probe
-/// is answered before any database work.
+/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 03: the outlet registry; story 04: the publish funnel; story 08: the
+/// enablement gate; story 10: the alert source and the <c>/api/alerts*</c> routes). Resolving services only needs the host
+/// to BUILD, so it is fed a dummy, never-connecting connection string; the anonymous probe is answered before any database
+/// work.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
 {
@@ -75,6 +82,14 @@ public sealed class ChannelsCompositionRootWiringTests
         once.Should().ContainSingle(d => d.ServiceType == typeof(ISkinOverridesValidator) && d.Lifetime == ServiceLifetime.Singleton);
         once.Should().ContainSingle(d => d.ServiceType == typeof(OutletService) && d.Lifetime == ServiceLifetime.Scoped);
         once.Should().ContainSingle(d => d.ServiceType == typeof(OutletDefaultsCatalog));
+
+        // Story 10: the alert source registers once however often AddChannels() runs.
+        twice.Count(d => d.ServiceType == typeof(IAlertRaiser)).Should().Be(1);
+        twice.Count(d => d.ServiceType == typeof(AlertService)).Should().Be(1);
+        twice.Count(d => d.ServiceType == typeof(AlertReader)).Should().Be(1);
+        twice.Count(d => d.ServiceType == typeof(IPlatformAlertNotifier)).Should().Be(1);
+        twice.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AlertExpirySweeper))
+            .Should().Be(1, "story 10's expiry sweep runs once per host");
     }
 
     [Fact]
@@ -105,6 +120,55 @@ public sealed class ChannelsCompositionRootWiringTests
         var start = () => factory.Services;
 
         start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("-00:00:01")]
+    public void AlertOptions_ANonPositiveBroadcastTimeout_IsRefused(string timeout)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{ChannelAlertOptions.SectionName}:BroadcastTimeout"] = timeout,
+            })
+            .Build());
+        services.AddChannelAlerts();
+        using var provider = services.BuildServiceProvider();
+
+        var read = () => provider.GetRequiredService<IOptions<ChannelAlertOptions>>().Value;
+
+        read.Should().Throw<OptionsValidationException>().WithMessage("*BroadcastTimeout*");
+    }
+
+    [Fact]
+    public void ProgramCs_WiresTheAlertSource_AndItsRoutes()
+    {
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<IAlertRaiser>().Should().BeOfType<AlertService>();
+        scope.ServiceProvider.GetRequiredService<IPlatformAlertNotifier>().Should().BeOfType<NullPlatformAlertNotifier>(
+            "the SOC-072 bridge is a no-op until notifications story 03 replaces it");
+        scope.ServiceProvider.GetRequiredService<ParticipantShellConfigService>().Should().NotBeNull(
+            "GET /api/alerts delegates to the alert source, so the shell config service must still resolve");
+        factory.Services.GetServices<IHostedService>().OfType<AlertExpirySweeper>().Should().ContainSingle();
+
+        var routes = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .SelectMany(e => (e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? [])
+                .Select(method => $"{method} {e.RoutePattern.RawText}"))
+            .ToList();
+
+        routes.Should().Contain(new[]
+        {
+            "GET /api/alerts",
+            "GET /api/alerts/history",
+            "POST /api/alerts",
+            "POST /api/alerts/{id:guid}/clear",
+        });
     }
 
     /// <summary>Story 03: every <c>/api/outlets*</c> route, mapped by <c>MapChannels()</c>.</summary>
