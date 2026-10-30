@@ -143,10 +143,12 @@ public sealed class OrganizationScopeSweepTests
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
         // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
         // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
+        // channels-foundation/09: +1 for ExerciseChannelEnabledReader — the realtime disabled-channel gate's read of
+        // EnabledChannels for the SERVER-resolved exercise a broadcast fans out for (never a client id), in its own scope.
         // idle-db-autopause: +1 for WhiteNoisePacer's sweep — the noise level is checked (ids only) for exercises that
         // have pool rows, so the pacer can sleep while none is making noise; the same shape as the rehydrator's
         // existence check, each id then worked in its own resolved scope.
-        ["ResolvedScope"] = 32,
+        ["ResolvedScope"] = 33,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

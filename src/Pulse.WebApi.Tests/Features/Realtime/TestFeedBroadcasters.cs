@@ -19,15 +19,32 @@ internal static class TestFeedBroadcasters
     /// <summary>A real broadcaster whose lifecycle reader always answers <paramref name="status"/>.</summary>
     /// <param name="hubContext">The (usually mocked) hub context.</param>
     /// <param name="status">The stored status every read returns; <c>null</c> models a missing exercise row.</param>
+    /// <param name="channelEnabled">
+    /// The channel-enabled reader (channels-foundation 09); <c>null</c> = every channel enabled, so a test about
+    /// something else is never routed by the disabled-channel gate.
+    /// </param>
     /// <returns>The broadcaster.</returns>
-    public static SignalRFeedBroadcaster Create(IHubContext<ExerciseRealtimeHub> hubContext, string? status = "live") =>
-        new(hubContext, FixedStatus(status), NullLogger<SignalRFeedBroadcaster>.Instance);
+    public static SignalRFeedBroadcaster Create(
+        IHubContext<ExerciseRealtimeHub> hubContext,
+        string? status = "live",
+        ExerciseChannelEnabledReader? channelEnabled = null) =>
+        new(hubContext, FixedStatus(status), channelEnabled ?? AllChannelsEnabled, NullLogger<SignalRFeedBroadcaster>.Instance);
 
     /// <summary>A lifecycle reader that always answers <paramref name="status"/>, for any exercise.</summary>
     /// <param name="status">The stored status to answer.</param>
     /// <returns>The reader.</returns>
     public static ExerciseLifecycleStatusReader FixedStatus(string? status) =>
         (Guid _, CancellationToken _) => Task.FromResult(status);
+
+    /// <summary>A channel-enabled reader that answers <c>true</c> for every exercise and channel.</summary>
+    public static ExerciseChannelEnabledReader AllChannelsEnabled { get; } =
+        (Guid _, string _, CancellationToken _) => Task.FromResult(true);
+
+    /// <summary>A channel-enabled reader that answers <c>true</c> only for the listed channels, for any exercise.</summary>
+    /// <param name="enabledChannelIds">The enabled channel ids.</param>
+    /// <returns>The reader.</returns>
+    public static ExerciseChannelEnabledReader EnabledChannels(params string[] enabledChannelIds) =>
+        (Guid _, string channelId, CancellationToken _) => Task.FromResult(System.Array.IndexOf(enabledChannelIds, channelId) >= 0);
 }
 
 /// <summary>

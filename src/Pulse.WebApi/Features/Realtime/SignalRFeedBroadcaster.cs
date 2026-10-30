@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Realtime;
 
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
+using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -44,6 +45,13 @@ using Pulse.WebApi.Features.Social.Pins;
 /// those two steps can let that send's single frame reach participants — at most one in-flight frame per send.
 /// </para>
 /// <para>
+/// <b>The disabled-channel gate (channels-foundation story 09).</b> The three content frames (<c>ContentPublished</c>,
+/// <c>ContentRevised</c>, <c>ContentRetracted</c>) pass a second check after the lifecycle one: when the item's channel
+/// is not enabled for the exercise (<see cref="ExerciseChannelEnabledReader"/>), the frame goes to the staff group only,
+/// so a hidden channel never leaks a headline or permalink. <c>AlertsChanged</c> is not channel-gated: the alert bar is
+/// shell-wide, and the active set is the same one <c>GET /api/alerts</c> serves.
+/// </para>
+/// <para>
 /// <b>Not this gate's concern: Freeze.</b> A paused world is still push-open here (participants are served the
 /// holding page). Freeze is handled by the participant pause overlay (<c>PauseOverlayPublisher</c>, CR-001) and by
 /// #379's participant write gate, not by this broadcaster.
@@ -69,24 +77,41 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
     /// <summary>The SignalR client method name a subscriber handles when the exercise's scenario clock changes.</summary>
     internal const string ScenarioClockChangedEvent = "ScenarioClockChanged";
 
+    /// <summary>The client method for a newly published content item (FC-5).</summary>
+    internal const string ContentPublishedEvent = ChannelRealtimeEvents.ContentPublished;
+
+    /// <summary>The client method for a revised content item (FC-5).</summary>
+    internal const string ContentRevisedEvent = ChannelRealtimeEvents.ContentRevised;
+
+    /// <summary>The client method for a retracted content item (FC-5).</summary>
+    internal const string ContentRetractedEvent = ChannelRealtimeEvents.ContentRetracted;
+
+    /// <summary>The client method for a changed active alert set (FC-5).</summary>
+    internal const string AlertsChangedEvent = ChannelRealtimeEvents.AlertsChanged;
+
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
     private readonly ExerciseLifecycleStatusReader _lifecycleStatusReader;
+    private readonly ExerciseChannelEnabledReader _channelEnabledReader;
     private readonly ILogger<SignalRFeedBroadcaster> _logger;
 
     /// <summary>Creates the broadcaster with the hub context it fans out through.</summary>
     /// <param name="hubContext">The context for <see cref="ExerciseRealtimeHub"/>.</param>
     /// <param name="lifecycleStatusReader">Reads the exercise's stored lifecycle status before each send.</param>
+    /// <param name="channelEnabledReader">Reads whether a content frame's channel is enabled before it is sent.</param>
     /// <param name="logger">Logs a send that was withheld from participants.</param>
     public SignalRFeedBroadcaster(
         IHubContext<ExerciseRealtimeHub> hubContext,
         ExerciseLifecycleStatusReader lifecycleStatusReader,
+        ExerciseChannelEnabledReader channelEnabledReader,
         ILogger<SignalRFeedBroadcaster> logger)
     {
         ArgumentNullException.ThrowIfNull(hubContext);
         ArgumentNullException.ThrowIfNull(lifecycleStatusReader);
+        ArgumentNullException.ThrowIfNull(channelEnabledReader);
         ArgumentNullException.ThrowIfNull(logger);
         _hubContext = hubContext;
         _lifecycleStatusReader = lifecycleStatusReader;
+        _channelEnabledReader = channelEnabledReader;
         _logger = logger;
     }
 
@@ -188,6 +213,73 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
         await target.SendAsync(ScenarioClockChangedEvent, clock, cancellationToken: cancellationToken);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>ContentPublished</c> with the given <see cref="ChannelContentSummaryDto"/> verbatim. Exercise-wide only
+    /// while the exercise is push-open AND the item's channel is enabled; otherwise the staff group only (see the type's
+    /// remarks), so a disabled channel's headline never reaches a participant.
+    /// </remarks>
+    public async Task BroadcastContentPublishedAsync(
+        Guid exerciseId,
+        ChannelContentSummaryDto content,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        var target = await ResolveChannelTargetAsync(exerciseId, content.ChannelId, ContentPublishedEvent, cancellationToken);
+        await target.SendAsync(ContentPublishedEvent, content, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>ContentRevised</c> with the given <see cref="ContentRevisedDto"/> verbatim: the funnel builds it, so a
+    /// <c>silent_rewrite</c> arrives with its moved <c>updatedScenarioTime</c> and no new <c>revisions[]</c> entry (FC-1),
+    /// and this method neither adds nor drops one. Channel-gated exactly like <c>ContentPublished</c> (it carries the
+    /// headline).
+    /// </remarks>
+    public async Task BroadcastContentRevisedAsync(
+        Guid exerciseId,
+        ContentRevisedDto revised,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(revised);
+
+        var target = await ResolveChannelTargetAsync(exerciseId, revised.ChannelId, ContentRevisedEvent, cancellationToken);
+        await target.SendAsync(ContentRevisedEvent, revised, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>ContentRetracted</c> with the given <see cref="ContentRetractedDto"/> verbatim. Channel-gated exactly like
+    /// <c>ContentPublished</c> (its permalink names the item).
+    /// </remarks>
+    public async Task BroadcastContentRetractedAsync(
+        Guid exerciseId,
+        ContentRetractedDto retracted,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(retracted);
+
+        var target = await ResolveChannelTargetAsync(exerciseId, retracted.ChannelId, ContentRetractedEvent, cancellationToken);
+        await target.SendAsync(ContentRetractedEvent, retracted, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>AlertsChanged</c> with the given <see cref="AlertsChangedDto"/> (the full active set) verbatim, through the
+    /// lifecycle choke point only: the alert bar is shell-wide, so there is no channel gate.
+    /// </remarks>
+    public async Task BroadcastAlertsChangedAsync(
+        Guid exerciseId,
+        AlertsChangedDto alerts,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(alerts);
+
+        var target = await ResolveTargetAsync(exerciseId, AlertsChangedEvent, cancellationToken);
+        await target.SendAsync(AlertsChangedEvent, alerts, cancellationToken: cancellationToken);
+    }
+
     /// <summary>
     /// The lifecycle choke point (#375): the exercise-wide group when participants are admitted, otherwise the
     /// staff-only group (fail closed). See the type's remarks.
@@ -209,6 +301,47 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
         LogParticipantSendSuppressed(eventName, exerciseId, status ?? "(no exercise row)");
         return _hubContext.Clients.Group(ExerciseRealtimeHub.StaffGroupNameFor(exerciseId));
     }
+
+    /// <summary>
+    /// The content-frame choke point: the lifecycle gate first (one read when the exercise is closed), then the
+    /// disabled-channel gate. Both fail closed to the staff-only group. See the type's remarks.
+    /// </summary>
+    /// <param name="exerciseId">The server-resolved exercise the frame belongs to (COR-001).</param>
+    /// <param name="channelId">The content item's channel.</param>
+    /// <param name="eventName">The client event about to be sent, for the suppression log.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The client proxy the frame must be sent to.</returns>
+    private async Task<IClientProxy> ResolveChannelTargetAsync(
+        Guid exerciseId, string channelId, string eventName, CancellationToken cancellationToken)
+    {
+        var status = await _lifecycleStatusReader(exerciseId, cancellationToken);
+        if (!ExerciseLifecycleStates.IsLivePushOpen(status))
+        {
+            LogParticipantSendSuppressed(eventName, exerciseId, status ?? "(no exercise row)");
+            return _hubContext.Clients.Group(ExerciseRealtimeHub.StaffGroupNameFor(exerciseId));
+        }
+
+        if (!await _channelEnabledReader(exerciseId, channelId, cancellationToken))
+        {
+            LogDisabledChannelSendSuppressed(eventName, exerciseId, channelId);
+            return _hubContext.Clients.Group(ExerciseRealtimeHub.StaffGroupNameFor(exerciseId));
+        }
+
+        return _hubContext.Clients.Group(ExerciseRealtimeHub.GroupNameFor(exerciseId));
+    }
+
+    /// <summary>
+    /// Source-generated notice that a content frame was withheld from participants because its channel is disabled.
+    /// Debug: staff author content for a channel before enabling it, so this fires routinely.
+    /// </summary>
+    /// <param name="eventName">The client event withheld.</param>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <param name="channelId">The disabled channel.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "A {EventName} frame for exercise {ExerciseId} was NOT sent to participants: channel {ChannelId} is " +
+                  "not enabled for the exercise. It was sent to the staff group only.")]
+    private partial void LogDisabledChannelSendSuppressed(string eventName, Guid exerciseId, string channelId);
 
     /// <summary>
     /// Source-generated notice that a frame was withheld from participants (CA1848). Debug, not Information:
