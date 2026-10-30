@@ -100,6 +100,7 @@ import {
 } from '../services/exerciseSettingsService'
 import { getChromeSettings } from '../services/chromeSettingsService'
 import { getPracticeMode } from '../services/practiceModeService'
+import { getReadiness } from '../services/readinessService'
 import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 
 // Story 17: role-gated controls read the session; stand in the session this suite signs in as.
@@ -123,6 +124,16 @@ vi.mock('../services/practiceModeService', async importOriginal => {
   return { ...actual, getPracticeMode: vi.fn(), setPracticeMode: vi.fn() }
 })
 
+// The Stage control reads the exercise context + lifecycle; it has its own suite.
+vi.mock('../components/StageExerciseControl', () => ({
+  StageExerciseControl: () => <div data-testid="stub-stage-control" />,
+}))
+
+vi.mock('../services/readinessService', async importOriginal => {
+  const actual = await importOriginal<typeof import('../services/readinessService')>()
+  return { ...actual, getReadiness: vi.fn() }
+})
+
 /**
  * A promise that never settles — the panels stay `isPending`, so each renders its
  * heading and section with no state update to await and no fixture to maintain.
@@ -138,6 +149,7 @@ function pendingForever<T>(): Promise<T> {
  * panel mount, fails against this table.
  */
 const SECTIONS = [
+  { id: 'readiness', nav: 'Readiness', heading: 'Readiness' },
   { id: 'identity', nav: 'Identity & schedule', heading: 'Identity & schedule' },
   { id: 'channels', nav: 'Channels', heading: 'Channels' },
   { id: 'theming', nav: 'Theming & outlets', heading: 'Theming & outlets' },
@@ -200,6 +212,7 @@ beforeEach(() => {
   vi.mocked(getExerciseSettings).mockReset().mockImplementation(pendingForever)
   vi.mocked(getChromeSettings).mockReset().mockImplementation(pendingForever)
   vi.mocked(getPracticeMode).mockReset().mockImplementation(pendingForever)
+  vi.mocked(getReadiness).mockReset().mockImplementation(pendingForever)
 })
 
 describe('ExerciseSettingsPage — composition-point mount guard', () => {
@@ -232,6 +245,22 @@ describe('ExerciseSettingsPage — composition-point mount guard', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Identity & schedule' })).toBeInTheDocument()
     expect(screen.getByTestId('exercise-config-nav-identity')).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('lists Readiness FIRST in the nav but still arrives on Identity & schedule', () => {
+    renderPage()
+
+    const buttons = within(nav()).getAllByRole('button')
+    expect(buttons[0]).toHaveAccessibleName('Readiness')
+    expect(screen.getByTestId('exercise-config-nav-identity')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('exercise-config-nav-readiness')).not.toHaveAttribute('aria-current')
+  })
+
+  it('deep-links straight to the Readiness section', () => {
+    renderPage(['/staff/plan?section=readiness'])
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Readiness' })).toBeInTheDocument()
+    expect(screen.getByTestId('exercise-config-nav-readiness')).toHaveAttribute('aria-current', 'page')
   })
 
   it('shows exactly one section at a time', async () => {

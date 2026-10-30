@@ -87,6 +87,7 @@ import {
   type LifecycleState,
   type LifecycleTarget,
 } from './lifecycleService'
+import type { ReadinessItem } from '@/features/planner/services/readinessService'
 import { mockLifecycleFor, simulateTransition } from './lifecycleMock'
 
 /** Shown when the server's lifecycle answer is for a different exercise than the console shows. */
@@ -132,6 +133,11 @@ export interface UseExerciseLifecycleResult {
   readonly pending: LifecycleTarget | undefined
   /** Plain-text reason the last transition was refused or failed; cleared by the next attempt. */
   readonly transitionError: string | undefined
+  /**
+   * The blocking readiness items the server named when it refused a STAGE (409
+   * `readiness-blocking`); `undefined` for every other outcome. Cleared with the error.
+   */
+  readonly transitionBlocking: readonly ReadinessItem[] | undefined
   /** The last transition that SUCCEEDED in this mount (the control confirms it in text). */
   readonly lastTransition: LifecycleTarget | undefined
   /**
@@ -224,6 +230,7 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
       // unknown (a 409, or no status / 408 / 5xx: the server may have applied it), ask the
       // server: re-read the lifecycle so the buttons show the truth, then re-resolve the scope
       // so the header pill follows. See the module header.
+      // A readiness-blocking 409 also re-reads on purpose: another planner may have staged it.
       if (stateMayHaveChanged(toLifecycleError(error).status)) {
         let current: ExerciseLifecycle
         if (USE_MOCK_DATA) {
@@ -297,6 +304,9 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     transitionError: appliedElsewhere
       ? APPLIED_ELSEWHERE_MESSAGE
       : isError ? toLifecycleError(mutationError).message : undefined,
+    transitionBlocking: !appliedElsewhere && isError
+      ? toLifecycleError(mutationError).blocking
+      : undefined,
     lastTransition: last?.to,
     lastTransitionAlreadyDone: last?.alreadyDone ?? false,
     transition,

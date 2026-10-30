@@ -290,6 +290,10 @@ public sealed class RoleMatrixTests
         Probe("DELETE /api/staff/posts/{postId:guid}/pin", ControllerOnly);
         Probe("POST /api/media", UploadAuthoring);
 
+        // press-room story 02: a document upload is staff-only until a feature opts participants in — the default-deny
+        // IDocumentUploadAuthorizer answers 403 for participant and PIO sessions before the body is read.
+        Probe("POST /api/media/documents", PlannerOrController);
+
         // ---- Participant sim writes (live; staged in StaffAuthoringTests). Staff never react, edit, or
         //      follow without a persona of their own (the services' own refusals). ----
         Probe("PUT /api/posts/{postId:guid}/reactions/{kind}", ParticipantSim);

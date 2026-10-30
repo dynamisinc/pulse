@@ -28,8 +28,8 @@ names).
 
 ### Layout: left section nav + content pane (and why sections 1–3 share a form)
 
-The page is a section nav on the left and the selected section on the right — six
-sections: Identity & schedule, Channels, Theming & outlets, Compliance chrome,
+The page is a section nav on the left and the selected section on the right — seven
+sections (Readiness first, see Story 03 below): Identity & schedule, Channels, Theming & outlets, Compliance chrome,
 Practice / sandbox, Import participant accounts. Sections 4–6 are self-contained
 panels with their own endpoints and their own saves. Sections 1–3 are **not** three
 forms:
@@ -173,6 +173,47 @@ session. See `src/Pulse.WebApi/Features/Identity/Accounts/`.
 
 The staff bearer token is attached by the shared client's auth layer (wired by the
 staff identity/session story), not by this feature.
+
+## Story 03 — Go-live readiness (COR-042, feature: exercise-build-golive)
+
+The **readiness checklist**: a planner sees whether the exercise can be staged, which
+**blocking** items are open, and which **warnings** are worth a look. It is the first
+section of `ExerciseSettingsPage`'s nav, but **not** the arrival section (`DEFAULT_SECTION`
+stays `identity`; nav order and arrival are independent).
+
+| File | Role |
+|------|------|
+| `components/ReadinessPanel.tsx` | The COBRA panel: summary line ("Ready to stage" / "N blocking items open"), then `Blocking` and `Warnings` lists. Every row is a FontAwesome icon **plus** status words ("Done" / "Needs attention" / "Not checked yet") — never color-only (NFR-001). The summary is the `role="status"` live region. Driven by the payload: an unknown item id still renders, and the id only looks up an optional fix link. Only `open` blocking items count; `notChecked` never blocks. Self-contained, no props. |
+| `hooks/useReadiness.ts` | React Query 5 `useReadiness()` (`refetchOnWindowFocus: true`). Exports `READINESS_QUERY_KEY` (no exercise id — scope is server-resolved). The settings, chrome, practice-mode and account-import mutations invalidate it on success so readiness tracks live state. |
+| `services/readinessService.ts` | The data seam: shared axios client, env-guarded mock flip (`USE_MOCK_READINESS = USE_MOCK_DATA`), **fail-closed** validation (unknown status, non-array lists, missing fields rejected), transport-agnostic `ReadinessError`. Owns `ExerciseReadiness`, `ReadinessItem`, `ReadinessStatus`. |
+
+### Fix links
+
+Only ids with a real destination are linked (and only while the item is not `ok`):
+`schedule-set` → `/staff/plan?section=identity`; `chrome-valid` →
+`/staff/plan?section=chrome`; `participant-access` and `personas-bound` →
+`/staff/participant-admin` (the roster, where people and their persona handles are
+added). No other id has a link.
+
+### Story 04 — Gated go-live: Stage exercise (feature: exercise-build-golive)
+
+| File | Role |
+|------|------|
+| `components/StageExerciseControl.tsx` | The planner's **Stage exercise** control, mounted directly under `ReadinessPanel` in the Readiness section. Reads the lifecycle through the existing controller hook (`useExerciseLifecycle`, extended with a `staged` target and `transitionBlocking`). Button only in `build`; other states show one status sentence. `aria-disabled` (focusable) with a visible reason while readiness has open blocking items; on a server `readiness-blocking` 409 it shows the returned items in the dialog and refetches readiness. On success it invalidates lifecycle + readiness and announces "Exercise staged." in a polite live region. |
+| `components/StageExerciseDialog.tsx` | The COBRA confirm dialog (not typed-name): title "Stage <name>?", the ambient-world / clock body copy, the readiness summary, Cancel / Stage. Focus lands on Cancel, Escape cancels, focus returns to the trigger, controls are `aria-disabled` while pending. |
+
+Cross-feature imports: this feature imports `useExerciseLifecycle` / `lifecycleService` from
+`features/controller/lifecycle`, and `controller/lifecycle` imports `useReadiness` /
+`readinessService` from this feature by **direct file path** (not the barrels), which is what keeps
+the two from forming an import cycle. Stage is planner-only on the server; StartEx is controller-only
+and not readiness-gated.
+
+### Backend contract consumed
+
+`GET /api/staff/readiness` → `200 { ready, lifecycleState, blocking[], warnings[] }`,
+items `{ id, label, status: 'ok' | 'open' | 'notChecked', detail: string | null }`.
+Readable by planner, controller and evaluator; `401`/`403` otherwise. No exercise id in
+the path.
 
 ## Mounting
 

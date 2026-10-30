@@ -168,6 +168,42 @@ public sealed class MediaIsolationTests
         await batch.Should().ThrowAsync<ExerciseScopeViolationException>();
     }
 
+    /// <summary>
+    /// press-room story 02: the document read path joins the standing suite. Exercise B's REAL document id, uploaded by
+    /// the SAME acting human, read under scope A, is the byte-identical 404 an unknown id gets.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task DocumentReadPath_AnotherExercisesDocumentId_IsTheSame404AsAnUnknownId()
+    {
+        MediaSeed.SeededExercise exerciseA;
+        MediaSeed.SeededExercise exerciseB;
+        MediaSeed.SeededSession participantA;
+        MediaAsset documentInB;
+        await using (var db = _fixture.CreateContext())
+        {
+            exerciseA = MediaSeed.NewExercise(db);
+            exerciseB = MediaSeed.NewExercise(db);
+            participantA = MediaSeed.Participant(db, exerciseA);
+            documentInB = MediaSeed.Asset(db, exerciseB, MediaKinds.Document, uploadedBy: participantA.Session.ActingHumanId);
+            await db.SaveChangesAsync();
+        }
+
+        await using var host = new MediaTestHost(_fixture.ConnectionString!);
+        using var client = host.CreateClientFor(exerciseA.Host, participantA.Token);
+
+        async Task<(HttpStatusCode Status, string Body)> Read(Guid id)
+        {
+            using var response = await client.GetAsync(new Uri($"/api/media/documents/{id}", UriKind.Relative));
+            return (response.StatusCode, await response.Content.ReadAsStringAsync());
+        }
+
+        var crossExercise = await Read(documentInB.Id);
+        var unknown = await Read(Guid.NewGuid());
+
+        crossExercise.Status.Should().Be(HttpStatusCode.NotFound);
+        crossExercise.Should().Be(unknown, "nothing confirms that another exercise's document exists");
+    }
+
     private static async Task<string[]> ListIdsAsync(MediaTestHost host, MediaSeed.SeededExercise exercise, MediaSeed.SeededSession staff)
     {
         using var client = host.CreateClientFor(exercise.Host, staff.Token);

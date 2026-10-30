@@ -80,6 +80,7 @@
 import type { RouteObject } from 'react-router-dom'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { ServerClockSync } from '@/core/clock/ServerClockMount'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
 import { ParticipantSignInPage } from '@/features/login/pages/ParticipantSignInPage'
 import { StaffSignInPage } from '@/features/login/pages/StaffSignInPage'
@@ -116,6 +117,8 @@ export function createRoleAwareRoutes(surfaces: RoleAwareEntryProps): RouteObjec
       element: (
         <ExerciseContextProvider>
           <SessionProvider>
+            {/* The ONE server scenario clock, keyed by the exercise (no-op on mock data). */}
+            <ServerClockSync />
             <RoleAwareEntry {...surfaces} />
           </SessionProvider>
         </ExerciseContextProvider>

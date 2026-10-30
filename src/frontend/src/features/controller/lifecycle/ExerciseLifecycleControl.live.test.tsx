@@ -121,12 +121,21 @@ beforeEach(() => {
       return {
         data: {
           exerciseId: serverExerciseId,
-          exerciseName: serverExerciseId === 'ex-live-0001'
-            ? 'Coastal Surge (live)'
-            : 'Harbor Drill (other)',
+          // The PARTICIPANT-facing name differs on purpose: staff labels show the internal one.
+          exerciseName: serverExerciseId === 'ex-live-0001' ? 'Harbor Town' : null,
           timeZone: 'America/New_York',
           status: serverState,
         },
+      }
+    }
+    if (url === '/staff/assignments') {
+      // The staff label is the INTERNAL name from the assignments (story 09), never the
+      // participant-facing scope name (which the scope above may even send as null).
+      return {
+        data: [
+          { exerciseId: 'ex-live-0001', exerciseName: 'Coastal Surge (live)', role: 'controller', personId: 'p-1', isLead: true },
+          { exerciseId: 'ex-other-9999', exerciseName: 'Harbor Drill (other)', role: 'controller', personId: 'p-1', isLead: false },
+        ],
       }
     }
     if (url === LIFECYCLE_PATH) {
@@ -651,6 +660,7 @@ describe('ExerciseLifecycleControl (live) -- the server\'s exercise must be the 
     const dialog = await screen.findByRole('dialog')
 
     expect(within(dialog).getByTestId('end-exercise-name')).toHaveTextContent('Coastal Surge (live)')
+    expect(within(dialog).queryByText(/Harbor Town/)).toBeNull()
   })
 })
 

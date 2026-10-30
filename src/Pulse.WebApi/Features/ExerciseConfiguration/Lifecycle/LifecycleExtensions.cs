@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 
 /// <summary>
 /// Story 03's OWN composition-root seams — the three calls the orchestrator wires into <c>Program.cs</c>.
@@ -64,6 +65,10 @@ public static class LifecycleExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<ExerciseLifecycleService>();
+
+        // exercise-build-golive/03: the go-live readiness checklist, read by GET /api/staff/readiness and (story 04)
+        // by the stage transition.
+        services.AddScoped<ExerciseReadinessService>();
 
         // The seam this slice OWNS: a fail-closed floor world-steering replaces at merge (see remarks).
         services.TryAddSingleton<ISteeringOverlaySource, NoSteeringOverlaySource>();

@@ -82,7 +82,6 @@ import {
   faBolt,
   faCircleCheck,
   faGaugeHigh,
-  faLock,
   faPowerOff,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
@@ -95,6 +94,7 @@ import {
   useArmedConfirm,
   useCoarsePointer,
 } from '../../components/confirm'
+import { LeadOnlyNote } from '../components/LeadOnlyNote'
 import { SwampedModeToggle } from '../components/SwampedModeToggle'
 import { useDemandMeter } from '../hooks/useDemandMeter'
 import { useEngineControl, type EngineMode } from '../hooks/useEngineControl'
@@ -364,15 +364,13 @@ export function EngineControlBar() {
         />
       </Box>}
       {canControl && (killSwitchLeadBlocked || (engineControl.degraded && !isLead)) && (
-        <Stack
+        // Compact (#787): the full reason inline would wrap the 1180px command band.
+        <LeadOnlyNote
           id="engine-lead-only-reason"
-          data-testid="engine-lead-only-reason"
-          direction="row"
-          sx={{ alignItems: 'center', gap: 0.6, fontSize: 10.5, color: chrome.inkMuted }}
-        >
-          <FontAwesomeIcon icon={faLock} aria-hidden="true" />
-          <span>{LEAD_ONLY_RAISE_REASON}</span>
-        </Stack>
+          testId="engine-lead-only-reason"
+          label="Raise engine: lead only"
+          reason={LEAD_ONLY_RAISE_REASON}
+        />
       )}
       {/* a'. Story 11 H-1: a non-controller sees the server's engine mode, not a switch. */}
       {!canControl && (

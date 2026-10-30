@@ -22,6 +22,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Tests.Data;
@@ -350,6 +351,7 @@ public sealed class EngineSettingsLoopIntegrationTests
         // pulling in the whole B1 ingest path.
         services.AddSingleton(Mock.Of<IEnginePublishService>());
         services.AddReactionLoopHost();
+        services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
         services.AddEngineReview();
 
         // A recording decorator over the offline provider so the tier the burst is ACTUALLY generated at is
