@@ -207,7 +207,18 @@ function toResolvedConfig(body: ChannelNavConfigResponseBody): ChannelNavConfig 
   }
 }
 
-async function fetchChannelNavConfig(): Promise<ChannelNavConfig> {
+/**
+ * The React Query key for the channel-nav config. Exported so the channel
+ * enablement guard (`features/channels/routing`, channels-foundation 08)
+ * reads the SAME cache entry as `useChannelNav`: the nav and the guard can
+ * never disagree about which channels are enabled.
+ */
+export function channelNavConfigQueryKey(exerciseId: string) {
+  return ['participant-shell', 'channel-nav-config', exerciseId] as const
+}
+
+/** Fetches and resolves the config (enabled-only). Shared with the enablement guard. */
+export async function fetchChannelNavConfig(): Promise<ChannelNavConfig> {
   const response = await api.get<ChannelNavConfigResponseBody>(
     '/channel-nav-config',
     USE_MOCK_CHANNEL_NAV_CONFIG ? { adapter: mockAdapter } : undefined,
@@ -235,7 +246,7 @@ export function useChannelNav(): ChannelNavConfig {
   const { exerciseId } = useExerciseContext()
 
   const { data } = useQuery({
-    queryKey: ['participant-shell', 'channel-nav-config', exerciseId],
+    queryKey: channelNavConfigQueryKey(exerciseId),
     queryFn: fetchChannelNavConfig,
   })
 

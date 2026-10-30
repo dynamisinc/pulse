@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
@@ -19,10 +20,14 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// </para>
 /// <para>
 /// <b>Story 03 (outlets)</b> registers the public <see cref="ISkinOverridesValidator"/> (a pure singleton the portal
-/// config API reuses), the defaults catalog, the interim channel gate and the scoped <see cref="OutletService"/>. The
-/// service also needs what the host already wires: persistence + exercise scoping, <c>AddExerciseClock()</c>,
-/// <c>AddStaffIdentity()</c> (the gate and the acting human), <c>AddExerciseConfiguration()</c> (the gate's
-/// enabled-channel projection) and <c>AddMedia()</c> (the logo URL signer).
+/// config API reuses), the defaults catalog and the scoped <see cref="OutletService"/>, whose participant reads are
+/// channel-gated through story 08's <c>IChannelEnablement</c> (<c>AddChannelEnablement()</c> below). The service also
+/// needs what the host already wires: persistence + exercise scoping, <c>AddExerciseClock()</c>,
+/// <c>AddStaffIdentity()</c> (the staff gate and the acting human) and <c>AddMedia()</c> (the logo URL signer).
+/// </para>
+/// <para>
+/// <b>Story 08 (enablement)</b> registers <c>IChannelEnablement</c>, which <c>RequireChannelEnabled</c> and the outlet
+/// reads resolve per request.
 /// </para>
 /// </remarks>
 public static class ChannelsServiceCollectionExtensions
@@ -42,11 +47,12 @@ public static class ChannelsServiceCollectionExtensions
         services.TryAddSingleton<ISkinOverridesValidator, SkinOverridesValidator>();
         services.TryAddSingleton<OutletDefaultsCatalog>();
         services.TryAddScoped<ExerciseFactsReader>();
-        services.TryAddScoped<OutletChannelGate>();
         services.TryAddScoped<OutletService>();
 
         // Story 10: the alert source, IAlertRaiser and the expiry sweep.
         services.AddChannelAlerts();
+
+        services.AddChannelEnablement(); // 08: IChannelEnablement behind RequireChannelEnabled (FC-7)
         return services;
     }
 }

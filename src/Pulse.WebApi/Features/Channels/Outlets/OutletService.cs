@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -27,7 +28,7 @@ using Pulse.WebApi.Features.Media;
 /// </para>
 /// <para>
 /// <b>Participant reads</b> serve only ENABLED, non-deleted outlets on a channel the exercise has enabled
-/// (<see cref="OutletChannelGate"/>). Everything else, including an unknown or non-content channel, is the one
+/// (<see cref="IChannelEnablement"/>, story 08). Everything else, including an unknown or non-content channel, is the one
 /// <see cref="OutletResult.NotFoundMessage"/> 404.
 /// </para>
 /// <para>
@@ -79,7 +80,7 @@ public sealed partial class OutletService
     private readonly ICurrentStaffSessionAccessor _staffSession;
     private readonly IExerciseClock _exerciseClock;
     private readonly ExerciseFactsReader _exerciseFacts;
-    private readonly OutletChannelGate _channelGate;
+    private readonly IChannelEnablement _channelGate;
     private readonly ISkinOverridesValidator _skinValidator;
     private readonly OutletDefaultsCatalog _defaults;
     private readonly IMediaUrlSigner _mediaUrlSigner;
@@ -92,7 +93,7 @@ public sealed partial class OutletService
     /// <param name="staffSession">The server-side staff session: the only source of the acting human (COR-018).</param>
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-053).</param>
     /// <param name="exerciseFacts">The one exercise-row read (time zone, stored scenario instant).</param>
-    /// <param name="channelGate">The interim channel-enablement check (story 08 replaces it).</param>
+    /// <param name="channelGate">The channel enablement gate (story 08): the resolved exercise's enabled channels.</param>
     /// <param name="skinValidator">The FC-3b skin-overrides validator.</param>
     /// <param name="defaults">The "add default outlets" catalog.</param>
     /// <param name="mediaUrlSigner">Signs logo read URLs.</param>
@@ -104,7 +105,7 @@ public sealed partial class OutletService
         ICurrentStaffSessionAccessor staffSession,
         IExerciseClock exerciseClock,
         ExerciseFactsReader exerciseFacts,
-        OutletChannelGate channelGate,
+        IChannelEnablement channelGate,
         ISkinOverridesValidator skinValidator,
         OutletDefaultsCatalog defaults,
         IMediaUrlSigner mediaUrlSigner,
