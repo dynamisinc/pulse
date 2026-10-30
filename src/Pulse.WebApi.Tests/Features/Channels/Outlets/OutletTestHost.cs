@@ -30,7 +30,7 @@ using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// A minimal TestServer host wired the way <c>Program.cs</c> wires the outlet registry: persistence + exercise scoping,
-/// the exercise clock, <c>AddExerciseConfiguration()</c> (the channel gate's projection), <c>AddChannels()</c> +
+/// the exercise clock, <c>AddExerciseConfiguration()</c> (as Program.cs wires it), <c>AddChannels()</c> +
 /// <c>MapChannels()</c> behind the SHIPPED staff/controller filters, against the shared real-SQL database. Only the edges
 /// are doubled: the caller's identity and scope (switchable per call), the wall clock, and the media URL signer (BP's
 /// deterministic, scope-checking stand-in). A save recorder lists what each <c>SaveChanges</c> wrote, so tests can prove
