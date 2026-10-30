@@ -15,9 +15,10 @@
  * so an irreversible confirm (EndEx) keeps naming its target. It is dropped the
  * moment the exercise id changes, so another exercise's name is never shown.
  *
- * Returns `null` until a name has resolved for this exercise (or if the active
- * exercise is not among the assignments). Callers render generic copy in that
- * case; they must NEVER fall back to the scope's participant name.
+ * Returns `null` until a name has resolved for this exercise, and as soon as a
+ * SUCCESSFUL read no longer lists the active exercise (staff were unassigned).
+ * Callers render generic copy in that case; they must NEVER fall back to the
+ * scope's participant name.
  *
  * World: STAFF. Pure data hook.
  */
@@ -49,5 +50,9 @@ export function useActiveExerciseInternalName(): string | null {
     setKept({ exerciseId, name: resolved })
   }
   if (resolved !== null) return resolved
+  // Any data present came from a successful read (no placeholder/initial data), and a read
+  // without this exercise is authoritative, even if a LATER refetch failed (React Query keeps
+  // the previous data on error). The kept name only bridges the no-data gap after a reset.
+  if (query.data !== undefined) return null
   return kept !== null && sameExercise(kept.exerciseId, exerciseId) ? kept.name : null
 }

@@ -702,10 +702,11 @@ export function usePauseState(): PauseState {
       // ENGINE PAUSED drives the SAME kill switch <EngineControlBar> drives.
       // Entering the tier fires TWO independent requests (this kill-switch POST
       // and the pause-tier POST below), so the kill switch's own failure has to
-      // revert the TIER too: nothing else backstops it — no reaction-loop
-      // consumer reads the tier, so the kill switch is this tier's only
-      // enforcement, and a bar that snapped back to LIVE under a pill still
-      // reading ENGINE PAUSED is exactly the contradiction AC3 forbids.
+      // revert the TIER too. Since #675 the server's reaction loop also reads the
+      // tier and halts new drafts under ENGINE PAUSED, so the kill switch is no
+      // longer the tier's only enforcement; but a bar that snapped back to LIVE
+      // under a pill still reading ENGINE PAUSED is exactly the contradiction AC3
+      // forbids, so the two must still move together.
       applyEngineTierMode(exerciseId, transition, setEngineMode, () => {
         const reverted = revertLocally(transition, sequence)
         if (!reverted || USE_MOCK_DATA) return

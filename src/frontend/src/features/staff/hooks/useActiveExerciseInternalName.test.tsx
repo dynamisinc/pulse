@@ -11,7 +11,10 @@ import { selectInternalName, useActiveExerciseInternalName } from './useActiveEx
 import type { Enrollment } from '../types'
 
 const scope = { exerciseId: 'EX-1' }
-const assignments: { data: Enrollment[] | undefined } = { data: undefined }
+const assignments: { data: Enrollment[] | undefined; isSuccess: boolean } = {
+  data: undefined,
+  isSuccess: false,
+}
 
 vi.mock('@/core/exerciseContext', () => ({ useExerciseContext: () => scope }))
 vi.mock('./useStaffAssignments', () => ({ useStaffAssignments: () => assignments }))
@@ -23,6 +26,7 @@ function enrollment(exerciseId: string, exerciseName: string): Enrollment {
 beforeEach(() => {
   scope.exerciseId = 'EX-1'
   assignments.data = undefined
+  assignments.isSuccess = false
 })
 
 describe('selectInternalName', () => {
@@ -54,6 +58,32 @@ describe('useActiveExerciseInternalName', () => {
 
     scope.exerciseId = 'ex-2'
     assignments.data = undefined
+    rerender()
+    expect(result.current).toBeNull()
+  })
+
+  it('drops the kept name when a SUCCESSFUL read no longer lists the exercise', () => {
+    assignments.data = [enrollment('ex-1', 'Harbor Storm')]
+    assignments.isSuccess = true
+    const { result, rerender } = renderHook(() => useActiveExerciseInternalName())
+    expect(result.current).toBe('Harbor Storm')
+
+    assignments.data = [enrollment('ex-2', 'Other')] // unassigned from ex-1
+    rerender()
+    expect(result.current).toBeNull()
+  })
+
+  it('stays null when a refetch FAILS after a read that dropped the exercise (error keeps old data)', () => {
+    assignments.data = [enrollment('ex-1', 'Harbor Storm')]
+    assignments.isSuccess = true
+    const { result, rerender } = renderHook(() => useActiveExerciseInternalName())
+    expect(result.current).toBe('Harbor Storm')
+
+    assignments.data = [enrollment('ex-2', 'Other')]
+    rerender()
+    expect(result.current).toBeNull()
+
+    assignments.isSuccess = false // status 'error', previous data retained
     rerender()
     expect(result.current).toBeNull()
   })

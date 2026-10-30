@@ -229,10 +229,12 @@ public sealed class ExerciseReadinessService
 
         var hasFeed = await _dbContext.Posts
             .AsNoTracking()
-            // "Visible at scenario start": a live top-level post dated at or before the exercise's scenario start
-            // instant, CurrentScenarioTime (the clock starts from it). ScheduledStartAt is a real-world planning value
-            // that does NOT start the clock, so it is not compared against scenario-time posts. With no scenario
-            // start stored yet, any live top-level post counts.
+            // "Visible at scenario start": a live top-level post dated at or before Exercise.CurrentScenarioTime when
+            // one is stored. ScheduledStartAt is a real-world planning value and is never compared against
+            // scenario-time posts. KNOWN LIMIT: CurrentScenarioTime is a placeholder column that production does not
+            // write today (the engine starts its clock from its own registration), so in practice this falls back to
+            // "any live top-level post". Tighten it when a stored scenario start exists (engine-runtime dependency,
+            // see story 04's Currency check). Warning-tier only; it never blocks staging.
             .AnyAsync(
                 p => p.ExerciseId == exerciseId
                     && p.DeletedAt == null
