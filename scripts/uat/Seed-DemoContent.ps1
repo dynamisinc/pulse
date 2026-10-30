@@ -59,8 +59,8 @@
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
          bio, location, verified, avatar and banner. Only the fields that differ are sent.
       9. Posts the opening feed as controller-as-persona (POST /api/posts) in scenario-time order, with
-         scenarioTime = anchor - minutesBeforeAnchor. Replies go after their parents. Engagement baselines
-         are included.
+         scenarioTime = anchor - minutesBeforeAnchor and backdate = true (so a started server clock keeps that
+         time rather than stamping its own). Replies go after their parents. Engagement baselines are included.
      10. Pins each post the pack lists in pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7), its id
          resolved from the post key as step 9 resolved it. The last listed is pinned first: the Pinned tab shows
          the newest pin first (DF-5), so it reads in pack order while the exercise clock runs. With the clock
@@ -1648,6 +1648,9 @@ function New-PostRequestBody {
         scenarioTime    = $ScenarioTime
         timeZone        = $TimeZone
         origin          = 'controller-as-persona'
+        # The opening feed is deliberately backdated (anchor - minutesBeforeAnchor). The server stamps every post with its
+        # own exercise clock once that clock is started; backdate keeps this staff post's scenarioTime instead.
+        backdate        = $true
     }
     $media = @(Get-SeedList $Post 'media')
     if ($media.Count -gt 0) {

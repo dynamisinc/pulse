@@ -1361,9 +1361,11 @@ Describe 'End to end against the fake API' {
         $video.Form['width'] | Should -Be '96'
 
         $posts = @(Get-FakeCalls POST '/api/posts' | ForEach-Object { ConvertFrom-SeedJson $_.Body })
-        @($posts[0].Keys | Sort-Object) | Should -Be @('authorPersonaId', 'engagementBaseline', 'media', 'origin', 'scenarioTime', 'text', 'timeZone')
-        @($posts[2].Keys | Sort-Object) | Should -Be @('authorPersonaId', 'engagementBaseline', 'origin', 'parentPostId', 'scenarioTime', 'text', 'timeZone')
+        @($posts[0].Keys | Sort-Object) | Should -Be @('authorPersonaId', 'backdate', 'engagementBaseline', 'media', 'origin', 'scenarioTime', 'text', 'timeZone')
+        @($posts[2].Keys | Sort-Object) | Should -Be @('authorPersonaId', 'backdate', 'engagementBaseline', 'origin', 'parentPostId', 'scenarioTime', 'text', 'timeZone')
         $posts[0].origin | Should -Be 'controller-as-persona'
+        # The opening feed is backdated: every post asks the server to keep its scenarioTime over the exercise clock.
+        @($posts | ForEach-Object { $_.backdate }) | Should -Be @($true, $true, $true)
         $posts[0].timeZone | Should -Be 'America/Chicago'
         $posts[0].scenarioTime | Should -Be '2026-10-19T12:00:00.000Z'   # anchor - 120
         $posts[1].scenarioTime | Should -Be '2026-10-19T12:30:00.000Z'   # anchor - 90

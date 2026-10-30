@@ -20,6 +20,7 @@ using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
@@ -78,6 +79,7 @@ public sealed class ReactionLoopHostTests
         services.AddExerciseClock();
         services.AddEngineRuntimeSeams();
         services.AddReactionLoopHost();
+        services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
 
         return services.BuildServiceProvider();
     }

@@ -46,4 +46,11 @@
     </None>
   </ItemGroup>
 
+  <!-- press-room story 02: the checked-in hostile-PDF corpus (regenerate with its generate_corpus.py). -->
+  <ItemGroup>
+    <None Include="Features\Media\Documents\Corpus\*.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

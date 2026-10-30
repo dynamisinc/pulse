@@ -17,6 +17,8 @@ using Pulse.WebApi.Features.Social;
 /// <c>AddEngineRuntimeSeams</c> (the <see cref="Telemetry.IEngineTelemetryEmitter"/> +
 /// <see cref="Review.IEngineReviewStore"/>), <c>AddExerciseScoping</c>, and the social write path (the
 /// <see cref="Pulse.WebApi.Features.Social.PostIngestService"/> the publish funnel routes through).
+/// <c>AddPauseTierSteering</c> must also be wired (in any order): the driver and the ambient publish gate both
+/// require its <see cref="Steering.PauseTierRegistry"/>, and fail at resolution without it rather than reading Running.
 /// </summary>
 public static class ReactionLoopHostExtensions
 {

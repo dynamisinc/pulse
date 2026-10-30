@@ -65,6 +65,9 @@ public sealed class MediaUploadOptions
     /// <summary>The default video ceiling: 100 MiB.</summary>
     public const long DefaultVideoMaxBytes = 100L * 1024 * 1024;
 
+    /// <summary>The default document (PDF) ceiling: 20 MiB (press-room story 02).</summary>
+    public const long DefaultDocumentMaxBytes = 20L * 1024 * 1024;
+
     /// <summary>The default per-account upload rate (NFR-009).</summary>
     public const int DefaultPermitPerMinute = 30;
 
@@ -81,15 +84,22 @@ public sealed class MediaUploadOptions
     /// <summary>The streamed ceiling for a video (mp4/webm), enforced while reading.</summary>
     public long VideoMaxBytes { get; set; } = DefaultVideoMaxBytes;
 
+    /// <summary>
+    /// The streamed ceiling for a document (PDF), enforced while reading (<c>Media:Upload:DocumentMaxBytes</c>; the
+    /// story's <c>MaxDocumentBytes</c>, named like its siblings).
+    /// </summary>
+    public long DocumentMaxBytes { get; set; } = DefaultDocumentMaxBytes;
+
     /// <summary>Uploads per minute per ACCOUNT (participant <c>AccountId</c> / staff user id) — never per session or IP.</summary>
     public int PermitPerMinute { get; set; } = DefaultPermitPerMinute;
 
     /// <summary>
-    /// The request-body ceiling <c>POST /api/media</c> sets for itself: the larger per-kind ceiling plus
-    /// <see cref="MultipartOverheadBytes"/>.
+    /// The request-body ceiling <c>POST /api/media</c> (and <c>/api/media/documents</c>) sets for itself: the largest
+    /// per-kind ceiling plus <see cref="MultipartOverheadBytes"/>.
     /// </summary>
     /// <returns>The maximum request body size in bytes.</returns>
-    public long MaxRequestBodyBytes() => Math.Max(ImageMaxBytes, VideoMaxBytes) + MultipartOverheadBytes;
+    public long MaxRequestBodyBytes() =>
+        Math.Max(Math.Max(ImageMaxBytes, VideoMaxBytes), DocumentMaxBytes) + MultipartOverheadBytes;
 }
 
 /// <summary>The read-SAS expiry bucketing, bound from <see cref="SectionName"/> (§1.7).</summary>
