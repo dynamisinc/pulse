@@ -233,16 +233,16 @@ public sealed class OrgStaffLoginServiceTests
         login.Choice.Choose.Single(o => o.Slug == orgB.Slug).OrgName.Should().Be(orgB.Name);
 
         // A foreign (non-candidate) org is refused and does NOT consume the choice.
-        (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgC.Slug }))
+        (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgC.Slug }, "203.0.113.9"))
             .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
 
-        var chosen = await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgB.Slug });
+        var chosen = await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgB.Slug }, "203.0.113.9");
         chosen.Outcome.Should().Be(OrgStaffLoginOutcome.Authenticated);
         issuer.LastRequest!.PersonId.Should().Be(personB);
         issuer.LastRequest.ExerciseId.Should().BeNull();
 
         // Single use: the WHOLE choice was consumed, so the other candidate org cannot be minted from it.
-        (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgA.Slug }))
+        (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = login.Choice.ChoiceToken, OrgSlug = orgA.Slug }, "203.0.113.9"))
             .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
         issuer.IssueCount.Should().Be(1);
 
@@ -269,7 +269,7 @@ public sealed class OrgStaffLoginServiceTests
 
         await using var context = _kit.Context();
         (await OrgSignInTestKit.Service(context, new RecordingSessionIssuer())
-                .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }))
+                .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, null))
             .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
     }
 
@@ -291,7 +291,7 @@ public sealed class OrgStaffLoginServiceTests
 
         await using var context = _kit.Context();
         var issuer = new RecordingSessionIssuer();
-        (await OrgSignInTestKit.Service(context, issuer).ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }))
+        (await OrgSignInTestKit.Service(context, issuer).ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, null))
             .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
         issuer.IssueCount.Should().Be(0);
     }
@@ -308,7 +308,7 @@ public sealed class OrgStaffLoginServiceTests
 
         await using var context = _kit.Context();
         (await OrgSignInTestKit.Service(context, new RecordingSessionIssuer())
-                .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }))
+                .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, null))
             .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
     }
 
