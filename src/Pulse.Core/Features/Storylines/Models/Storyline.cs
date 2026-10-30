@@ -105,7 +105,8 @@ public sealed class Storyline
     /// engine has never reacted to it yet). Drives the reaction-cadence gate in the observe stage so the loop
     /// does not re-react to the same ongoing silence every tick. NOTE: this is distinct from
     /// <see cref="MinutesSinceLastOfficialResponse"/> — an engine reaction is NOT an official response and must
-    /// NOT reset the silence clock (the crowd's anxiety keeps building while officials stay silent).
+    /// NOT reset the silence clock (the crowd's anxiety keeps building while officials stay silent). Only moves
+    /// forward, except that <see cref="Tick"/> clamps it back to the clock when the scenario clock is rewound.
     /// </summary>
     public int? LastEngineReactionScenarioMinute { get; private set; }
 
@@ -258,6 +259,14 @@ public sealed class Storyline
         var intensityBefore = Intensity;
         var events = new List<IStorylineEvent>();
 
+        // A clock rewind (a runtime reset back to minute 0 keeps the registered storylines in memory) leaves the
+        // engine's reaction marker in the future; clamp it so the cadence gate restarts from the new minute
+        // instead of suppressing silence reactions until the clock climbs back past the old marker.
+        if (LastEngineReactionScenarioMinute > minute)
+        {
+            LastEngineReactionScenarioMinute = Math.Max(0, minute);
+        }
+
         // Silence accrues in scenario time (drives the brief's minutes-since-response + window opening).
         MinutesSinceLastOfficialResponse += elapsed;
 
@@ -380,7 +389,7 @@ public sealed class Storyline
     /// Records that the engine generated an inaction reaction for this storyline at
     /// <paramref name="scenarioMinute"/>, so the observe stage's reaction-cadence gate suppresses re-reacting
     /// to the same ongoing silence until the configured cadence elapses (ADP-011). Set monotonically — a
-    /// later, smaller minute never moves it backward. Does NOT touch
+    /// later, smaller minute never moves it backward (only a clock rewind does, via <see cref="Tick"/>). Does NOT touch
     /// <see cref="MinutesSinceLastOfficialResponse"/>: an engine reaction is not an official response.
     /// </summary>
     /// <param name="scenarioMinute">The scenario minute the reaction was generated, non-negative.</param>

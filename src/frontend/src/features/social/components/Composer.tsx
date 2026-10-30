@@ -104,6 +104,8 @@ export interface ComposerProps {
    * publish (live mode too), so the host can react — close a modal, refresh a
    * list. The composer never touches the feed itself. */
   onPosted?: UseComposePostOptions['onPosted']
+  /** The draft's starting text, read once on mount (channels-foundation 21). */
+  initialText?: string
 }
 
 /** Point an optional caller ref (object or callback) at `node`. */
@@ -118,10 +120,11 @@ const RING_STROKE = 2.5
 const RING_RADIUS = RING_SIZE / 2 - RING_STROKE
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
-export function Composer({ charLimit, onPosted }: ComposerProps) {
+export function Composer({ charLimit, onPosted, initialText }: ComposerProps) {
   const compose = useComposePost({
     ...(charLimit !== undefined ? { charLimit } : {}),
     ...(onPosted !== undefined ? { onPosted } : {}),
+    ...(initialText !== undefined ? { initialText } : {}),
   })
 
   // COR-015 / D1-011: the composer is absent in a read-only session, never a

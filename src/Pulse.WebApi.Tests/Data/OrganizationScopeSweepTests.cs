@@ -141,10 +141,12 @@ public sealed class OrganizationScopeSweepTests
         // the same read the overlay GET performs, never a client-supplied id.
         // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
+        // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
         // idle-db-autopause: +1 for WhiteNoisePacer's sweep — the noise level is checked (ids only) for exercises that
         // have pool rows, so the pacer can sleep while none is making noise; the same shape as the rehydrator's
         // existence check, each id then worked in its own resolved scope.
-        ["ResolvedScope"] = 31,
+        ["ResolvedScope"] = 32,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

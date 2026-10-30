@@ -1,0 +1,51 @@
+{
+  "$comment": "FROZEN exercise-portal wire contract (story 02, #768; PC-1, PC-3, PC-6). Read by BOTH suites: PortalContractParityTests (C#, src/Pulse.WebApi.Tests/Features/Portal) and portalWireContract.test.ts (TS). Additive-only after E3 Wave 1, and only with the orchestrator. Edit this file, the C# records/PortalVocabulary/PortalTelemetry and types.ts/vocabulary.ts/telemetry.ts together. DisplayStateDto, DisplayStaffDto, DisplayMode and DisplayTargetKind are Deferred (Q-35) and deliberately absent.",
+  "vocabulary": {
+    "moduleIds": ["topStories", "socialStream", "trending", "pressLatest", "weather"],
+    "defaultModuleOrder": ["topStories", "socialStream", "pressLatest", "weather", "trending"],
+    "layoutKeys": ["anchor"]
+  },
+  "moduleChannels": {
+    "topStories": "news",
+    "socialStream": "social",
+    "trending": "social",
+    "pressLatest": "press",
+    "weather": "weather"
+  },
+  "defaultLayoutKey": "anchor",
+  "limits": {
+    "maxResources": 25,
+    "mastheadNameMaxLength": 60,
+    "modulesJsonMaxBytes": 4096,
+    "skinOverridesJsonMaxBytes": 4096,
+    "resourceTitleMaxLength": 120,
+    "resourceSummaryMaxLength": 300
+  },
+  "telemetry": [
+    { "eventType": "portal_view", "emitter": "client", "entityType": "portal", "hasEntityId": false, "payloadKeys": [], "deferred": false },
+    { "eventType": "portal_module_click", "emitter": "client", "entityType": "portal_module", "hasEntityId": true, "payloadKeys": ["contentId"], "deferred": false },
+    { "eventType": "resource_view", "emitter": "client", "entityType": "portal_resource", "hasEntityId": true, "payloadKeys": [], "deferred": false },
+    { "eventType": "portal_config_changed", "emitter": "server", "entityType": "portal", "hasEntityId": true, "payloadKeys": ["fields"], "deferred": false },
+    { "eventType": "display_command", "emitter": "server", "entityType": "display", "hasEntityId": true, "payloadKeys": ["command"], "deferred": true },
+    { "eventType": "display_session_started", "emitter": "server", "entityType": "display", "hasEntityId": true, "payloadKeys": [], "deferred": true }
+  ],
+  "shapes": {
+    "PortalDto": ["masthead", "layoutKey", "modules", "skinOverrides", "hasResources"],
+    "PortalMastheadDto": ["name", "tagline", "logo"],
+    "PortalModuleDto": ["id", "channelId"],
+    "PortalResourceDto": ["id", "title", "summary", "bodyHtml", "media"],
+    "PortalModuleSettingDto": ["id", "enabled"],
+    "PortalConfigStaffDto": [
+      "portalName", "cityName", "tagline", "logo", "layoutKey", "modules", "skinOverrides", "resolvedName", "version"
+    ],
+    "PortalConfigWriteRequest": [
+      "portalName", "cityName", "tagline", "logoMediaId", "layoutKey", "modules", "skinOverrides", "version"
+    ],
+    "PortalResourceStaffDto": ["id", "title", "summary", "bodyHtml", "media", "sortOrder", "visible", "version"],
+    "PortalResourceWriteRequest": ["title", "summary", "bodyHtml", "mediaAssetId", "visible", "version"],
+    "PortalResourceReorderRequest": ["orderedIds"]
+  },
+  "participantShapes": ["PortalDto", "PortalMastheadDto", "PortalModuleDto", "PortalResourceDto"],
+  "participantForbiddenKeyPatterns": ["token", "hash", "version", "actinghumanid", "lastseen", "wallclock", "exerciseid"],
+  "participantAllowedWords": ["hashtag", "conversation"]
+}

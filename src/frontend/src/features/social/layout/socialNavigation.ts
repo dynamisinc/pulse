@@ -163,6 +163,20 @@ export const socialPaths = {
 }
 
 /**
+ * A post's in-channel permalink (channels-foundation 21): `socialPaths.thread`, for
+ * channels that link to a post from outside Social (the portal stream, a news embed).
+ * Host-relative, like every in-sim URL (COR-008).
+ */
+export function socialPostPath(postId: string, handle?: string): string {
+  return socialPaths.thread(postId, handle)
+}
+
+/** A persona's in-channel profile path (channels-foundation 21): `socialPaths.profile`. */
+export function socialProfilePath(handle: string): string {
+  return socialPaths.profile(handle)
+}
+
+/**
  * What a pathname resolves to. `'redirect'` covers `/`, every unknown path, and
  * every reserved first segment that is not itself a route (`/staff`,
  * `/staff/console`, `/login`, ...): all of them are sent to Home.

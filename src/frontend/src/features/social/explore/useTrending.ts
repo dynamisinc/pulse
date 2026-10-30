@@ -23,6 +23,9 @@ import { useScenarioTime } from '@/core/clock'
 import { useExploreBaseline } from './useExploreFeed'
 import { trendingTopics, type TrendingTopic } from './trending'
 
+// Channels-foundation 21: the ranked shape travels with the hook through the barrel.
+export type { TrendingTopic }
+
 const MINUTE_MS = 60_000
 
 export interface UseTrendingResult {

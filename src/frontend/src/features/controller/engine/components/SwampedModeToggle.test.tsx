@@ -307,6 +307,9 @@ describe('SwampedModeToggle — timeout auto-send not authorized (PROVIDER-GOVER
     expect(screen.getByTestId('swamped-mode-non-lead-note')).toHaveTextContent(
       'Only the lead controller can enable swamped mode.',
     )
+    // #787: the visible text is the compact label; the sentence is for AT and the tooltip.
+    expect(screen.getByTestId('swamped-mode-non-lead-note-label'))
+      .toHaveTextContent('Swamped: lead only')
   })
 
   it('a lead with timeoutAutoSendAuthorized === false cannot turn ON and sees the governance note', () => {

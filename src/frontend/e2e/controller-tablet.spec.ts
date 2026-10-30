@@ -441,6 +441,27 @@ test.describe('command band at 1180x820 (dev versus production)', () => {
     expect(prod.band.x + prod.band.width).toBeLessThanOrEqual(1180)
     await expect(page.getByTestId('lifecycle-end')).toBeVisible()
   })
+
+  // Accepted (Tom, 2026-10-29): a safety banner (provider degraded, swamped mode ON) may wrap
+  // the band to a second row at 1180, for leads too; the banners stay full text (NFR-001).
+  // What must hold: End exercise stays visible, on-screen and tappable, and nothing scrolls
+  // sideways. Degraded is the alarm state the mock can reach (the dev simulate button).
+  test('a safety banner may wrap the band, but End exercise stays on-screen and tappable', async ({ page }) => {
+    await openControllerConsole(page, false)
+    await page.getByTestId('engine-degraded-simulate').click()
+    await expect(page.getByText('PROVIDER DEGRADED', { exact: false })).toBeVisible()
+    await page.addStyleTag({ content: HIDE_DEV_BUTTON_CSS })
+
+    const { band, end, wraps } = await measureBand(page)
+    expect(wraps, 'the alarm banner wraps the band (the state this test is about)').toBe(true)
+    expect(end.x + end.width, 'End exercise ends inside the band (no clip)').toBeLessThanOrEqual(band.x + band.width)
+    expect(end.x + end.width, 'End exercise ends inside the viewport').toBeLessThanOrEqual(1180)
+    expect(end.y + end.height, 'End exercise sits inside the band').toBeLessThanOrEqual(band.y + band.height)
+    expect(end.y + end.height, 'End exercise sits inside the viewport').toBeLessThanOrEqual(820)
+    await expect(page.getByTestId('lifecycle-end')).toBeVisible()
+    await expectTouchTarget(page.getByTestId('lifecycle-end'))
+    await expectNoHorizontalScroll(page)
+  })
 })
 
 for (const viewport of [{ width: 1180, height: 820 }, { width: 1024, height: 768 }]) {
@@ -516,10 +537,12 @@ test.describe('roles at 1180x820', () => {
     await expect(page.getByText('EVALUATOR DASHBOARD')).toBeVisible()
   })
 
-  test('planner is not allowed into the console and sees no controller controls', async ({ page }) => {
+  // Story 17 admits planners to the console for content work (WR-002 chip); conduct stays
+  // controller-only.
+  test('planner enters the console content-only and sees no conduct controls', async ({ page }) => {
     await openConsole(page, 'planner')
-    await expect(page.getByText('Not allowed').first()).toBeVisible()
-    for (const id of ['engine-kill-switch', 'pause-pill', 'lifecycle-end', 'takedown-trigger', 'console-command-band']) {
+    await expect(page.getByTestId('console-planner-chip')).toBeVisible()
+    for (const id of ['engine-kill-switch', 'pause-pill', 'lifecycle-end', 'takedown-trigger']) {
       await expect(page.getByTestId(id), `${id} is visible to a planner`).toHaveCount(0)
     }
     await expect(page.getByRole('button', { name: /end exercise|pause control|take down/i })).toHaveCount(0)

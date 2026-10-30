@@ -19,6 +19,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.SharedAccess;
+using Pulse.WebApi.Features.Media.Documents;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 
@@ -83,6 +84,15 @@ public static class MediaEndpoints
     /// <summary>The upload route.</summary>
     public const string UploadRoute = "/api/media";
 
+    /// <summary>The document (download-only PDF) upload route (press-room story 02).</summary>
+    public const string DocumentUploadRoute = "/api/media/documents";
+
+    /// <summary>The document read route: metadata plus a signed, attachment-only download URL.</summary>
+    public const string DocumentReadRoute = "/api/media/documents/{id}";
+
+    /// <summary>The 422 error code for a document the structural scan rejected.</summary>
+    public const string DocumentRejectedErrorCode = "document-rejected";
+
     /// <summary>The staff library route.</summary>
     public const string LibraryRoute = "/api/staff/media";
 
@@ -130,6 +140,12 @@ public static class MediaEndpoints
 
         services.AddScoped<MediaUploadService>();
 
+        // press-room story 02: the deny-list scanner, and the participant document gate — DEFAULT DENY, registered
+        // with TryAdd so press story 04's real authorizer wins whichever slice registers first.
+        services.TryAddSingleton<IDocumentScanner, PdfDenyListScanner>();
+        services.TryAddScoped<IDocumentUploadAuthorizer, DenyAllDocumentUploadAuthorizer>();
+        services.AddScoped<DocumentReadService>();
+
         // #379: POST /api/media carries RefuseWhenWritesPaused().
         services.TryAddParticipantWriteGate();
         services.AddScoped<MediaLibraryService>();
@@ -163,6 +179,14 @@ public static class MediaEndpoints
             .RefuseWhenWritesPaused();
         writes.MapPost(UploadRoute, UploadAsync)
             .RequireRateLimiting(MediaUploadRateLimitPolicy);
+
+        // press-room story 02: PDFs only, same filters and the same per-account rate limit; a participant also needs
+        // IDocumentUploadAuthorizer (default deny), checked by the service before the body is read.
+        writes.MapPost(DocumentUploadRoute, UploadDocumentAsync)
+            .RequireRateLimiting(MediaUploadRateLimitPolicy);
+
+        // The uploader (or assigned staff) reads a document back; every other id is the same 404.
+        endpoints.MapGet(DocumentReadRoute, GetDocumentAsync);
 
         // Staff-only: a live staff session (401 otherwise) assigned to the resolved exercise (403 otherwise).
         var staff = endpoints.MapGroup(string.Empty).AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
@@ -318,6 +342,55 @@ public static class MediaEndpoints
                 new MediaErrorDto(StoreUnavailableErrorCode), statusCode: StatusCodes.Status503ServiceUnavailable),
 
             // Unreachable; fail closed rather than emit a bare 200.
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
+    /// <summary>
+    /// <c>POST /api/media/documents</c> — multipart PDF upload, streamed and deny-list scanned. 201
+    /// <see cref="DocumentUploadView"/>; 400/401/403/413/415; 422 <see cref="DocumentRejectedDto"/>; 429; 503.
+    /// </summary>
+    private static async Task<IResult> UploadDocumentAsync(
+        HttpContext httpContext,
+        [FromServices] MediaUploadService uploadService,
+        [FromServices] IOptions<MediaUploadOptions> uploadOptions,
+        CancellationToken cancellationToken)
+    {
+        ApplyRequestSizeLimit(httpContext, uploadOptions.Value);
+
+        var result = await uploadService.UploadDocumentAsync(httpContext.Request.ContentType, httpContext.Request.Body, cancellationToken);
+        return result.Outcome switch
+        {
+            MediaUploadOutcome.Created => Results.Json(result.Document, statusCode: StatusCodes.Status201Created),
+            MediaUploadOutcome.ScopeUnresolved => Results.Unauthorized(),
+            MediaUploadOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+            MediaUploadOutcome.Invalid => Results.BadRequest(result.Error),
+            MediaUploadOutcome.TooLarge => Results.Json(result.Error, statusCode: StatusCodes.Status413PayloadTooLarge),
+            MediaUploadOutcome.UnsupportedMediaType => Results.Json(result.Error, statusCode: StatusCodes.Status415UnsupportedMediaType),
+            MediaUploadOutcome.Rejected => Results.Json(
+                new DocumentRejectedDto(DocumentRejectedErrorCode, result.Reason!), statusCode: StatusCodes.Status422UnprocessableEntity),
+            MediaUploadOutcome.StoreUnavailable => Results.Json(
+                new MediaErrorDto(StoreUnavailableErrorCode), statusCode: StatusCodes.Status503ServiceUnavailable),
+
+            // Unreachable; fail closed rather than emit a bare 200.
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
+    /// <summary><c>GET /api/media/documents/{id}</c> — 200 <see cref="DocumentDownloadView"/>; 401; 404 (one answer); 503.</summary>
+    private static async Task<IResult> GetDocumentAsync(
+        string id,
+        [FromServices] DocumentReadService readService,
+        CancellationToken cancellationToken)
+    {
+        var result = await readService.GetAsync(id, cancellationToken);
+        return result.Outcome switch
+        {
+            DocumentReadOutcome.Ok => Results.Ok(result.View),
+            DocumentReadOutcome.ScopeUnresolved => Results.Unauthorized(),
+            DocumentReadOutcome.NotFound => Results.NotFound(),
+            DocumentReadOutcome.StoreUnavailable => Results.Json(
+                new MediaErrorDto(StoreUnavailableErrorCode), statusCode: StatusCodes.Status503ServiceUnavailable),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }

@@ -93,3 +93,52 @@ public sealed record StaffMediaAssetView(
 /// <summary>The <c>{"error":"&lt;code&gt;"}</c> body 429/503 answer with (implementation.md §1.1).</summary>
 /// <param name="Error">The machine-readable error code.</param>
 public sealed record MediaErrorDto([property: JsonPropertyName("error")] string Error);
+
+/// <summary>
+/// The <c>POST /api/media/documents</c> 201 body (press-room story 02; PC-1 <c>payload.document</c>): exactly
+/// <c>{ mediaId, fileName, sizeBytes }</c> — no URL, no page count, no extracted text. For a document the download
+/// name is participant-visible BY DESIGN (it names the attachment a release carries); it is the normalized,
+/// <c>.pdf</c>-terminated name, never the raw client value.
+/// </summary>
+/// <param name="MediaId">The new <see cref="MediaAsset"/> id.</param>
+/// <param name="FileName">The normalized download name.</param>
+/// <param name="SizeBytes">The stored size in bytes.</param>
+public sealed record DocumentUploadView(
+    [property: JsonPropertyName("mediaId")] string MediaId,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes)
+{
+    /// <summary>Projects a stored document.</summary>
+    /// <param name="asset">The document asset.</param>
+    /// <returns>The view.</returns>
+    public static DocumentUploadView FromAsset(MediaAsset asset)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+
+        return new DocumentUploadView(asset.Id.ToString(), asset.OriginalFileName, asset.Bytes);
+    }
+}
+
+/// <summary>
+/// The <c>GET /api/media/documents/{id}</c> 200 body: the upload view plus a signed, download-only URL (the signer
+/// pins <c>application/pdf</c> and an <c>attachment</c> disposition).
+/// </summary>
+/// <param name="MediaId">The document id.</param>
+/// <param name="FileName">The normalized download name.</param>
+/// <param name="SizeBytes">The stored size in bytes.</param>
+/// <param name="Url">The signed download URL.</param>
+public sealed record DocumentDownloadView(
+    [property: JsonPropertyName("mediaId")] string MediaId,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes,
+    [property: JsonPropertyName("url")] string Url);
+
+/// <summary>
+/// The 422 body for a document the structural scan rejected: <c>{"error":"document-rejected","reason":"&lt;code&gt;"}</c>.
+/// The reason is one of <c>DocumentRejectionReasons</c> — never the matched token, its offset or any scanner detail.
+/// </summary>
+/// <param name="Error">Always <c>document-rejected</c>.</param>
+/// <param name="Reason">The reason code.</param>
+public sealed record DocumentRejectedDto(
+    [property: JsonPropertyName("error")] string Error,
+    [property: JsonPropertyName("reason")] string Reason);
