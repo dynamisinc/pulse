@@ -28,9 +28,8 @@ registerSkinTokens('newsline7', tokens, { fonts })
 Two dev-time notes:
 - **HMR.** Editing a registered token file re-runs it with new values, which is a "second, different
   registration" and throws; reload the page after a token edit.
-- **Small fonts.** Vite inlines assets under 4 KiB as `data:` URIs, which the registry (and CSP) reject.
-  Story 23 sets `assetsInlineLimit` so fonts are never inlined; until it is on your branch, import tiny
-  subsets with `?no-inline`.
+- **Small fonts.** Vite would inline assets under 4 KiB as `data:` URIs, which the registry (and CSP)
+  reject; story 23's `assetsInlineLimit` keeps every font a file, so `?url` is all you need.
 
 Token files name font **stacks** only, and every stack must end in a generic family (`serif`,
 `sans-serif`, `monospace`, `system-ui`, …) so a missing or blocked face falls back cleanly. Keeping
