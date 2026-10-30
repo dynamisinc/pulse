@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -103,6 +104,7 @@ public sealed class ChromeTestHost : IAsyncDisposable
 
         // The orchestrator's order: 01b's constant-preserving defaults first, story 02's contribution after.
         builder.Services.AddExerciseConfiguration();
+        builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
         if (includeComplianceChromeSlice)
         {
             builder.Services.AddComplianceChromeConfig();

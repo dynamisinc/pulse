@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.ParticipantShell;
@@ -97,6 +98,7 @@ public sealed class ExerciseConfigurationTestHost : IAsyncDisposable
 
         // The feature under test, in the orchestrator's order: 01b's defaults first, contributors after.
         builder.Services.AddExerciseConfiguration();
+        builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
         configureContributor?.Invoke(builder.Services);
 
         // The server-authoritative request scope (fixed per host; null = the fail-closed case).
