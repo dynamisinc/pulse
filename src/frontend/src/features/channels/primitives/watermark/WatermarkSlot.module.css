@@ -1,0 +1,38 @@
+/*
+ * features/channels/primitives/watermark/WatermarkSlot.module.css
+ * The EXERCISE chip (NFR-008). Colours are FIXED, not skin tokens: white on near-black
+ * is >= 4.5:1 whatever the media or the outlet skin (pinned by WatermarkSlot.test.tsx).
+ */
+
+.slot {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  /* Above the media and the ExerciseBands (z-index 1); below the host's controls (z >= 3). */
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Clear a video's control row (native bar + the player's own buttons). */
+.clearControls {
+  bottom: 56px;
+}
+
+/* Not required: keep the box, hide the ink, so toggling it shifts nothing. */
+.reserved {
+  visibility: hidden;
+}
+
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: #111418;
+  color: #ffffff;
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+}
