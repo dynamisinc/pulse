@@ -11,7 +11,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Enablement;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Xunit;
 
@@ -202,13 +204,18 @@ public sealed class ChannelEnablementTests : IDisposable
     private ChannelEnablement NewEnablement(Guid? exerciseId) =>
         new(NewContext(exerciseId), new ExerciseContext { CurrentExerciseId = exerciseId });
 
-    private ParticipantShellConfigService NewNavService(Guid exerciseId) =>
-        new(
-            NewContext(exerciseId),
-            new ExerciseContext { CurrentExerciseId = exerciseId },
+    private ParticipantShellConfigService NewNavService(Guid exerciseId)
+    {
+        var scope = new ExerciseContext { CurrentExerciseId = exerciseId };
+        var context = NewContext(exerciseId);
+        return new(
+            context,
+            scope,
             new ConstantChromeConfigProjection(),
             new ConstantShellVariantProjection(),
-            new ConstantOverlayStateProjection());
+            new ConstantOverlayStateProjection(),
+            new AlertReader(context, scope, new ExerciseClockService(TimeProvider.System), TimeProvider.System));
+    }
 
     private PulseDbContext NewContext(Guid? exerciseId) =>
         new(
