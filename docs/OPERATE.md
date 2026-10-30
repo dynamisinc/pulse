@@ -98,8 +98,9 @@ only for the window between them — but a tab holding the old bundle stays blan
       (revert anything the Tmp run wrote to it).
    5. `dotnet ef migrations has-pending-model-changes --project src/Pulse.WebApi/Pulse.WebApi.csproj` must report none.
    6. Run `A3SetupContentParticipantNameMigrationTests` and `IdempotentMigrationScriptTests`. The test
-      constants `MigrationUnderTest` and `BeforeA3` pin the migration ids; update `BeforeA3` if the
-      predecessor on `main` changed.
+      constants `MigrationUnderTest`, `PreviousMigration` (A3 tests) and `BeforeA3` (script tests) pin the
+      migration ids; update both predecessor constants if the predecessor on `main` changed, or A3's `Down`
+      test also rolls back the migrations between them.
 4. **Rollback: no workflow runs a `Down`.** *Deploy Backend* has no ref input (its only input is the
    environment), so roll back the backend with a **revert PR**. Reverting the code without a `Down` is
    safe: the new columns are additive (a nullable column, and `bit NOT NULL DEFAULT 0`) and the old
