@@ -91,7 +91,7 @@ export function FollowButton({
   initiallyFollowing,
   onFollowerCountChange,
 }: FollowButtonProps) {
-  const { isFollowing, followerCount, canFollow, pending, toggleFollow } = useFollow({
+  const { isFollowing, followerCount, canFollow, pending, errorMessage, toggleFollow } = useFollow({
     personaId,
     initialFollowerCount,
     initiallyFollowing,
@@ -109,23 +109,35 @@ export function FollowButton({
   const buttonClass = isFollowing ? `${styles.button} ${styles.following}` : styles.button
 
   return (
-    <button
-      type="button"
-      className={buttonClass}
-      data-testid="follow-button"
-      data-following={isFollowing}
-      aria-pressed={isFollowing}
-      aria-label={label}
-      aria-busy={pending}
-      disabled={pending}
-      onClick={toggleFollow}
-    >
-      <FontAwesomeIcon
-        icon={isFollowing ? faUserCheck : faUserPlus}
-        aria-hidden="true"
-        className={styles.icon}
-      />
-      <span className={styles.text}>{isFollowing ? 'Following' : 'Follow'}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={buttonClass}
+        data-testid="follow-button"
+        data-following={isFollowing}
+        aria-pressed={isFollowing}
+        aria-label={label}
+        aria-busy={pending}
+        disabled={pending}
+        onClick={toggleFollow}
+      >
+        <FontAwesomeIcon
+          icon={isFollowing ? faUserCheck : faUserPlus}
+          aria-hidden="true"
+          className={styles.icon}
+        />
+        <span className={styles.text}>{isFollowing ? 'Following' : 'Follow'}</span>
+      </button>
+      {/* Always mounted so the polite region exists BEFORE its text changes (W2, #661). */}
+      <span
+        className={styles.srOnly}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="follow-notice"
+      >
+        {errorMessage}
+      </span>
+    </>
   )
 }

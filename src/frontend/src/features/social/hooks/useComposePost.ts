@@ -118,6 +118,12 @@ import { publishPost } from '../services/livePostActions'
 import { postStore } from '../services/postStore'
 import { narrowCreatedPost, ownPostStore } from '../services/ownPostStore'
 import { sanitizeText } from '../services/sanitize'
+import {
+  EXERCISE_ENDED_WRITE_MESSAGE,
+  isEndedRefusal,
+  useCanWrite,
+  useExerciseEndedFlag,
+} from '@/features/participant-shell/writeGate'
 
 /** Default per-exercise character limit (SOC-001); overridable via a prop. */
 export const DEFAULT_CHAR_LIMIT = 280
@@ -189,7 +195,11 @@ export interface PublishFailure {
  *    408 and the other 5xx -> 'failed' (Retry offered);
  *  - any other 4xx -> 'refused' (no Retry).
  */
-export function classifyPublishFailure(failure: unknown, isReply: boolean): PublishFailure {
+export function classifyPublishFailure(
+  failure: unknown,
+  isReply: boolean,
+  ended = false,
+): PublishFailure {
   const unconfirmed: PublishFailure = {
     kind: 'unconfirmed',
     message: publishUnconfirmedMessage(isReply),
@@ -200,6 +210,10 @@ export function classifyPublishFailure(failure: unknown, isReply: boolean): Publ
   // A 2xx the client could not use, or a gateway timeout: the origin may have committed.
   if (status !== undefined && ((status >= 200 && status < 300) || status === 504)) {
     return unconfirmed
+  }
+  // A composer that was open at EndEx: the gate 403s every write. Say why (no Retry).
+  if (isEndedRefusal(failure, ended)) {
+    return { kind: 'refused', message: EXERCISE_ENDED_WRITE_MESSAGE }
   }
   if (status === 429) {
     return { kind: 'failed', message: publishRateLimitedMessage(isReply) }
@@ -399,6 +413,14 @@ export interface UseComposePostResult {
   readonly canPost: boolean
   /** Whether the composer must not render at all (observer mode, COR-015). */
   readonly isReadOnly: boolean
+  /** The exercise has ended: nothing can be sent. An already-open draft stays readable. */
+  readonly isEnded: boolean
+  /**
+   * The composer should not render: ended AND there was no draft when it ended. A draft that
+   * is open at EndEx stays mounted (readable and copyable, submit and media off) so nothing is
+   * lost silently and focus is not dropped.
+   */
+  readonly hiddenByEnd: boolean
   /** All conditions met to publish (content, ready tray with alts, within limit, canPost). */
   readonly canPublish: boolean
   /** Why Post is disabled for a MEDIA reason the author can fix, or `undefined`. */
@@ -418,6 +440,13 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const { charLimit = DEFAULT_CHAR_LIMIT, parentPostId, onPosted, initialText = '' } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
+  // Read-only session OR exercise ended: every write is off (personal READ views are unaffected).
+  const canWrite = useCanWrite()
+  const ended = useExerciseEndedFlag()
+  const endedRef = useRef(ended)
+  useEffect(() => {
+    endedRef.current = ended
+  }, [ended])
 
   const [text, setTextState] = useState(initialText)
   const [items, setItems] = useState<readonly ComposerAttachment[]>([])
@@ -469,6 +498,16 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const isLow = showCount && !isOverLimit
 
   const isReadOnly = session.isReadOnly
+  const hasDraft = text.trim().length > 0 || items.length > 0
+  // Latch, at the moment `ended` turns true, whether a draft was open (adjusted during render,
+  // not in an effect, so it never paints a frame with the draft gone).
+  const [endedSeen, setEndedSeen] = useState(false)
+  const [keptAtEnd, setKeptAtEnd] = useState(false)
+  if (ended !== endedSeen) {
+    setEndedSeen(ended)
+    setKeptAtEnd(ended && hasDraft)
+  }
+  const hiddenByEnd = ended && !keptAtEnd
   const canPost = session.personaId !== undefined
 
   // "Has content" is judged on what would be SENT: text that is only markup
@@ -478,7 +517,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const isUploading = items.some(item => item.status === 'uploading')
   const hasMedia = items.length > 0
   const canPublish =
-    (hasText || hasMedia) && mediaReady && !isOverLimit && canPost && !isReadOnly && !isPublishing
+    (hasText || hasMedia) && mediaReady && !isOverLimit && canPost && canWrite && !isPublishing
 
   const mediaBlockReason = useMemo((): string | undefined => {
     if (items.some(item => item.status === 'failed')) {
@@ -518,7 +557,12 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       .catch((failure: unknown) => {
         // A cancel/remove already dropped the item; nothing to report.
         if (isAbortError(failure)) return
-        patchItem(item.key, { status: 'failed', error: uploadFailureMessage(failure) })
+        const endedRefusal =
+          endedRef.current && failure instanceof MediaUploadError && failure.status === 403
+        patchItem(item.key, {
+          status: 'failed',
+          error: endedRefusal ? EXERCISE_ENDED_WRITE_MESSAGE : uploadFailureMessage(failure),
+        })
       })
       .finally(() => {
         controllersRef.current.delete(item.key)
@@ -567,7 +611,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     // Re-derive every guard locally rather than trusting a stale `canPublish`
     // closure, and narrow `personaId` to a string (no non-null assertion).
     const personaId = session.personaId
-    if (session.isReadOnly || personaId === undefined) return
+    if (!canWrite || personaId === undefined) return
     if (publishingRef.current) return
     if ([...text].length > charLimit) return
 
@@ -637,7 +681,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
       .catch((failure: unknown) => {
         if (!mountedRef.current) return
         // The draft is untouched: this is what makes Retry safe and lossless.
-        setPublishFailure(classifyPublishFailure(failure, isReply))
+        setPublishFailure(classifyPublishFailure(failure, isReply, endedRef.current))
       })
       .finally(() => {
         publishingRef.current = false
@@ -648,7 +692,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     timeZone,
     session.personaId,
     session.actingHumanId,
-    session.isReadOnly,
+    canWrite,
     text,
     charLimit,
     parentPostId,
@@ -679,6 +723,8 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     isOverLimit,
     canPost,
     isReadOnly,
+    isEnded: ended,
+    hiddenByEnd,
     canPublish,
     mediaBlockReason,
     publish,

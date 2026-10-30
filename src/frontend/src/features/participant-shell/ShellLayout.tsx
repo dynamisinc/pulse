@@ -108,7 +108,8 @@ import { ComplianceChrome } from './components/ComplianceChrome'
 import { AlertBar } from './components/AlertBar/AlertBar'
 import { ChannelNav } from './components/ChannelNav'
 import { ParticipantSignOutControl } from './components/ParticipantSignOutControl'
-import { OverlayLayer } from './components/OverlayLayer'
+import { OverlayLayer, useExerciseEnded } from './components/OverlayLayer'
+import { ExerciseEndedProvider } from './writeGate'
 
 export interface ShellLayoutProps {
   /** The channel mounted into the shell (social now; portal/news/press/weather later). */
@@ -170,6 +171,8 @@ export function ShellLayout({ children }: ShellLayoutProps) {
 
   const { variant, pending: variantPending } = useShellState()
   const { now: scenarioNow } = useScenarioTime()
+  // Exercise ended (read-only review): published to the write affordances; never remounts.
+  const ended = useExerciseEnded()
 
   // How many mounted channels currently render their own account control (see the
   // module header). A count, not a boolean, so overlapping claims (a channel swap)
@@ -183,42 +186,44 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   const mountProps: ShellMountProps = { variant, scenarioNow, variantPending }
 
   return (
-    <div data-testid="pulse-shell-root" style={shellRootStyle}>
-      {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
+    <ExerciseEndedProvider ended={ended}>
+      <div data-testid="pulse-shell-root" style={shellRootStyle}>
+        {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
           inset vars the content region below consumes. */}
-      <ComplianceChrome />
+        <ComplianceChrome />
 
-      {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
+        {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
           Persists across every channel; renders a zero-height empty live
           region when there are no active alerts. */}
-      <AlertBar />
+        <AlertBar />
 
-      {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
+        {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
           the content region (never inside its reset boundary) — it is shell
           chrome, not channel content (COR-060). */}
-      <ChannelNav />
+        <ChannelNav />
 
-      {/* Participant sign-out (feature: login, story 04). Its own sibling —
+        {/* Participant sign-out (feature: login, story 04). Its own sibling —
           see the module header for why this is not folded into ChannelNav.
           Absent while a mounted channel has claimed the account control
           (it renders its own Sign out). */}
-      {accountClaims === 0 && <ParticipantSignOutControl />}
+        {accountClaims === 0 && <ParticipantSignOutControl />}
 
-      {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
+        {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
           inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
-      <div data-testid="pulse-shell-content-region" style={contentRegionStyle}>
-        <ShellContextProvider value={mountProps}>
-          <ShellAccountControlClaimProvider value={claimAccountControl}>
-            {children}
-          </ShellAccountControlClaimProvider>
-        </ShellContextProvider>
-      </div>
+        <div data-testid="pulse-shell-content-region" style={contentRegionStyle}>
+          <ShellContextProvider value={mountProps}>
+            <ShellAccountControlClaimProvider value={claimAccountControl}>
+              {children}
+            </ShellAccountControlClaimProvider>
+          </ShellContextProvider>
+        </div>
 
-      {/* Overlay layer: pause/EndEx (z=overlay, below chrome) + break-fiction
+        {/* Overlay layer: pause/EndEx (z=overlay, below chrome) + break-fiction
           (z=breakFiction, above everything incl. chrome). Renders null when
           overlayState is 'none'. Kept last so its paint order matches its
           z-order for equal-context layers. */}
-      <OverlayLayer />
-    </div>
+        <OverlayLayer />
+      </div>
+    </ExerciseEndedProvider>
   )
 }

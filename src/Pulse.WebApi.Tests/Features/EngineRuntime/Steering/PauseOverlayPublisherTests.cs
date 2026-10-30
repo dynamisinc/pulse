@@ -189,7 +189,7 @@ public sealed class PauseOverlayPublisherTests
             "WR-002: the participant push frame is EXACTLY the GET /api/overlay-state body plus the ordering sequence — "
             + "every key the GET serves, nothing else (generic, so a field added to OverlayStateResponse is covered)");
         getKeys.Should().BeEquivalentTo(
-            ["state", "register", "message"], "the frozen OverlayState triple, today");
+            ["state", "register", "message", "ended"], "the frozen OverlayState triple plus the additive 'ended' flag");
 
         json.Should().NotContain(
             "human-director-42",
@@ -206,7 +206,7 @@ public sealed class PauseOverlayPublisherTests
             .Select(property => property.Name);
 
         propertyNames.Should().BeEquivalentTo(
-            ["State", "Register", "Message", "Sequence"],
+            ["State", "Register", "Message", "Ended", "Sequence"],
             "a future maintainer must not be able to leak provenance/attribution through this projection — it is "
             + "built ONLY from the composed OverlayStateResponse, which has no staff field to project");
     }

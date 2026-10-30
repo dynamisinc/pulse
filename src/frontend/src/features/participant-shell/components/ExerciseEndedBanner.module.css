@@ -1,0 +1,35 @@
+/* Exercise-ended banner: calm, out-of-fiction slate band. Participant world only. */
+.banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px max(12px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px));
+  min-height: 28px;
+  background: #1f2933;
+  color: #f5f7fa;
+  border-bottom: 1px solid #52606d;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.safeTop {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
+}
+
+.icon {
+  flex: none;
+}
+
+.text {
+  min-width: 0;
+}

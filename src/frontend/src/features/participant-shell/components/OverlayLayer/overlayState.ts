@@ -103,7 +103,7 @@ import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useExerciseContext, useOptionalExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { registerSessionReset } from '@/core/auth/sessionReset'
@@ -118,7 +118,7 @@ const OVERLAY_STATE_PATH = '/overlay-state'
 const OVERLAY_STATE_CHANGED_EVENT = 'OverlayStateChanged'
 
 /** Wire shape of the (future) `/overlay-state` response body. */
-type OverlayStateResponseBody = OverlayState
+type OverlayStateResponseBody = Omit<OverlayState, 'ended'> & { readonly ended?: unknown }
 
 /**
  * All valid overlay states / registers. The runtime guards check membership
@@ -164,6 +164,7 @@ const MOCK_OVERLAY_STATE: OverlayStateResponseBody = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 /**
@@ -204,6 +205,7 @@ async function fetchOverlayState(): Promise<OverlayState> {
     state: response.data.state,
     register: response.data.register,
     message: response.data.message,
+    ended: (response.data as { ended?: unknown }).ended === true,
   }
 }
 
@@ -218,6 +220,7 @@ const DEFAULT_OVERLAY_STATE: OverlayState = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +239,7 @@ interface WireOverlayState {
   readonly state: OverlayStateKind
   readonly register: OverlayRegister
   readonly message: string
+  readonly ended?: unknown
   readonly sequence?: number
 }
 
@@ -262,11 +266,22 @@ function readSequence(wire: WireOverlayState): number {
 }
 
 function toOverlayState(wire: WireOverlayState): OverlayState {
-  return { state: wire.state, register: wire.register, message: wire.message }
+  return {
+    state: wire.state,
+    register: wire.register,
+    message: wire.message,
+    ended: wire.ended === true,
+  }
 }
 
 /** The current live snapshot. Starts at the safe `'none'` default (fail closed). */
 let liveSnapshot: OverlayState = DEFAULT_OVERLAY_STATE
+
+/**
+ * True once the server has answered at least once for THIS session (a GET, a push, or a 403
+ * clear). Until then `ended` is only the first-paint scope seed; after, it is authoritative.
+ */
+let liveSettled = false
 
 /** The `sequence` of the most recently applied state — the stale-push cutoff. */
 let lastAppliedSequence = 0
@@ -306,6 +321,10 @@ function notifyLive(): void {
 }
 
 /** Returns the live snapshot. Stable reference until the next change. */
+function getLiveSettled(): boolean {
+  return liveSettled
+}
+
 function getLiveSnapshot(): OverlayState {
   return liveSnapshot
 }
@@ -325,11 +344,15 @@ function subscribeLive(listener: () => void): () => void {
  */
 function applyLive(next: OverlayState, sequence: number): void {
   lastAppliedSequence = sequence
+  const wasSettled = liveSettled
+  liveSettled = true
   if (
     next.state === liveSnapshot.state &&
     next.register === liveSnapshot.register &&
-    next.message === liveSnapshot.message
+    next.message === liveSnapshot.message &&
+    next.ended === liveSnapshot.ended
   ) {
+    if (!wasSettled) notifyLive()
     return
   }
   liveSnapshot = next
@@ -492,6 +515,9 @@ function resetLiveForSession(): void {
   fetchGeneration += 1
   // Back to the safe 'none' AND to sequence 0: the next exercise counts its own sequence.
   applyLive(DEFAULT_OVERLAY_STATE, 0)
+  // The new session has not been heard from yet.
+  liveSettled = false
+  notifyLive()
   if (!stillMounted) return
   // A shell is still subscribed: nothing will call ensureStarted() for it again, so
   // re-attach here. A microtask later, so core/realtime's stop() has begun; and only with a
@@ -506,6 +532,7 @@ function resetLiveForTests(): void {
   detachLive()
   attachedConnection = realtimeConnection
   liveSnapshot = DEFAULT_OVERLAY_STATE
+  liveSettled = false
   lastAppliedSequence = 0
   fetchGeneration = 0
   appliedPushCount = 0
@@ -520,6 +547,7 @@ function resetLiveForTests(): void {
  */
 export const liveOverlayStateStore = {
   getSnapshot: getLiveSnapshot,
+  isSettled: getLiveSettled,
   subscribe: subscribeLive,
   ensureStarted: ensureStartedLive,
   resetForTests: resetLiveForTests,
@@ -542,6 +570,11 @@ export const liveOverlayStateStore = {
  * COR-001) — this module never sends an exercise id.
  */
 export function useOverlayState(): OverlayState {
+  return useOverlayStateResolution().state
+}
+
+/** The overlay state plus whether the server has answered yet (see {@link useExerciseEnded}). */
+function useOverlayStateResolution(): { readonly state: OverlayState; readonly settled: boolean } {
   const { exerciseId } = useExerciseContext()
 
   // Live path only: kick off the seeding GET + the realtime subscription once
@@ -555,6 +588,11 @@ export function useOverlayState(): OverlayState {
     liveOverlayStateStore.getSnapshot,
     liveOverlayStateStore.getSnapshot,
   )
+  const liveSettledNow = useSyncExternalStore(
+    liveOverlayStateStore.subscribe,
+    liveOverlayStateStore.isSettled,
+    liveOverlayStateStore.isSettled,
+  )
 
   const { data } = useQuery({
     queryKey: ['participant-shell', 'overlay-state', exerciseId],
@@ -562,7 +600,26 @@ export function useOverlayState(): OverlayState {
     enabled: USE_MOCK_DATA,
   })
 
-  return USE_MOCK_DATA ? data ?? DEFAULT_OVERLAY_STATE : live
+  return USE_MOCK_DATA
+    ? { state: data ?? DEFAULT_OVERLAY_STATE, settled: data !== undefined }
+    : { state: live, settled: liveSettledNow }
 }
 
 registerSessionReset(resetLiveForSession, import.meta.hot)
+
+/**
+ * True once the exercise has ended (lifecycle `completed`): participants may still READ, but every
+ * write is refused server-side (403). Drives the ended banner and the write-disable seam.
+ * Absent on the wire is false. The caller may OR in `scope.status === 'completed'` as a
+ * first-paint seed ONLY, until the overlay answer has landed (a Reopen can leave completed).
+ */
+export function useExerciseEnded(): boolean {
+  const { state, settled } = useOverlayStateResolution()
+  // First-paint seed ONLY: the bound scope already says `completed` before the overlay answer
+  // lands, so no write control flashes. Once the server has answered, `ended` is authoritative,
+  // so a future Reopen (completed -> live) with an `ended: false` push clears ended mode without
+  // a reload.
+  const scope = useOptionalExerciseContext()
+  if (settled) return state.ended
+  return state.ended || scope?.status === 'completed'
+}

@@ -200,13 +200,25 @@ public static class LifecycleOverlayComposer
     public static OverlayContribution FromLifecycle(string? state) =>
         // RULING (Tom, 2026-10-19, #390): 'completed' stays 'none' here, so EndEx LIFTS any overlay (and, since #390,
         // pushes that lift to connected tabs). It is deliberately NOT the blocking 'endex' overlay: participants may
-        // keep reading after EndEx. The "exercise has ended, read-only" state travels as a separate additive `ended`
-        // flag on the overlay DTOs (follow-up PR), not as a new overlay value. Both the GET and the lifecycle push
-        // read this one line, so do not change it without a new ruling.
+        // keep reading after EndEx. The "exercise has ended, read-only" state travels as the separate additive `ended`
+        // flag on the overlay DTOs (IsEnded, set by LifecycleOverlayStateProjection), not as a new overlay value. Both
+        // the GET and the lifecycle push read this one line, so do not change it without a new ruling.
         ExerciseLifecycleStates.TryParse(state, out var canonical)
         && string.Equals(canonical, ExerciseLifecycleStates.Paused, StringComparison.Ordinal)
             ? new OverlayContribution(LifecycleOverlayWire.Pause, Register: null, string.Empty)
             : OverlayContribution.None;
+
+    /// <summary>
+    /// The additive <see cref="OverlayStateResponse.Ended"/> flag for a state literal: <c>true</c> exactly when the
+    /// exercise is <c>completed</c> (or the legacy <c>complete</c>), <c>false</c> for every other state and for an
+    /// unrecognized or missing one. This is how "the exercise has ended, read-only" reaches the participant shell
+    /// while the overlay state itself stays <c>none</c> (see <see cref="FromLifecycle"/>'s ruling note).
+    /// </summary>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when the exercise has ended.</returns>
+    public static bool IsEnded(string? state) =>
+        ExerciseLifecycleStates.TryParse(state, out var canonical)
+        && string.Equals(canonical, ExerciseLifecycleStates.Completed, StringComparison.Ordinal);
 
     /// <summary>Joins the two contributions into the single frozen <see cref="OverlayStateResponse"/>.</summary>
     /// <remarks>
@@ -380,8 +392,9 @@ public sealed class LifecycleShellVariantProjection : IShellVariantProjection
 
 /// <summary>
 /// Story 03's real <see cref="IOverlayStateProjection"/> — COR-032's Paused holding page, composed with any
-/// live CTL-023 steering overlay into ONE state behind the unchanged frozen
-/// <c>OverlayStateResponse { state, register, message }</c> shape (AC6).
+/// live CTL-023 steering overlay into ONE state behind the frozen
+/// <c>OverlayStateResponse { state, register, message }</c> shape (AC6), plus the additive <c>ended</c> flag
+/// (<see cref="LifecycleOverlayComposer.IsEnded"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -417,6 +430,13 @@ public sealed class LifecycleOverlayStateProjection : IOverlayStateProjection
         var lifecycle = LifecycleOverlayComposer.FromLifecycle(source.Status);
         var steering = _steeringOverlays.GetCurrent(source.ExerciseId);
 
-        return Task.FromResult(LifecycleOverlayComposer.Compose(lifecycle, steering));
+        // The 'ended' flag is set HERE, once, from the lifecycle state alone: the steering decorator passes it through
+        // and both pushers copy it via ParticipantOverlayStateDto.FromComposed, so GET and push cannot disagree.
+        var composed = LifecycleOverlayComposer.Compose(lifecycle, steering) with
+        {
+            Ended = LifecycleOverlayComposer.IsEnded(source.Status),
+        };
+
+        return Task.FromResult(composed);
     }
 }

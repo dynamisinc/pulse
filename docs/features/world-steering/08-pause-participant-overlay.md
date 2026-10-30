@@ -415,8 +415,9 @@ Isolation (COR-001, always-Critical) — `SteeringPauseOverlayProjectionTests.Ex
 freeze, so the zero is the scope closing the door).
 
 XC-002 — `OverlayStateEndpointTests.Get_ResponseCarriesOnlyParticipantSafeKeys` (exactly
-`state`/`register`/`message`; no `actingHumanId`, no `exerciseId`, no `tier`),
-`SteeringPauseOverlayProjectionTests.TheServedBody_IsTheFrozenThreeFieldShape`.
+`state`/`register`/`message`/`ended`; no `actingHumanId`, no `exerciseId`, no `tier`),
+`SteeringPauseOverlayProjectionTests.TheServedBody_IsTheFrozenThreeFieldShape_PlusEnded` (the additive `ended`
+flag, 2026-10-19).
 
 Composition (the ordering trap) —
 `SteeringCompositionRootWiringTests.ProgramCs_ResolvesTheSteeringPauseOverlayProjection_NotTheLifecycleProjectionAlone`

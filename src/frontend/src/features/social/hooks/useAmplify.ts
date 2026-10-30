@@ -45,6 +45,7 @@ import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { emitRepostToggle, quotePost, type QuotePostRecord } from '../services/amplify'
 import { useReactionToggle } from './useReactionToggle'
 import type { UseTransientMessageResult } from './useTransientMessage'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** Options for {@link useAmplify}. */
 export interface UseAmplifyOptions {
@@ -110,8 +111,10 @@ export function useAmplify({
 }: UseAmplifyOptions): UseAmplifyResult {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
+  // Read-only session OR exercise ended: every write is off (personal READ views are unaffected).
+  const canWrite = useCanWrite()
 
-  const canAmplify = !session.isReadOnly && session.personaId !== undefined
+  const canAmplify = canWrite && session.personaId !== undefined
 
   // MOCK mode only (the toggle engine never calls this live).
   const emitMockTelemetry = useCallback(
@@ -146,7 +149,7 @@ export function useAmplify({
 
   const doQuote = useCallback((commentary: string): QuotePostRecord | undefined => {
     const personaId = session.personaId
-    if (session.isReadOnly || personaId === undefined) return undefined
+    if (!canWrite || personaId === undefined) return undefined
     return quotePost({
       exerciseId,
       timeZone,
@@ -159,7 +162,7 @@ export function useAmplify({
       // Live: the server emits `quote` (§1.8) -- a client emit would double-count.
       emitTelemetry: USE_MOCK_DATA,
     })
-  }, [exerciseId, timeZone, session.personaId, session.actingHumanId, session.isReadOnly, postId])
+  }, [exerciseId, timeZone, session.personaId, session.actingHumanId, canWrite, postId])
 
   return {
     canAmplify,
