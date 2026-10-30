@@ -1,0 +1,66 @@
+{
+  "$comment": "Weather payload contract (weather-source story 01, #752; WX-010, WX-001/003). Read by BOTH suites: WeatherContractParityTests (C#, src/Pulse.WebApi.Tests/Features/Weather/Kinds) and weatherContract.test.ts (TS). Edit this file, the C# records/WeatherVocabulary and types.ts/vocabulary.ts together.",
+  "vocabulary": {
+    "productTypes": ["watch", "warning", "advisory"],
+    "hazards": [
+      "tornado", "severe_thunderstorm", "flash_flood", "flood", "hurricane", "tropical_storm", "storm_surge",
+      "winter_storm", "blizzard", "ice_storm", "extreme_heat", "extreme_cold", "high_wind", "wildfire_smoke",
+      "dense_fog", "other"
+    ],
+    "productActions": ["new", "update", "upgrade", "cancel"],
+    "supersedingActions": ["update", "upgrade", "cancel"],
+    "conditionCodes": [
+      "clear", "partly_cloudy", "cloudy", "rain", "showers", "thunderstorms", "snow", "sleet", "fog", "wind", "hot", "cold"
+    ],
+    "productStates": ["pending", "active", "expired", "cancelled"]
+  },
+  "limits": {
+    "narrativeMaxLength": 4000,
+    "headlineMaxLength": 200,
+    "ibwFieldMaxLength": 1000,
+    "actionMaxLength": 300,
+    "maxActions": 8,
+    "maxZones": 12,
+    "maxPeriods": 14,
+    "discussionMaxLength": 4000,
+    "uncertaintyNoteMaxLength": 1000,
+    "periodDetailMaxLength": 1000,
+    "shortTextMaxLength": 100,
+    "windDirMaxLength": 16,
+    "postTextMaxCodePoints": 280,
+    "minTempF": -80,
+    "maxTempF": 140,
+    "maxWindMph": 250
+  },
+  "shapes": {
+    "WeatherProductProjection": [
+      "productType", "hazard", "action", "supersedesPermalink", "zoneSlugs", "effectiveScenarioTime",
+      "expiresScenarioTime", "ibw", "actions"
+    ],
+    "WeatherIbw": ["what", "where", "when", "impacts"],
+    "ForecastPayload": ["zoneSlug", "current", "periods", "discussion", "uncertaintyNote"],
+    "ForecastCurrent": [
+      "tempF", "condition", "conditionCode", "windMph", "windDir", "humidityPct", "observedScenarioTime"
+    ],
+    "ForecastPeriod": ["label", "tempF", "hiF", "loF", "condition", "conditionCode", "precipPct", "windText", "detail"],
+    "WeatherProductPayload": [
+      "productType", "hazard", "action", "supersedesContentId", "supersedesPermalink", "zoneSlugs",
+      "effectiveScenarioTime", "expiresScenarioTime", "ibw", "actions", "delivery"
+    ],
+    "WeatherDelivery": ["raiseAlert", "post"],
+    "WeatherDeliveryPost": ["enabled", "text"]
+  },
+  "participantShapes": ["WeatherProductProjection", "WeatherIbw", "ForecastPayload", "ForecastCurrent", "ForecastPeriod"],
+  "participantExcludedKeys": ["delivery", "supersedesContentId", "raiseAlert", "post", "note", "planningNote"],
+  "productStateCases": [
+    { "name": "before effective", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T13:59:59Z", "cancelled": false, "expected": "pending" },
+    { "name": "at effective", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T14:00:00Z", "cancelled": false, "expected": "active" },
+    { "name": "mid window, other offset", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T09:30:00-05:00", "cancelled": false, "expected": "active" },
+    { "name": "just before expires", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T15:59:59Z", "cancelled": false, "expected": "active" },
+    { "name": "at expires", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T16:00:00Z", "cancelled": false, "expected": "expired" },
+    { "name": "after expires", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-03T00:00:00Z", "cancelled": false, "expected": "expired" },
+    { "name": "cancelled while active", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T15:00:00Z", "cancelled": true, "expected": "cancelled" },
+    { "name": "cancelled before effective", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T13:00:00Z", "cancelled": true, "expected": "cancelled" },
+    { "name": "cancelled after expires", "effective": "2026-12-02T14:00:00Z", "expires": "2026-12-02T16:00:00Z", "now": "2026-12-02T17:00:00Z", "cancelled": true, "expected": "cancelled" }
+  ]
+}
