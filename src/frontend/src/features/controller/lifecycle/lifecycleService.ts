@@ -39,13 +39,24 @@
  * 400 / 409 when it is short, single-line and not markup, otherwise a fixed sentence for the
  * status. An HTML error page or a stack trace is never shown.
  *
- * WHAT THIS UI ASKS FOR. Only `live` (Start exercise) and `completed` (End exercise):
- * {@link LifecycleTarget}. Pause / resume is the world-steering tier control, not this; build ->
- * staged and completed -> archived belong to exercise administration.
+ * WHAT THIS UI ASKS FOR. `staged` (planner's Stage exercise, exercise-build-golive story 04),
+ * `live` (Start exercise) and `completed` (End exercise): {@link LifecycleTarget}. Pause / resume
+ * is the world-steering tier control, not this; completed -> archived belongs to exercise
+ * administration.
+ *
+ * THE READINESS-BLOCKING 409 (story 04). Staging is refused when blocking readiness items are
+ * open: 409 `{ error: 'readiness-blocking', message, blocking: ReadinessItem[] }`. It becomes a
+ * {@link LifecycleError} with `kind: 'readiness-blocking'` and the validated `blocking` items.
+ * A body that is not exactly that shape falls back to the generic 409 handling (fail closed).
+ * Stage is planner-only and StartEx controller-only (403 otherwise); StartEx is NOT gated.
  */
 
 import axios from 'axios'
 import { api } from '@/core/services/api'
+import {
+  isReadinessItem,
+  type ReadinessItem,
+} from '@/features/planner/services/readinessService'
 
 /** The COR-032 lifecycle vocabulary, canonical form (what the endpoints speak). */
 export type LifecycleState = 'build' | 'staged' | 'live' | 'paused' | 'completed' | 'archived'
@@ -60,8 +71,11 @@ export const LIFECYCLE_STATES: readonly LifecycleState[] = [
   'archived',
 ]
 
-/** The two transitions this console requests: StartEx and EndEx. */
-export type LifecycleTarget = Extract<LifecycleState, 'live' | 'completed'>
+/**
+ * The transitions the client requests: Stage (planner, readiness-gated -- exercise-build-golive
+ * story 04), StartEx and EndEx (controller).
+ */
+export type LifecycleTarget = Extract<LifecycleState, 'staged' | 'live' | 'completed'>
 
 /** True when `value` is one of the six canonical lifecycle literals. */
 export function isLifecycleState(value: unknown): value is LifecycleState {
@@ -103,12 +117,45 @@ export const REQUEST_TIMEOUT_MS = 10_000
 export class LifecycleError extends Error {
   /** The HTTP status, when the server answered (absent for a network failure or a mock error). */
   readonly status: number | undefined
+  /**
+   * `'readiness-blocking'` when the server refused a STAGE because blocking readiness items are
+   * open (409 `{ error: 'readiness-blocking', message, blocking }`); `undefined` for every other
+   * failure. When set, {@link blocking} is the validated, non-empty list of those items.
+   */
+  readonly kind: 'readiness-blocking' | undefined
+  readonly blocking: readonly ReadinessItem[] | undefined
 
-  constructor(message: string, status?: number) {
+  constructor(
+    message: string,
+    status?: number,
+    blocking?: readonly ReadinessItem[],
+  ) {
     super(message)
     this.name = 'LifecycleError'
     this.status = status
+    this.kind = blocking === undefined ? undefined : 'readiness-blocking'
+    this.blocking = blocking
   }
+}
+
+/** Fixed sentence when the server's refusal carries no usable message of its own. */
+const READINESS_BLOCKING_FALLBACK =
+  'The exercise cannot be staged yet: blocking readiness items are still open.'
+
+/**
+ * Parses the readiness-blocking 409 body. FAILS CLOSED: anything that is not exactly
+ * `{ error: 'readiness-blocking', blocking: ReadinessItem[1..] }` returns `undefined`, and the
+ * caller falls back to the generic 409 handling. Returns the error to throw otherwise.
+ */
+function parseReadinessBlocking(data: unknown): LifecycleError | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const body = data as Record<string, unknown>
+  if (body.error !== 'readiness-blocking') return undefined
+  if (!Array.isArray(body.blocking) || body.blocking.length === 0) return undefined
+  // Every listed item must be a valid item AND open: the body means "these items are blocking".
+  if (!body.blocking.every(item => isReadinessItem(item) && item.status === 'open')) return undefined
+  const message = showableServerMessage(body.message) ?? READINESS_BLOCKING_FALLBACK
+  return new LifecycleError(message, 409, body.blocking)
 }
 
 /**
@@ -191,6 +238,11 @@ export function toLifecycleError(error: unknown): LifecycleError {
       return new LifecycleError(
         'The server could not be reached. Check the connection and try again.',
       )
+    }
+    // A STAGE refused for open blocking readiness items is a typed variant with its item list.
+    if (status === 409) {
+      const blocked = parseReadinessBlocking(error.response?.data)
+      if (blocked !== undefined) return blocked
     }
     // Only a 400 / 409 carries a sentence meant for a person (the machine's own refusal).
     const reason = status === 400 || status === 409

@@ -209,6 +209,50 @@ public class StorylineTests
     }
 
     [Fact]
+    public void Tick_ClockRewoundBehindTheReactionMarker_ClampsTheMarkerToTheNewMinute()
+    {
+        var storyline = NewStoryline();
+        storyline.Seed(0);
+        var clock = new FakeScenarioClock();
+        storyline.Tick(clock.Set(240));
+        storyline.RecordEngineReaction(240);
+
+        storyline.Tick(clock.Set(0)); // a runtime reset rewinds the clock; the storyline stays registered
+
+        storyline.LastEngineReactionScenarioMinute.Should().Be(
+            0, "a marker ahead of the rewound clock would hold the cadence gate shut until the clock caught up");
+    }
+
+    [Fact]
+    public void Tick_ClockRewoundBelowZero_ClampsTheMarkerToZero()
+    {
+        var storyline = NewStoryline();
+        storyline.Seed(0);
+        var clock = new FakeScenarioClock();
+        storyline.Tick(clock.Set(60));
+        storyline.RecordEngineReaction(60);
+
+        storyline.Tick(clock.Set(-5)); // an unstarted clock can read negative
+
+        storyline.LastEngineReactionScenarioMinute.Should().Be(0, "the marker is a non-negative scenario minute");
+    }
+
+    [Fact]
+    public void Tick_ClockMovingForward_LeavesTheReactionMarkerAlone()
+    {
+        var storyline = NewStoryline();
+        storyline.Seed(0);
+        var clock = new FakeScenarioClock();
+        storyline.Tick(clock.Set(20));
+        storyline.RecordEngineReaction(20);
+
+        storyline.Tick(clock.Set(20)); // freeze
+        storyline.Tick(clock.Set(30));
+
+        storyline.LastEngineReactionScenarioMinute.Should().Be(20, "only a rewind behind the marker moves it");
+    }
+
+    [Fact]
     public void RecordEngineReaction_NegativeMinute_Throws()
     {
         var storyline = NewStoryline();

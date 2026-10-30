@@ -24,6 +24,7 @@ One command puts UAT into the demo's opening state, in the right order, and ends
 pwsh scripts/uat/Invoke-DemoReset.ps1 -WhatIf                                   # the plan + each script's own preview; writes nothing
 pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses                     # THE RESET
 pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses -ReloadFiredRunSheet   # after a rehearsal that fired the run sheet
+pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses -AllowLiveProvider     # the demo runs the live AI on purpose (check 4)
 pwsh scripts/uat/Test-DemoReady.ps1                                             # the pre-flight alone (read-only), any time
 pwsh scripts/uat/Test-DemoReady.ps1 -Json                                       # ... and its results to scripts/uat/logs/demo-ready-<timestamp>.json
 ```
@@ -65,6 +66,11 @@ Any other lifecycle state than `live` or `staged` (paused, completed, archived, 
 host or an https URL; both scripts reduce it to the bare host before any request and pass only that on. `http://`
 (localhost included) and an explicit port are refused: the UAT scripts use https on 443 only. A demo pack that
 cannot be loaded fails the pre-flight, with the pins, run-sheet, anchor and edits checks.
+
+**Check 4 and the live AI.** By default check 4 expects the Fake provider (DF-38) and FAILS on a live one. When the
+demo runs the live AI on purpose (as on 10/20, AzureOpenAI), pass `-AllowLiveProvider` to `Test-DemoReady.ps1`, or to
+`Invoke-DemoReset.ps1`, which hands it to its step 5. Check 4 then PASSES on a live provider (AzureOpenAI or ClaudeFoundry), and WARNS if a live
+provider is configured but generation has been cut to Fake (the kill switch), because the live AI would not answer.
 
 ```text
 Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azurewebsites.net

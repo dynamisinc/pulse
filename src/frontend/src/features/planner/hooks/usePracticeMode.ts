@@ -45,6 +45,7 @@ import {
   type PracticeModeState,
   type PracticeModeUpdate,
 } from '../services/practiceModeService'
+import { READINESS_QUERY_KEY } from './useReadiness'
 
 /**
  * The query key the practice-mode read uses. Exported so any staff surface can
@@ -83,6 +84,8 @@ export function useSetPracticeMode(): UseMutationResult<
     mutationFn: setPracticeMode,
     onSuccess: saved => {
       queryClient.setQueryData(PRACTICE_MODE_QUERY_KEY, saved)
+      // Go-live readiness reads this state (story 03): refresh it.
+      void queryClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY })
     },
   })
 }

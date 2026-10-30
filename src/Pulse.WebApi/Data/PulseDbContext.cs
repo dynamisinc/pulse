@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Data;
 
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
@@ -45,6 +46,17 @@ public class PulseDbContext : DbContext
     /// Public so the isolation tests can assert each axis by name.
     /// </summary>
     public const string OrganizationScopeFilterKey = "OrganizationScope";
+
+    /// <summary>
+    /// Open generic handle to <see cref="ApplyExerciseScopeAndSoftDeleteFilter{TEntity}"/>, resolved once and closed
+    /// per <see cref="ISoftDeletable"/> CLR type in <see cref="OnModelCreating"/>.
+    /// </summary>
+    private static readonly MethodInfo ApplyExerciseScopeAndSoftDeleteFilterMethod =
+        typeof(PulseDbContext).GetMethod(
+            nameof(ApplyExerciseScopeAndSoftDeleteFilter),
+            BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException(
+            $"Could not reflect {nameof(ApplyExerciseScopeAndSoftDeleteFilter)} — the soft-delete filter is unwired.");
 
     /// <summary>
     /// Open generic handle to <see cref="ApplyExerciseScopeFilter{TEntity}"/>, resolved once and closed
@@ -200,6 +212,30 @@ public class PulseDbContext : DbContext
 
     /// <summary>The edit history of participants' own posts (demo-feedback/17, DF-29..DF-31). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
     public DbSet<PostEdit> PostEdits => Set<PostEdit>();
+
+    /// <summary>Channel outlets — the in-fiction publishers (channels-foundation/01, FC-2). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<Outlet> Outlets => Set<Outlet>();
+
+    /// <summary>Channel content — articles, releases, weather products (channels-foundation/01, FC-2). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<ContentItem> ContentItems => Set<ContentItem>();
+
+    /// <summary>Content revision history (channels-foundation/01, FC-2). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<ContentItemRevision> ContentItemRevisions => Set<ContentItemRevision>();
+
+    /// <summary>Content media attachments (channels-foundation/01, FC-2). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<ContentItemMedia> ContentItemMedia => Set<ContentItemMedia>();
+
+    /// <summary>The persistent alert bar's alerts (channels-foundation/01, FC-2). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<ChannelAlert> ChannelAlerts => Set<ChannelAlert>();
+
+    /// <summary>The portal's per-exercise settings row (exercise-portal PC-2, created by M1). Exercise-scoped.</summary>
+    public DbSet<PortalConfig> PortalConfigs => Set<PortalConfig>();
+
+    /// <summary>The portal's resources page entries (exercise-portal PC-2, created by M1). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<PortalResource> PortalResources => Set<PortalResource>();
+
+    /// <summary>Named weather locations (weather-source zone model, created by M1). Exercise-scoped, soft-deleted.</summary>
+    public DbSet<WeatherZone> WeatherZones => Set<WeatherZone>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -964,6 +1000,8 @@ public class PulseDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        ConfigureChannels(modelBuilder);
+
         // ------------------------------------------------------------------------------------------
         // READ-SIDE GLOBAL QUERY FILTER — exercise-isolation/01 (#44): the always-Critical read half of
         // the isolation guarantee (COR-001). Applied CENTRALLY to EVERY IExerciseScoped entity by
@@ -996,9 +1034,12 @@ public class PulseDbContext : DbContext
         // reflect-over-the-model idiom, so a newly-added org-owned library entity is covered automatically.
         //
         // ADDITIVE, NEVER SUBSTITUTIVE. This loop runs AFTER the exercise loop above and uses a DISTINCT
-        // filter key (OrganizationScopeFilterKey), so on an entity carrying both markers EF Core 10 keeps
-        // BOTH named filters and ANDs them. It cannot overwrite, relax or disable the always-Critical
-        // exercise predicate — which is why the exercise loop above is left byte-for-byte unchanged.
+        // filter key (OrganizationScopeFilterKey), so it cannot overwrite, relax or disable the always-Critical
+        // exercise predicate — which is why the exercise loop above is left byte-for-byte unchanged. NOTE (found
+        // by channels-foundation/01): EF Core 10 REFUSES an anonymous and a named filter on the same entity at
+        // model build, so an entity carrying BOTH markers fails loudly rather than ANDing the two. Today the axes
+        // cover disjoint entity sets; an entity that ever needs both must compose them into one predicate, the
+        // way the soft-delete loop below composes DeletedAt with the exercise predicate.
         //
         // FAIL CLOSED (captured in the ctor): _currentOrganizationId is
         //     organizationContext?.CurrentOrganizationId ?? Guid.Empty
@@ -1019,6 +1060,312 @@ public class PulseDbContext : DbContext
             }
         }
         // ------------------------------------------------------------------------------------------
+
+        // ------------------------------------------------------------------------------------------
+        // SOFT-DELETE FILTER — channels-foundation/01 (XC-010). Opt-in over ISoftDeletable (only the channel
+        // entities). EF Core 10 cannot put an anonymous and a named filter on one entity, and the exercise axis
+        // IS the anonymous filter (the loop above stays byte-for-byte unchanged). So for these entities this loop
+        // REPLACES that anonymous filter with a STRICT SUPERSET of it: the identical exercise predicate AND
+        // DeletedAt IS NULL. It can only hide more rows, never fewer. Readers that need deleted rows use
+        // IncludingSoftDeleted<T>(), which re-applies this context's exercise scope — never a bare
+        // IgnoreQueryFilters(). An ISoftDeletable entity that is not IExerciseScoped is a model-build failure.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (!typeof(ISoftDeletable).IsAssignableFrom(entityType.ClrType))
+            {
+                continue;
+            }
+
+            if (!typeof(IExerciseScoped).IsAssignableFrom(entityType.ClrType))
+            {
+                throw new InvalidOperationException(
+                    $"{entityType.ClrType.Name} is ISoftDeletable but not IExerciseScoped; the soft-delete filter is " +
+                    "composed with the exercise filter and has no shape for an unscoped entity.");
+            }
+
+            ApplyExerciseScopeAndSoftDeleteFilterMethod
+                .MakeGenericMethod(entityType.ClrType)
+                .Invoke(this, [modelBuilder]);
+        }
+        // ------------------------------------------------------------------------------------------
+    }
+
+    /// <summary>
+    /// channels-foundation/01 — M1, the one schema migration of the December channels release (Q-28, Tom 10/29): the five
+    /// FC-2 content entities plus the folded portal (PC-2, no <c>PortalDisplay</c>) and weather-zone tables and the nullable
+    /// <see cref="InjectItem.ContentItemId"/>. Every entity is <see cref="IExerciseScoped"/>, so the reflection loop in
+    /// <see cref="OnModelCreating"/> gives it the central filter and <see cref="GuardExerciseScope"/> covers its writes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Same-exercise references.</b> Every reference from these tables to another table row — each other, the inject
+    /// column, and <c>MediaAssets</c> — is a composite foreign key <c>(ExerciseId, XId)</c> onto an alternate key
+    /// <c>(ExerciseId, Id)</c>, so the database itself refuses a row that points into another exercise: a cross-exercise
+    /// write fails even if a service forgets to check. M1 adds that alternate key to <c>MediaAssets</c> (a unique constraint
+    /// over the existing unique <c>Id</c>; no column change). Persona, post, inject and alert ids are logical references
+    /// resolved through the scoped sets.
+    /// </para>
+    /// <para>
+    /// <b>ExerciseId is a concurrency token</b> on every M1 entity, so every tracked UPDATE carries
+    /// <c>AND [ExerciseId] = @original</c>: a stale or stub entity naming another exercise's id matches no row and throws
+    /// <c>DbUpdateConcurrencyException</c> instead of writing across the boundary. Model-only, no DDL.
+    /// </para>
+    /// <para>
+    /// <b>Every foreign key is Restrict</b> (XC-010: no cascade path, no hard delete). Slug indexes are unfiltered, so a
+    /// soft-deleted outlet, item or zone keeps its slug reserved and a permalink is never reused (NWS-011). Scenario-time
+    /// columns have no store default (COR-053). Opaque JSON and HTML columns are <c>nvarchar(max)</c>; their size caps are the
+    /// owning services'.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureChannels(ModelBuilder modelBuilder)
+    {
+        // The principal side of the same-exercise media references below (see remarks).
+        modelBuilder.Entity<MediaAsset>().HasAlternateKey(e => new { e.ExerciseId, e.Id });
+
+        modelBuilder.Entity<Outlet>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            entity.HasAlternateKey(e => new { e.ExerciseId, e.Id });
+            entity.HasAlternateKey(e => new { e.ExerciseId, e.Id, e.ChannelId });
+
+            entity.Property(e => e.ChannelId).IsRequired().HasMaxLength(Outlet.MaxChannelIdLength);
+            entity.Property(e => e.Slug).IsRequired().HasMaxLength(Outlet.MaxSlugLength);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(Outlet.MaxNameLength);
+            entity.Property(e => e.Tagline).HasMaxLength(Outlet.MaxTaglineLength);
+            entity.Property(e => e.CategoriesJson).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.SkinKey).IsRequired().HasMaxLength(Outlet.MaxSkinKeyLength);
+            entity.Property(e => e.SkinOverridesJson).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            // FC-1: outlet slugs are unique per (ExerciseId, ChannelId). Scope leads the key (COR-001); it doubles as the
+            // scoped lookup index.
+            entity.HasIndex(e => new { e.ExerciseId, e.ChannelId, e.Slug }).IsUnique();
+
+            entity.HasOne<Outlet>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.ParentOutletId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.LogoMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ContentItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            entity.HasAlternateKey(e => new { e.ExerciseId, e.Id });
+
+            entity.Property(e => e.ChannelId).IsRequired().HasMaxLength(Outlet.MaxChannelIdLength);
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(ContentItem.MaxKindLength);
+            entity.Property(e => e.Slug).IsRequired().HasMaxLength(Outlet.MaxSlugLength);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(ContentItem.MaxStatusLength);
+            entity.Property(e => e.Headline).IsRequired().HasMaxLength(ContentItem.MaxHeadlineLength);
+            entity.Property(e => e.Dek).HasMaxLength(ContentItem.MaxDekLength);
+            entity.Property(e => e.Kicker).HasMaxLength(ContentItem.MaxLabelLength);
+            entity.Property(e => e.Category).HasMaxLength(ContentItem.MaxLabelLength);
+            entity.Property(e => e.BylineName).HasMaxLength(ContentItem.MaxBylineNameLength);
+            entity.Property(e => e.BodyHtml).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.PayloadJson).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.Origin).IsRequired().HasMaxLength(ContentItem.MaxStatusLength);
+            entity.Property(e => e.ActingHumanId).IsRequired().HasMaxLength(ContentItem.MaxActingHumanIdLength);
+            entity.Property(e => e.ExternalSource).HasMaxLength(ContentItem.MaxExternalSourceLength);
+            entity.Property(e => e.ExternalRef).HasMaxLength(ContentItem.MaxExternalRefLength);
+            entity.Property(e => e.PublishOptionsJson).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.LastError).HasMaxLength(ContentItem.MaxLastErrorLength);
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            // FC-1: content slugs are unique per (ExerciseId, OutletId); it also serves the outlet foreign key.
+            entity.HasIndex(e => new { e.ExerciseId, e.OutletId, e.Slug }).IsUnique();
+
+            // PDF-06 Cadence seam: a pushed item is idempotent by its external reference, unique per exercise only when
+            // BOTH parts are set. EF emits the filtered CREATE INDEX inside EXEC(N'...') in the idempotent script (#413).
+            entity.HasIndex(e => new { e.ExerciseId, e.ExternalSource, e.ExternalRef })
+                .IsUnique()
+                .HasFilter("[ExternalSource] IS NOT NULL AND [ExternalRef] IS NOT NULL");
+
+            // The participant list read (newest-first per channel) and the scheduler's due-item sweep (story 05).
+            entity.HasIndex(e => new { e.ExerciseId, e.ChannelId, e.Status, e.PublishedScenarioTime });
+            entity.HasIndex(e => new { e.ExerciseId, e.ScheduledScenarioTime })
+                .HasFilter("[Status] = N'scheduled' AND [DeletedAt] IS NULL");
+
+            // The outlet reference also carries ChannelId, so an item can only be filed under an outlet of its OWN
+            // channel (a news item under a press outlet would render in one channel with another's skin and permalink).
+            entity.HasOne<Outlet>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.OutletId, e.ChannelId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id, e.ChannelId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.HeroMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ContentItemRevision>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(ContentItemRevision.MaxKindLength);
+            entity.Property(e => e.Note).HasMaxLength(ContentItemRevision.MaxNoteLength);
+            entity.Property(e => e.SnapshotJson).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.ActingHumanId).IsRequired().HasMaxLength(ContentItem.MaxActingHumanIdLength);
+
+            // One row per revision number per item: the database is the last word under a concurrent double-revise.
+            entity.HasIndex(e => new { e.ExerciseId, e.ContentItemId, e.Number }).IsUnique();
+
+            entity.HasOne<ContentItem>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.ContentItemId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ContentItemMedia>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(Entities.ContentItemMedia.MaxRoleLength);
+            entity.Property(e => e.Alt).HasMaxLength(Entities.ContentItemMedia.MaxAltLength);
+
+            entity.HasIndex(e => new { e.ExerciseId, e.ContentItemId, e.SortOrder });
+
+            entity.HasOne<ContentItem>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.ContentItemId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.MediaAssetId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChannelAlert>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            entity.Property(e => e.Severity).IsRequired().HasMaxLength(ChannelAlert.MaxLiteralLength);
+            entity.Property(e => e.Headline).IsRequired().HasMaxLength(ChannelAlert.MaxHeadlineLength);
+            entity.Property(e => e.SourceChannel).IsRequired().HasMaxLength(ChannelAlert.MaxLiteralLength);
+            entity.Property(e => e.Href).HasMaxLength(ChannelAlert.MaxHrefLength);
+            entity.Property(e => e.Origin).IsRequired().HasMaxLength(ChannelAlert.MaxLiteralLength);
+            entity.Property(e => e.ActingHumanId).IsRequired().HasMaxLength(ContentItem.MaxActingHumanIdLength);
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            // The active-set and reverse-chron history reads (story 10); doubles as the scoped lookup index.
+            entity.HasIndex(e => new { e.ExerciseId, e.IssuedScenarioTime });
+        });
+
+        modelBuilder.Entity<PortalConfig>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            // PC-2: at most one row per exercise (absent row = defaults).
+            entity.HasIndex(e => e.ExerciseId).IsUnique();
+
+            entity.Property(e => e.PortalName).HasMaxLength(PortalConfig.MaxPortalNameLength);
+            entity.Property(e => e.CityName).HasMaxLength(PortalConfig.MaxCityNameLength);
+            entity.Property(e => e.Tagline).HasMaxLength(PortalConfig.MaxTaglineLength);
+            entity.Property(e => e.LayoutKey).IsRequired().HasMaxLength(PortalConfig.MaxLayoutKeyLength);
+            entity.Property(e => e.ModulesJson).IsRequired().HasColumnType("nvarchar(max)");
+            entity.Property(e => e.SkinOverridesJson).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.LogoMediaId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PortalResource>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(PortalResource.MaxTitleLength);
+            entity.Property(e => e.Summary).HasMaxLength(PortalResource.MaxSummaryLength);
+            entity.Property(e => e.BodyHtml).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            // PC-2: SortOrder indexed per exercise (the resources page order); doubles as the scoped lookup index.
+            entity.HasIndex(e => new { e.ExerciseId, e.SortOrder });
+
+            entity.HasOne<MediaAsset>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ExerciseId, e.MediaAssetId })
+                .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WeatherZone>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired().IsConcurrencyToken()
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+            entity.Property(e => e.Slug).IsRequired().HasMaxLength(WeatherZone.MaxSlugLength);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(WeatherZone.MaxNameLength);
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(WeatherZone.MaxKindLength);
+            entity.Property(e => e.Description).HasMaxLength(WeatherZone.MaxDescriptionLength);
+            entity.Property(e => e.Version).IsConcurrencyToken();
+
+            // Slugs are unique per exercise, deleted zones included (historic products still name them).
+            entity.HasIndex(e => new { e.ExerciseId, e.Slug }).IsUnique();
+        });
+
+        // The nullable inject column (F16's, folded into M1). A same-exercise composite FK; nullable ContentItemId makes
+        // it optional, so every existing post/burst row (NULL) is untouched. EF names the FK's index.
+        modelBuilder.Entity<InjectItem>()
+            .HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(e => new { e.ExerciseId, e.ContentItemId })
+            .HasPrincipalKey(e => new { e.ExerciseId, e.Id })
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    /// <summary>
+    /// Replaces one <see cref="ISoftDeletable"/> entity's anonymous exercise filter with the same exercise predicate AND
+    /// <c>DeletedAt == null</c> (see the soft-delete loop in <see cref="OnModelCreating"/> for why it is one filter).
+    /// Closes over <see cref="_currentExerciseId"/> exactly as <see cref="ApplyExerciseScopeFilter{TEntity}"/> does.
+    /// </summary>
+    private void ApplyExerciseScopeAndSoftDeleteFilter<TEntity>(ModelBuilder modelBuilder)
+        where TEntity : class, IExerciseScoped, ISoftDeletable
+    {
+        modelBuilder.Entity<TEntity>().HasQueryFilter(e => e.ExerciseId == _currentExerciseId && e.DeletedAt == null);
+    }
+
+    /// <summary>
+    /// The one sanctioned way to read soft-deleted <see cref="ISoftDeletable"/> rows (a deleted zone's name on a historic
+    /// forecast, an audit export): every row of <typeparamref name="TEntity"/> in THIS context's exercise scope, deleted or
+    /// not. It drops the combined filter and re-applies the identical fail-closed exercise predicate, so an unresolved
+    /// scope still sees zero rows. Never write <c>IgnoreQueryFilters()</c> on these sets by hand.
+    /// </summary>
+    /// <typeparam name="TEntity">A soft-deletable, exercise-scoped entity.</typeparam>
+    /// <returns>A query over the scope's rows including deleted ones.</returns>
+    public IQueryable<TEntity> IncludingSoftDeleted<TEntity>()
+        where TEntity : class, IExerciseScoped, ISoftDeletable
+    {
+        var exerciseId = _currentExerciseId;
+        return Set<TEntity>().IgnoreQueryFilters().Where(e => e.ExerciseId == exerciseId);
     }
 
     /// <summary>
@@ -1059,6 +1406,7 @@ public class PulseDbContext : DbContext
     /// <inheritdoc />
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ConvertDeletesToSoftDeletes();
         GuardExerciseScope();
         GuardOrganizationScope();
         GuardTelemetryEnvelope();
@@ -1068,10 +1416,43 @@ public class PulseDbContext : DbContext
     /// <inheritdoc />
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        ConvertDeletesToSoftDeletes();
         GuardExerciseScope();
         GuardOrganizationScope();
         GuardTelemetryEnvelope();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// XC-010 for <see cref="ISoftDeletable"/> entities (channels-foundation/01): a tracked row marked <c>Deleted</c> is
+    /// turned into an UPDATE that stamps <see cref="ISoftDeletable.DeletedAt"/> (wall clock — a staff-only column), so
+    /// nothing is hard-deleted through the context. Runs BEFORE <see cref="GuardExerciseScope"/>, which then sees the row
+    /// as <c>Modified</c> and checks its scope like any other write. Bulk <c>ExecuteDelete</c> bypasses the change tracker
+    /// and is not converted; no channel code may use it on these sets.
+    /// </summary>
+    private void ConvertDeletesToSoftDeletes()
+    {
+        foreach (var entry in ChangeTracker.Entries<ISoftDeletable>())
+        {
+            if (entry.State != EntityState.Deleted)
+            {
+                continue;
+            }
+
+            // Unchanged + only the properties that were ACTUALLY modified, plus DeletedAt — never State = Modified, which
+            // would write every column, so a delete-by-stub (`Remove(new X { Id = id, ... })`) would blank the row it
+            // meant to retain. Edits made to a tracked row before Remove (a Version bump, a retraction stamp) are kept.
+            // ExerciseId and Version (concurrency tokens here) keep the UPDATE confined to the row as it was read.
+            var modified = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToList();
+            entry.State = EntityState.Unchanged;
+            foreach (var name in modified)
+            {
+                entry.Property(name).IsModified = true;
+            }
+
+            entry.Entity.DeletedAt ??= DateTimeOffset.UtcNow;
+            entry.Property(nameof(ISoftDeletable.DeletedAt)).IsModified = true;
+        }
     }
 
     /// <summary>

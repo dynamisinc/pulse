@@ -103,7 +103,7 @@ describe('ExerciseIdentityBadge — static with fewer than two assignments', () 
     expect(badge.tagName).not.toBe('BUTTON')
     expect(badge).not.toHaveAttribute('aria-haspopup')
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
-    expect(within(badge).getByText('Alpha Exercise')).toBeInTheDocument()
+    expect(await within(badge).findByText('Alpha Exercise')).toBeInTheDocument()
     expect(within(badge).getByText('CONTROLLER · SIMCELL-1')).toBeInTheDocument()
   })
 
@@ -113,6 +113,46 @@ describe('ExerciseIdentityBadge — static with fewer than two assignments', () 
 
     await waitFor(() => expect(mockGetAssignments).toHaveBeenCalled())
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+})
+
+describe('ExerciseIdentityBadge — INTERNAL name, never the participant-facing scope name', () => {
+  it('shows the internal name even when the scope name is null (static badge)', async () => {
+    vi.mocked(useExerciseContext).mockReturnValue({ ...SCOPE, exerciseName: null })
+    mockGetAssignments.mockResolvedValue([ALPHA])
+    renderBadge()
+
+    const badge = screen.getByTestId('staff-header-identity-badge')
+    expect(await within(badge).findByText('Alpha Exercise')).toBeInTheDocument()
+  })
+
+  it('does not show the participant-facing scope name; the internal one wins', async () => {
+    vi.mocked(useExerciseContext).mockReturnValue({ ...SCOPE, exerciseName: 'Public Name' })
+    mockGetAssignments.mockResolvedValue([ALPHA])
+    renderBadge()
+
+    const badge = screen.getByTestId('staff-header-identity-badge')
+    expect(await within(badge).findByText('Alpha Exercise')).toBeInTheDocument()
+    expect(screen.queryByText('Public Name')).not.toBeInTheDocument()
+  })
+
+  it('renders no name line (not the scope name) until the assignments resolve', async () => {
+    vi.mocked(useExerciseContext).mockReturnValue({ ...SCOPE, exerciseName: 'Public Name' })
+    mockGetAssignments.mockRejectedValue(new StaffAssignmentError('boom', { status: 500 }))
+    renderBadge()
+
+    await waitFor(() => expect(mockGetAssignments).toHaveBeenCalled())
+    const badge = screen.getByTestId('staff-header-identity-badge')
+    expect(within(badge).queryByText('Public Name')).not.toBeInTheDocument()
+    expect(within(badge).getByText('CONTROLLER · SIMCELL-1')).toBeInTheDocument()
+  })
+
+  it('the switcher trigger names the internal exercise when the scope name is null', async () => {
+    vi.mocked(useExerciseContext).mockReturnValue({ ...SCOPE, exerciseName: null })
+    renderBadge()
+
+    const trigger = await screen.findByRole('button', { name: /switch exercise/i })
+    expect(trigger).toHaveAccessibleName(/current: Alpha Exercise, CONTROLLER SIMCELL-1/)
   })
 })
 

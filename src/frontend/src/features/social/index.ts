@@ -24,7 +24,8 @@ export { PostCard } from './components/PostCard'
 export type { PostCardProps, PostView, PostMediaView, PostLinkPreviewView } from './components/PostCard'
 // demo-polish F0: the card is decomposed into parts under `components/post/`
 // (`PostCard.tsx` is a re-export shim). Wave-2 stories import the part they own by
-// path; this barrel is FROZEN after F0 (implementation.md §4.3).
+// path; this barrel was FROZEN after F0 (implementation.md §4.3). Channels-foundation
+// 21 lifted the freeze for its ADDITIVE exports only (the block at the end).
 
 export { VerifiedMark } from './components/VerifiedMark'
 export type { VerifiedMarkProps } from './components/VerifiedMark'
@@ -105,3 +106,22 @@ export type { WhoToFollowProps } from './components/WhoToFollow'
 export { useWhoToFollow } from './hooks/useWhoToFollow'
 export type { UseWhoToFollowResult } from './hooks/useWhoToFollow'
 export { resolveSuggestedFollowIds } from './services/whoToFollowService'
+
+// --- channels-foundation 21: what other channels consume (additive; R-S1, FU-5, FU-6a) ---
+// The portal (Social Stream / Trending / kiosk slide) and news (embedded post, share to
+// Pulse) import these from here, never by deep path. Each is the SAME binding as its
+// module's own export. Read-only `<PostCard>` is the `readOnly` prop on the card above.
+export { useTrending } from './explore/useTrending'
+export type { UseTrendingResult, TrendingTopic } from './explore/useTrending'
+export { SocialBrandScope } from './theme/SocialBrandScope'
+export type { SocialBrandScopeProps } from './theme/SocialBrandScope'
+export { socialPaths, socialPostPath, socialProfilePath } from './layout/socialNavigation'
+export { useRecentPublicPosts } from './hooks/useRecentPublicPosts'
+export type {
+  UseRecentPublicPostsOptions,
+  UseRecentPublicPostsResult,
+} from './hooks/useRecentPublicPosts'
+export { usePostById } from './hooks/usePostById'
+export type { UsePostByIdResult } from './hooks/usePostById'
+export { useComposeWithLink } from './hooks/useComposeWithLink'
+export type { UseComposeWithLinkResult } from './hooks/useComposeWithLink'

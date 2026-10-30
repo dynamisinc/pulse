@@ -49,6 +49,39 @@ describe('resolveExerciseContext', () => {
     })
   })
 
+  it('resolves a null exerciseName (no participant-facing name set), with no fallback', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        exerciseId: 'ex-0042',
+        exerciseName: null,
+        timeZone: 'America/Denver',
+        status: 'live',
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+
+    const scope = await resolveExerciseContext()
+
+    expect(scope.exerciseName).toBeNull()
+  })
+
+  it.each([
+    ['an empty string', ''],
+    ['a number', 42],
+    ['an object', {}],
+    ['absent', undefined],
+  ])('fails closed when exerciseName is %s', async (_label, exerciseName) => {
+    mockGet.mockResolvedValue({
+      data: {
+        exerciseId: 'ex-0042',
+        exerciseName,
+        timeZone: 'America/Denver',
+        status: 'live',
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+
+    await expect(resolveExerciseContext()).rejects.toThrow()
+  })
+
   it('fails closed when the response body is empty', async () => {
     mockGet.mockResolvedValue({ data: null } as Awaited<ReturnType<typeof api.get>>)
 

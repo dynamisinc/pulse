@@ -9,6 +9,14 @@ import { describe, expect, it } from 'vitest'
 import { CardSheet } from './CardSheet'
 import { buildMockCards } from './cardsMocks'
 
+describe('CardSheet - null exercise name', () => {
+  it('renders the cards brand-only (no name line) when exerciseName is null', () => {
+    render(<CardSheet cards={buildMockCards(3)} exerciseName={null} />)
+    expect(screen.getAllByTestId('roster-card')).toHaveLength(3)
+    expect(document.querySelector('p[class*="exercise"]')).toBeNull()
+  })
+})
+
 describe('CardSheet - pagination', () => {
   it('puts eight cards on a page and the rest on the next', () => {
     render(<CardSheet cards={buildMockCards(20)} exerciseName="Coastal Surge" />)

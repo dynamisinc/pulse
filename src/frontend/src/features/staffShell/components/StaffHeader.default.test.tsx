@@ -43,7 +43,8 @@ describe('StaffHeader — shipped default (real ExerciseContextProvider, DEV moc
 
     await waitFor(() => expect(screen.getByTestId('staff-header-identity-badge')).toBeInTheDocument())
 
-    expect(screen.getByText('Coastal Surge (Mock Exercise)')).toBeInTheDocument()
+    // The internal name arrives with the (mock) staff assignments, after the badge mounts.
+    expect(await screen.findByText('Coastal Surge (Mock Exercise)')).toBeInTheDocument()
     expect(screen.getByTestId('staff-header-state-pill')).toHaveTextContent('LIVE')
     expect(screen.getByTestId('staff-header-state-pill-dot')).toBeInTheDocument()
   })

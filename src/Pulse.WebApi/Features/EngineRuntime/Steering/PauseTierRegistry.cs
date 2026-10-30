@@ -139,6 +139,10 @@ public sealed record PauseTierResult(
 ///   code change;</item>
 ///   <item>leaving <see cref="PauseTier.Freeze"/> calls <see cref="IExerciseClock.Unfreeze"/>, which resumes at
 ///   exactly the scenario minute it held (COR-050 — no scenario time is lost);</item>
+///   <item><see cref="PauseTier.Engine"/> has no side effect here: its consumers READ <see cref="GetTier"/> —
+///   <c>ReactionLoopDriver.RunTickAsync</c> raises no new storyline work (no provider call, no review item) while it
+///   holds, and the ambient publish gate (<c>InterimEngineLifecyclePublishGate</c>) holds ambient chatter. Neither
+///   stops the clock;</item>
 ///   <item>every transition invokes <see cref="IPauseOverlayPublisher"/> — a no-op until story 08 replaces the
 ///   default registration.</item>
 /// </list>

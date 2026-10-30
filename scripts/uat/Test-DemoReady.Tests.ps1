@@ -289,6 +289,53 @@ Describe 'Test-DemoReady.ps1' {
             (Get-Result $run 4 'Generation provider').status | Should -Be $Status
             (Get-Result $run 4 'Generation provider').detail | Should -Match "expected Fake \(DF-38\); got $Effective"
         }
+
+        It 'without -AllowLiveProvider, a live provider FAIL names the switch' {
+            $global:ReadyFake.Routes['GET /api/engine/settings'] = @{ Status = 200; Body = [ordered]@{ provider = 'AzureOpenAI'; effectiveProvider = 'AzureOpenAI' } }
+            $run = Invoke-Ready
+            (Get-Result $run 4 'Generation provider').detail | Should -Match '-AllowLiveProvider'
+            $run.Code | Should -Be 1
+        }
+
+        It 'with -AllowLiveProvider: <Name>' -ForEach @(
+            @{ Name = 'AzureOpenAI is PASS'; Provider = 'AzureOpenAI'; Effective = 'AzureOpenAI'; Status = 'PASS'; Detail = 'got AzureOpenAI, the live AI' }
+            @{ Name = 'Fake is PASS'; Provider = 'Fake'; Effective = 'Fake'; Status = 'PASS'; Detail = 'got Fake$' }
+            @{ Name = 'AzureOpenAI cut to Fake is WARN'; Provider = 'AzureOpenAI'; Effective = 'Fake'; Status = 'WARN'; Detail = 'cut to Fake, so the live AI will not answer' }
+            @{ Name = 'no effective provider is FAIL'; Provider = 'AzureOpenAI'; Effective = ''; Status = 'FAIL'; Detail = 'got no effective provider' }
+            @{ Name = 'ClaudeFoundry is PASS'; Provider = 'ClaudeFoundry'; Effective = 'ClaudeFoundry'; Status = 'PASS'; Detail = 'got ClaudeFoundry, the live AI' }
+            @{ Name = 'whitespace only is FAIL'; Provider = 'AzureOpenAI'; Effective = '   '; Status = 'FAIL'; Detail = 'got no effective provider' }
+            @{ Name = 'an unknown provider is FAIL'; Provider = 'Mystery'; Effective = 'Mystery'; Status = 'FAIL'; Detail = "got 'Mystery', which is neither Fake nor a live provider" }
+            @{ Name = 'wrong letter case is FAIL (the server emits exact casing)'; Provider = 'azureopenai'; Effective = 'azureopenai'; Status = 'FAIL'; Detail = "got 'azureopenai', which is neither Fake nor a live provider" }
+            @{ Name = 'an empty configured provider on Fake is PASS, not WARN'; Provider = ''; Effective = 'Fake'; Status = 'PASS'; Detail = 'got Fake$' }
+        ) {
+            $global:ReadyFake.Routes['GET /api/engine/settings'] = @{ Status = 200; Body = [ordered]@{ provider = $Provider; effectiveProvider = $Effective } }
+            $run = Invoke-Ready -Extra @{ AllowLiveProvider = $true }
+            $result = Get-Result $run 4 'Generation provider'
+            $result.status | Should -Be $Status
+            $result.detail | Should -Match 'expected Fake or a live provider \(-AllowLiveProvider\)'
+            $result.detail | Should -Match $Detail
+        }
+
+        It 'with -AllowLiveProvider and an otherwise ready exercise, a live provider leaves the run READY (exit 0)' {
+            $global:ReadyFake.Routes['GET /api/engine/settings'] = @{ Status = 200; Body = [ordered]@{ provider = 'AzureOpenAI'; effectiveProvider = 'AzureOpenAI' } }
+            $baseline = Invoke-Ready
+            @($baseline.Results | Where-Object { $_.status -eq 'FAIL' -and $_.number -ne '4' }) | Should -BeNullOrEmpty
+            (Invoke-Ready -Extra @{ AllowLiveProvider = $true }).Code | Should -Be 0
+        }
+    }
+
+    Describe 'Script entry: every parameter reaches the run splat (PR #674 adversarial review W1)' {
+        It 'the script-level $runArguments carries each of the script''s parameters' {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptFile, [ref] $null, [ref] $null)
+            $parameters = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            $splat = $ast.EndBlock.Statements |
+                Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.VariablePath.UserPath -eq 'runArguments' } |
+                Select-Object -First 1
+            $splat | Should -Not -BeNullOrEmpty
+            $keys = @($splat.Right.Expression.KeyValuePairs | ForEach-Object { $_.Item1.Value })
+            $parameters | Should -Not -BeNullOrEmpty
+            foreach ($name in $parameters) { $keys | Should -Contain $name -Because "-$name must reach the run, or the script silently ignores it" }
+        }
     }
 
     Describe 'Check 5: white noise and media marking' {

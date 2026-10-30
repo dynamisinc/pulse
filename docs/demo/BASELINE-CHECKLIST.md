@@ -20,6 +20,8 @@
   already open. It no longer restarts the API by default. After a restart the old process
   keeps serving for minutes, and the seed is lost at the handover. If you need a clean slate, run it with
   `-Restart`, wait ~8 minutes, then run it again without it.
+- **The seed pauses the engine.** `Seed-DemoContent.ps1` leaves the pause tier at `engine` (ENGINE PAUSED), and
+  the engine drafts nothing in that tier. Resume it from the console's Pause pill before beat 3 (step 3.0).
 - **Two fresh tabs:** participant and controller. Sessions live in per-tab storage, so two fresh tabs in
   one browser can hold different sessions, but a *duplicated* tab copies the session. A second monitor or a
   phone for the participant view makes the demo read better.
@@ -68,6 +70,7 @@ screenshot, in the results table at the end. Times are scenario time unless a st
 
 | # | Do | Expect |
 |---|---|---|
+| 3.0 | **Resume the engine first.** Check the Pause pill. If it reads **ENGINE PAUSED** (`Seed-DemoContent.ps1` leaves the tier at `engine`), select it → **Resume**, and check it reads **RUNNING** | The pill reads RUNNING. While ENGINE PAUSED, the engine drafts nothing, so **no drafts arrive in beats 3 and 4**. On 2026-10-20 drafts arrived under ENGINE PAUSED only because of a bug, since fixed. Resuming does not flush a backlog: the first silence drafts come about one reaction cadence (3 scenario minutes) later |
 | 3.1 | Keep the participant silent past the silence window (default 3 scenario minutes) | The storyline escalates |
 | 3.2 | Watch the console's review queue | Drafts arrive, each with persona and storyline context, plus an "N need review" indicator |
 | 3.3 | Approve one, edit then approve one, veto one | Approved and edited drafts appear in the participant feed under their personas; the vetoed one never does |

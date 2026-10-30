@@ -444,6 +444,44 @@ describe('useFeedStream — discard(ids) removes buffered posts and keeps the co
     expect(result.current.newCount).toBe(1)
   })
 
+  it('requeue puts undrainable posts back behind the pill, keeping the count honest', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+    act(() => fake.push(buildView('p1')))
+    act(() => fake.push(buildView('p2')))
+    act(() => fake.push(buildView('p3')))
+
+    let drained: ParticipantPostView[] = []
+    act(() => { drained = result.current.loadBuffered() })
+    expect(result.current.newCount).toBe(0)
+
+    // p2 could not be rendered (unknown author): it goes back; a newer arrival follows it.
+    act(() => result.current.requeue(drained.filter(post => post.id === 'p2')))
+    act(() => fake.push(buildView('p4')))
+    expect(result.current.newCount).toBe(2)
+
+    let again: ParticipantPostView[] = []
+    act(() => { again = result.current.loadBuffered() })
+    expect(again.map(post => post.id)).toEqual(['p4', 'p2']) // newest-first, p2 older than p4
+  })
+
+  it('requeue ignores a post already buffered and still honours the cap', async () => {
+    const fake = new FakeFeedStreamSource()
+    const { result } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
+    await waitFor(() => expect(fake.startCalls).toBe(1))
+    act(() => fake.push(buildView('p1')))
+    act(() => result.current.requeue([buildView('p1')]))
+    expect(result.current.newCount).toBe(1)
+
+    const old = Array.from({ length: FEED_STREAM_BUFFER_CAP }, (_, i) => buildView(`old-${i}`))
+    act(() => result.current.requeue(old))
+    expect(result.current.newCount).toBe(FEED_STREAM_BUFFER_CAP)
+    let drained: ParticipantPostView[] = []
+    act(() => { drained = result.current.loadBuffered() })
+    expect(drained[0]?.id).toBe('p1') // the newest buffered post survives; the oldest was evicted
+  })
+
   it('has a stable identity across renders', async () => {
     const fake = new FakeFeedStreamSource()
     const { result, rerender } = renderHook(() => useFeedStream({ enabled: true, source: fake }))
