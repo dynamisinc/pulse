@@ -311,7 +311,9 @@ the shipped `EngineCockpitStaffAuthorizationFilter`; the shipped kill-switch/res
   3. **Resume:** confirm ticking resumes, items arrive again, and the header SCENARIO clock continues
      from the minute it held (no jump forward by the frozen span, COR-050).
   4. **Pause engine:** confirm `<EngineControlBar>` shows STOP **and** that generation actually
-     stopped (no new review items / no `engine.generated` while ENGINE PAUSED). Resume; confirm the
+     stopped (no new review items / no `engine.generated` while ENGINE PAUSED). One exception: a burst
+     whose provider call was already in flight when the pause took is discarded (no review item), but its
+     `engine.generated` is still recorded once, because the call happened and carries its spend. Resume; confirm the
      bar returns to the position it was on before the pause (LIVE, or SUGGEST-ONLY if that is what the
      controller had chosen) **and** that generation resumes.
   5. **Failure honesty:** with dev-tools offline (or the backend stopped), select Freeze. The pill must

@@ -83,14 +83,15 @@ only for the window between them — but a tab holding the old bundle stays blan
    step (`/api/exercise-context`). Reason: against an old backend `exerciseName` is the internal `Name`, which
    the NavRail would show to participants (#376 leak). The participant-guide sentence about the name in the
    side menu moves to PR-4c with it.
-3. **Re-scaffold the migration after #655 (`20261019171234`) and #665 (`20261019200000`) are on `main`.**
+3. **Re-scaffold the migration against `main` before merging** (2026-10-30: Tom ordered A3 to land before #655 and #665, so
+   its id moved to `20261030173000`, after `20261029174012_Channels_M1_ContentFoundation`; #655 and #665 re-timestamp after it).
    `ef migrations add` cannot set the id, so:
    0. Install the CI-pinned tool: `dotnet tool install --global dotnet-ef --version 10.0.10` (the repo has no
       local tool manifest; `deploy-backend.yml` pins 10.0.10).
    1. Merge `main` into the branch; let `ModelSnapshot` merge textually.
    2. From the repo root: `dotnet ef migrations add TmpA3Model --project src/Pulse.WebApi/Pulse.WebApi.csproj`.
    3. Copy the body of `BuildTargetModel` from the generated `*_TmpA3Model.Designer.cs` into
-      `20261019230000_A3SetupContentParticipantName.Designer.cs` (keep that file's class/attribute header).
+      `20261030173000_A3SetupContentParticipantName.Designer.cs` (keep that file's class/attribute header).
    4. **Check that the generated `*_TmpA3Model.cs` has EMPTY `Up()` and `Down()`.** If it does not, the merged
       snapshot or the A3 migration is missing schema: stop and fix that; do not paper over it. Then delete the
       `*_TmpA3Model` `.cs` and `.Designer.cs`, and keep the snapshot exactly as the textual merge left it
@@ -107,7 +108,7 @@ only for the window between them — but a tab holding the old bundle stays blan
    them from `WorldName` and the lifecycle telemetry). Generate the script **from a checkout that still contains
    the A3 migration** (the #670 merge commit, before the revert; on post-revert `main` it reports
    "migration not found") and apply it to `sqldb-pulse-uat` by hand:
-   `dotnet ef migrations script 20261019230000_A3SetupContentParticipantName 20261017120000_AdminIdentityFoundation --project src/Pulse.WebApi/Pulse.WebApi.csproj`
+   `dotnet ef migrations script 20261030173000_A3SetupContentParticipantName 20261029174012_Channels_M1_ContentFoundation --project src/Pulse.WebApi/Pulse.WebApi.csproj`
    (adjust the "to" migration to whichever migration precedes A3 on `main` at that time). If PR-4c has
    shipped, revert it first so nothing renders the name.
 5. **After deploy, reload open staff consoles.** The settings PUT is a full replace. An old tab's PUT omits

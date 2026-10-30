@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Realtime;
 
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Social;
@@ -64,6 +65,9 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
 
     /// <summary>The SignalR client method name a subscriber handles when a post's shown counts change (demo-feedback DF-17).</summary>
     private const string PostEngagementChangedEvent = "PostEngagementChanged";
+
+    /// <summary>The SignalR client method name a subscriber handles when the exercise's scenario clock changes.</summary>
+    internal const string ScenarioClockChangedEvent = "ScenarioClockChanged";
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
     private readonly ExerciseLifecycleStatusReader _lifecycleStatusReader;
@@ -165,6 +169,23 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
 
         var target = await ResolveTargetAsync(exerciseId, PostEngagementChangedEvent, cancellationToken);
         await target.SendAsync(PostEngagementChangedEvent, change, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>ScenarioClockChanged</c> with <see cref="ScenarioClockChangedDto"/> (the exercise id, scenario time and
+    /// server time only, XC-002) through the same lifecycle choke point as every other frame: the exercise-wide group while participants are
+    /// admitted (staff connections are members, so consoles receive it once), the staff group alone otherwise.
+    /// </remarks>
+    public async Task BroadcastScenarioClockChangedAsync(
+        Guid exerciseId,
+        ScenarioClockChangedDto clock,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        var target = await ResolveTargetAsync(exerciseId, ScenarioClockChangedEvent, cancellationToken);
+        await target.SendAsync(ScenarioClockChangedEvent, clock, cancellationToken: cancellationToken);
     }
 
     /// <summary>

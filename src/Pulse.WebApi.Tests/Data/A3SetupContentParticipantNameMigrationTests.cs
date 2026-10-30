@@ -28,7 +28,7 @@ using Xunit;
 public sealed class A3SetupContentParticipantNameMigrationTests
 {
     private const string PreviousMigration = "20261017120000_AdminIdentityFoundation";
-    private const string MigrationUnderTest = "20261019230000_A3SetupContentParticipantName";
+    private const string MigrationUnderTest = "20261030173000_A3SetupContentParticipantName";
     private const string Transitioned = "exercise.lifecycle.transitioned";
 
     private static readonly DateTimeOffset LeftBuildAt = new(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);

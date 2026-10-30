@@ -1,0 +1,66 @@
+/*
+ * core/media/player/ExerciseBands.module.css
+ * ---------------------------------------------------------------------------
+ * The EXERCISE media bands (demo-feedback 06; NFR-008, DF-4). See ExerciseBands.tsx.
+ *
+ * - The overlay fills its media box (`position: absolute; inset: 0`) and takes no
+ *   layout space, so mounting/unmounting it never shifts anything.
+ * - Click-through (`pointer-events: none`): tile buttons, the player's controls and
+ *   the native video controls all keep working under/over it.
+ * - Colours are the participant skin tokens: `--pc-bg` text on a 66% `--pc-ink` strip.
+ *   Composited over pure white media (the worst case) that is ~5.6:1 (>= 4.5:1, WCAG
+ *   1.4.3); `ExerciseBands.test.tsx` computes it from this file. Hex fallbacks mirror
+ *   `theme/tokens.ts`'s LIGHT_PALETTE for a box mounted outside a token root.
+ * - The overlay is a size container, so the text scales with the MEDIA BOX, not the
+ *   viewport: `4cqi` keeps "EXERCISE EXERCISE EXERCISE" at about three quarters of
+ *   the box width; the clamp keeps it legible on a small tile (8px floor) and stops it
+ *   dominating a full-screen video (18px cap). On a box too small for all three words
+ *   (a composer thumbnail) the line overflows EVENLY on both sides (flex centring), so
+ *   the middle "EXERCISE" stays whole.
+ */
+
+.bands {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  justify-content: space-between;
+  container-type: inline-size;
+  pointer-events: none;
+  user-select: none;
+}
+
+.band {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  justify-content: center;
+  padding: 0.3em 0.5em;
+  background: rgb(14 21 24 / 66%);
+  background: color-mix(in srgb, var(--pc-ink, #0e1518) 66%, transparent);
+  color: var(--pc-bg, #fff);
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 11px;
+  font-size: clamp(8px, 4cqi, 18px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.text {
+  flex: none;
+}
+
+/*
+ * Inside the video player: lift the bottom band above the browser's native control
+ * bar (timeline, time, volume), which sits on the bottom edge of the frame.
+ */
+.clearControls {
+  padding-bottom: 44px;
+}
