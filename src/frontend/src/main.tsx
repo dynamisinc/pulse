@@ -1,3 +1,5 @@
+// First: zod runs jitless before any schema module loads (host CSP, story 23).
+import './core/config/zodConfig'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 // Figtree, the Pulse type face (D1-003), self-hosted so no one needs a network font

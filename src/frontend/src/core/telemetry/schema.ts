@@ -36,6 +36,8 @@
  */
 
 import { z } from 'zod'
+// Before any schema is built: no zod JIT under the host CSP (story 23).
+import '@/core/config/zodConfig'
 
 // ---------------------------------------------------------------------------
 // Sub-schemas
