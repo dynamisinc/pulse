@@ -36,6 +36,9 @@ public static class RealtimeExtensions
         // TryAdd the pause overlay uses, so whichever registers first wins and a host's own reader is never replaced.
         services.TryAddExerciseLifecycleStatusReader();
 
+        // channels-foundation 09: the content frames' disabled-channel gate reads the exercise's enabled set per send.
+        services.TryAddExerciseChannelEnabledReader();
+
         // identity-auth-roles/16: the connection → session registry the grant-revoke rule cuts connections through.
         services.TryAddSingleton<SessionConnectionRegistry>();
         services.TryAddSingleton<ISessionConnectionRevoker, SessionConnectionRevoker>();
