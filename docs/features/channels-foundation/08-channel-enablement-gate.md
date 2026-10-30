@@ -32,6 +32,10 @@ Files: `Features/Channels/Enablement/**`, the `ChannelCatalog` edit in `Particip
   filter (the handler's own role and scope gates still apply); participant, shared read-only and unassigned staff
   sessions are gated.
   An unresolved scope 404s.
+- **Outlet registry (story 03):** its participant reads (`GET /api/outlets?channel=`, `GET /api/outlets/{slug}`) take the
+  channel from the query or the outlet row, so they call `IChannelEnablement.IsEnabledAsync` directly rather than the
+  fixed-id filter. Story 03's interim `OutletChannelGate` (same rule, via the nav config) is replaced by it on merge;
+  story 03's own disabled-channel 404 tests cover the swap. Its staff routes are not gated.
 - **Interface location:** FC-7 places seam interfaces in `Contracts/`, but story 02 did not ship
   `IChannelEnablement`, so it lives in `Enablement/` with its implementation.
 - **Client:** `features/channels/routing/` — `useEnabledChannels()` reads the shell's own nav-config query
