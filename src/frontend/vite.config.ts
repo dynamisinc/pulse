@@ -46,6 +46,20 @@ function pulseSwStamp(): Plugin {
   }
 }
 
+/**
+ * Channels-foundation story 23 (PP-3): the response headers Azure Static Web Apps sends on
+ * every response (`globalHeaders` in public/staticwebapp.config.json, which owns the CSP).
+ * `vite preview` serves the same set, so a production build can be checked against the real
+ * policy locally. The dev server does NOT get them: @vitejs/plugin-react injects an inline
+ * React Refresh preamble that `script-src 'self'` would block.
+ */
+function staticWebAppGlobalHeaders(): Record<string, string> {
+  const config = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, 'public/staticwebapp.config.json'), 'utf8'),
+  ) as { globalHeaders?: Record<string, string> }
+  return config.globalHeaders ?? {}
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), pulseSwStamp()],
@@ -54,11 +68,17 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    // Story 23: never inline a font as a `data:` URI (Vite inlines assets under 4 KiB by
+    // default), because `font-src 'self'` blocks `data:`. Small woff2 subsets stay files.
+    assetsInlineLimit: filePath => (/\.(woff2?|ttf|otf)$/i.test(filePath) ? false : undefined),
+  },
   server: {
     port: 5198,
   },
   preview: {
     port: 5198,
+    headers: staticWebAppGlobalHeaders(),
   },
   test: {
     globals: true,

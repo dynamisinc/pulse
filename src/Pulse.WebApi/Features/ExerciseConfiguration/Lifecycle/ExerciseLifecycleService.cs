@@ -165,6 +165,8 @@ public sealed class ExerciseLifecycleResult
 /// <see cref="IExerciseLifecycleTransitionObserver"/> (world-steering pushes the participant overlay from it), best
 /// effort: after the commit, with <see cref="CancellationToken.None"/>, and with any failure logged and swallowed —
 /// the transition has already happened, so a broken notification must never report it as failed.
+/// </para>
+/// <para>
 /// <b>The stage readiness gate (exercise-build-golive/04).</b> A transition whose target is <c>staged</c> first runs
 /// <see cref="ExerciseReadinessService"/> and is refused (<see cref="ExerciseLifecycleOutcome.ReadinessBlocked"/>, no
 /// write, no event) while any blocking item is <c>open</c>; <c>notChecked</c> items never block. The checklist reads
@@ -483,6 +485,7 @@ public sealed partial class ExerciseLifecycleService
                   "transition observer failed; connected participants may not see the change until they re-read it.")]
     private partial void LogTransitionObserverFailed(Exception exception, Guid exerciseId, string from, string to);
 
+    /// <summary>
     /// The stage gate: <c>null</c> when the exercise may be staged, else the refusal. Read-only — it writes nothing.
     /// </summary>
     /// <remarks>

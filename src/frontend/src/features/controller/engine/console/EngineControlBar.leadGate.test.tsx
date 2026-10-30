@@ -67,8 +67,9 @@ describe('kill switch', () => {
     // The next step is the restore (a raise).
     expect(killSwitch).toBeDisabled()
     expect(killSwitch).toHaveAttribute('aria-describedby', 'engine-lead-only-reason')
+    expect(killSwitch).toHaveAccessibleDescription(REASON)
     const reason = screen.getByTestId('engine-lead-only-reason')
-    expect(reason).toHaveTextContent(REASON)
+    expect(screen.getByTestId('engine-lead-only-reason-label')).toHaveTextContent('Raise engine: lead only')
     expect(reason.querySelector('svg')).not.toBeNull()
   })
 
