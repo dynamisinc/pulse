@@ -44,7 +44,9 @@
  * `liveReviewStore.ts`): the initial GET seeds the snapshot so a participant
  * who joins or refreshes MID-Freeze still lands on the holding page; pushes
  * update it live; a hub reconnect (including the first connect) re-GETs the
- * authoritative state, so nothing missed while disconnected is stranded. A
+ * authoritative state, so nothing missed while disconnected is stranded; and a
+ * tab becoming VISIBLE re-GETs too (#390), for a backgrounded tab that missed a
+ * push without ever reconnecting. A
  * malformed push is DROPPED, never cast blindly, and a push that is OLDER than
  * what we have already applied is dropped too — the server publishes a
  * per-exercise monotonic `sequence` precisely so a late out-of-order push cannot
@@ -294,6 +296,7 @@ const liveListeners = new Set<() => void>()
 let liveStarted = false
 let unsubscribePush: (() => void) | null = null
 let unsubscribeConnectionState: (() => void) | null = null
+let unsubscribeVisibility: (() => void) | null = null
 
 /** The connection `ensureStartedLive` attached to, so a session reset re-attaches to the same. */
 let attachedConnection: RealtimeConnection = realtimeConnection
@@ -416,6 +419,19 @@ function reconcileLive(payload: unknown): void {
 }
 
 /**
+ * Calls `listener` each time the document becomes VISIBLE (never on hidden); returns the
+ * remover. A no-op outside a browser.
+ */
+function onBecameVisible(listener: () => void): () => void {
+  if (typeof document === 'undefined') return () => undefined
+  const handler = (): void => {
+    if (document.visibilityState === 'visible') listener()
+  }
+  document.addEventListener('visibilitychange', handler)
+  return () => document.removeEventListener('visibilitychange', handler)
+}
+
+/**
  * Starts the live source: the seeding GET plus the `OverlayStateChanged`
  * subscription on the SHARED realtime connection, with a reconnect-triggered
  * resync. Idempotent — the shell may mount `<OverlayLayer />` from more than
@@ -434,6 +450,17 @@ function ensureStartedLive(connection: RealtimeConnection = realtimeConnection):
     if (state === HubConnectionState.Connected) void refetchLive()
   })
 
+  // #390: a tab coming back to the foreground re-GETs. Lifecycle transitions now push too,
+  // but a backgrounded tab can miss a push (a throttled or dropped connection that never
+  // reconnects), and the one stranding that matters is a Freeze holding page left over an
+  // exercise that has since ended. The GET is the same ordering-guarded `refetchLive`, so
+  // the generation and push-count guards apply to it exactly as to every other GET.
+  // Mirrors `notificationsStore.ts` / `useReadOnlyRefresh.ts`. The GET body has no `sequence`,
+  // so adopting it re-bases `lastAppliedSequence` to 0 ON PURPOSE (any later push then applies).
+  unsubscribeVisibility = onBecameVisible(() => {
+    void refetchLive()
+  })
+
   void refetchLive()
   void connection.start().catch(() => {
     // Hub unreachable — the GET above still seeded the snapshot, and a later
@@ -445,8 +472,10 @@ function ensureStartedLive(connection: RealtimeConnection = realtimeConnection):
 function detachLive(): void {
   if (unsubscribePush !== null) unsubscribePush()
   if (unsubscribeConnectionState !== null) unsubscribeConnectionState()
+  if (unsubscribeVisibility !== null) unsubscribeVisibility()
   unsubscribePush = null
   unsubscribeConnectionState = null
+  unsubscribeVisibility = null
   liveStarted = false
 }
 

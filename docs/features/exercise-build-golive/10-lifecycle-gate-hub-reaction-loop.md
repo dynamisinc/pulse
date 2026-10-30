@@ -33,3 +33,9 @@ Hub/loop lifecycle matrix tests (simulation-content broadcast refused vs `lifecy
 
 ### Copilot review 3 fold (2026-10-16)
 - Changed: the post-completion gate refuses simulation-content broadcasts only; lifecycle/overlay control messages are always delivered. Added the EndEx ordering AC (commit, broadcast, disconnect participants; staff stay) and matching tests; aligned with story 12.
+
+### Send-side gate fold (2026-10-19, #375 / PR #653)
+Status stays **Not Started / in progress**. This fold does not complete the story.
+- **Done (send side of AC1):** simulation-content hub frames are refused for participants outside `staged`/`live`/`paused`. `SignalRFeedBroadcaster` checks `ExerciseLifecycleStates.IsLivePushOpen` (the one shared accessor; fails closed on unknown or missing) before each `PostReceived`/`PostRemoved`/`PostPinChanged`/`PostEdited`/`PostEngagementChanged`. In `build`/`completed`/`archived` the frame goes to the staff group only, so consoles keep their live view. Tests: `SignalRFeedBroadcasterTests`, `ExerciseRealtimeHubLifecycleTests` (including a real-reader EndEx and a reconnect-after-EndEx case).
+- **Decision, pending Tom's confirmation:** the hub **connect** stays OPEN after `completed`/`archived`, which departs from AC1's "the join is refused". The reason: the participant overlay client re-GETs `/api/overlay-state` on reconnect to render the EndEx overlay, and refusing the join would break that recovery path. The send-side gate closes the content-leak risk instead.
+- **Moved:** the `ReactionLoopHost` tick-stop AC ("stops ticking within one interval") is tracked by **#640**. The EndEx ordering / participant-disconnect and overlay AC is tracked by **#390 / PR #651**.

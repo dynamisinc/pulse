@@ -232,7 +232,7 @@ public sealed class JoinEndpointsHttpTests
     {
         var exerciseA = await PersonalLinkSeed.ExerciseAsync(_fixture);
         var exerciseB = await PersonalLinkSeed.ExerciseAsync(_fixture);
-        var closed = await PersonalLinkSeed.ExerciseAsync(_fixture, status: "completed");
+        var closed = await PersonalLinkSeed.ExerciseAsync(_fixture, status: "archived");
 
         var revokedAccount = await PersonalLinkSeed.AccountAsync(_fixture, exerciseA.Id);
         var (_, revokedToken) = await PersonalLinkSeed.LinkAsync(_fixture, revokedAccount, revoked: true);
@@ -252,7 +252,7 @@ public sealed class JoinEndpointsHttpTests
             ("revoked link", exerciseA.Hostname, revokedToken),
             ("disabled account", exerciseA.Hostname, disabledToken),
             ("exercise B's token on A's host", exerciseA.Hostname, tokenB),
-            ("completed exercise", closed.Hostname, closedToken),
+            ("archived exercise", closed.Hostname, closedToken),
             ("unresolved host", "nobody.pulse.test", tokenB),
         };
 

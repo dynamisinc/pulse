@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 
@@ -62,11 +64,27 @@ public static class ReactionEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPut("/api/posts/{postId:guid}/reactions/{kind}", ReactAsync);
-        endpoints.MapDelete("/api/posts/{postId:guid}/reactions/{kind}", UnreactAsync);
+        // #379: a participant like / repost (and its undo) is refused (409 frozen) while the exercise is paused or
+        // frozen. RULING (Tom, 2026-10-19, WR-002): "Allow pins". A personal pin (kind=pin) is a private bookmark,
+        // not a world write, so it is EXEMPT and works in a held world; every other kind stays refused.
+        endpoints.MapPut("/api/posts/{postId:guid}/reactions/{kind}", ReactAsync)
+            .RefuseWhenWritesPaused(IsPersonalPin);
+        endpoints.MapDelete("/api/posts/{postId:guid}/reactions/{kind}", UnreactAsync)
+            .RefuseWhenWritesPaused(IsPersonalPin);
 
         return endpoints;
     }
+
+    /// <summary>
+    /// Whether the request is a personal pin, the one reaction kind the held-world gate exempts (ruling, Tom,
+    /// 2026-10-19). An exact, case-sensitive match on the <c>kind</c> route value, the same comparison the service
+    /// uses to recognise a pin, so a near-miss such as <c>PIN</c> stays under the gate.
+    /// </summary>
+    /// <param name="httpContext">The current request.</param>
+    /// <returns><c>true</c> for <c>kind=pin</c>.</returns>
+    internal static bool IsPersonalPin(HttpContext httpContext) =>
+        httpContext.Request.RouteValues.TryGetValue("kind", out var kind)
+        && string.Equals(kind as string, ReactionKinds.Pin, StringComparison.Ordinal);
 
     /// <summary>Activates the caller's reaction; idempotent on a repeat.</summary>
     /// <param name="postId">The post to react to.</param>

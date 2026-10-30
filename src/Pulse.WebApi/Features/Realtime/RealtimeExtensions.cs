@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Social;
 
 /// <summary>
@@ -30,6 +31,10 @@ public static class RealtimeExtensions
 
         services.AddSignalR();
         services.AddScoped<IFeedBroadcaster, SignalRFeedBroadcaster>();
+
+        // #375: the broadcaster's EndEx send gate reads the exercise's lifecycle status before every send. The same
+        // TryAdd the pause overlay uses, so whichever registers first wins and a host's own reader is never replaced.
+        services.TryAddExerciseLifecycleStatusReader();
 
         // identity-auth-roles/16: the connection → session registry the grant-revoke rule cuts connections through.
         services.TryAddSingleton<SessionConnectionRegistry>();

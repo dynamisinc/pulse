@@ -66,6 +66,14 @@ const FORBIDDEN_SPECIFIERS: ReadonlyArray<{ readonly pattern: RegExp; readonly w
     why: 'a participant media player',
   },
   {
+    // channels-foundation 14 moved the players to `core/media/player` (Social keeps shims).
+    // The UI there is participant-only; its pure helpers stay importable by path.
+    pattern: new RegExp(
+      `(^|/)core/media/player(/(${[...PARTICIPANT_PLAYERS, 'ExerciseBands', 'ParticipantTooltip'].join('|')})|/?$)`,
+    ),
+    why: 'a participant media player (core/media/player)',
+  },
+  {
     pattern: /(^|\/)social\/(pages|layout|explore|notifications)\//,
     why: 'a participant page',
   },
@@ -201,6 +209,11 @@ describe('the controller (staff) world imports no participant skin', () => {
         .toBe(false)
       expect(catches("import { x } from '@/features/social/components/media/mediaLayout'"))
         .toBe(false)
+      // The same players at their extracted home (channels-foundation 14).
+      expect(catches("import { VideoPlayer } from '@/core/media/player'")).toBe(true)
+      expect(catches("import { VideoPlayer } from '@/core/media/player/VideoPlayer'")).toBe(true)
+      expect(catches("import { ExerciseBands } from '@/core/media/player/ExerciseBands'")).toBe(true)
+      expect(catches("import { x } from '@/core/media/player/mediaLayout'")).toBe(false)
     })
 
     it('flags a RELATIVE specifier that climbs into a participant folder', () => {

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 
@@ -59,6 +60,9 @@ public static class FollowEndpoints
         services.TryAddScoped<ICurrentSessionPersonaAccessor, CurrentSessionPersonaAccessor>();
         services.TryAddScoped<FollowService>();
 
+        // #379: the follow writes (and the reaction writes, which call this method) carry RefuseWhenWritesPaused().
+        services.TryAddParticipantWriteGate();
+
         return services;
     }
 
@@ -79,7 +83,10 @@ public static class FollowEndpoints
         // controller otherwise, never an evaluator. Participant callers pass through to the service unchanged.
         var writes = endpoints.MapGroup(string.Empty)
             .DenyReadOnlySessions()
-            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring);
+            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring)
+
+            // #379: a participant follow / unfollow is refused (409 frozen) while the exercise is paused or frozen.
+            .RefuseWhenWritesPaused();
         writes.MapPost("/api/personas/{personaId:guid}/follow", FollowAsync);
         writes.MapDelete("/api/personas/{personaId:guid}/follow", UnfollowAsync);
 

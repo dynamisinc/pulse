@@ -14,6 +14,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Realtime;
 using Xunit;
 
 /// <summary>
@@ -139,7 +140,7 @@ public sealed class InjectRichPostFunnelTests
 
         _fixture.ConnectionString.Should().NotBeNull();
         await using var host = await InjectTestHost.StartAsync(
-            _fixture.ConnectionString!, broadcaster: new SignalRFeedBroadcaster(hub.Object));
+            _fixture.ConnectionString!, broadcaster: TestFeedBroadcasters.Create(hub.Object));
         var seeded = await host.SeedExerciseAsync();
         host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
         var item = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));

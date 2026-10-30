@@ -87,7 +87,9 @@ taxonomy:
    - `engine.autonomy_changed` has **no server-side emitter at all**. The **frontend is its sole audit
      trail** (`useEngineControl.ts:267`, via `POST /api/telemetry`). That is a genuine gap in the audit
      story for this one event type specifically — recorded here as a gap, not implied to be fixed by
-     naming it.
+     naming it. *(Superseded by #618: the kill switch / restore are now recorded server-side as
+     `engine.kill-switch.engaged` / `engine.autonomy.restored`, and the live-path client emit is retired — see
+     the #618 section below.)*
 3. **`EngineEventTaxonomyTests.cs`** — 11 new model-only `[Fact]` tests that turn the reservations and the
    additivity claim into enforced properties instead of comments. All 11 were neuter-verified to fail
    before being accepted: an unratified constant, a renamed `rumor.spread`, `"re-roll"` renamed to
@@ -119,7 +121,7 @@ taxonomy:
 The tuning/observability surface that renders them (story 02); E10's metric computation (E10); the
 XC-004 v0 base schema definition itself (E1 owns it — this story *extends* it); the rumor mechanics
 (rumor-model, v1.1 — this reserves their event slots); a server-side emitter for `engine.autonomy_changed`
-(recorded above as a known gap, not addressed by this commit).
+(recorded above as a known gap, not addressed by this commit — since closed by #618's server-side lever records).
 
 ## Technical Notes
 Staff/backend. Additive event types on the XC-004 envelope; emitted by every E8 feature via the shared
@@ -183,6 +185,87 @@ and `engine.decided.toneMix` = `ambient`. The ambient policy's acting human (`Am
 `engine.published` actor `actingHumanId` on an autonomous ambient post) is the authenticated `StaffUser.Id` from the
 verified session, not a client-supplied value (review W-2). A controller-approved ambient post keeps the default engine
 actor (no `actingHumanId`); the approval's own decision event names the human.
+
+## Autonomy steering-lever records (#618) — staff-change family, not the loop taxonomy
+
+Recorded here because this file is the event catalogue. Until #618 the three in-memory autonomy levers emitted no
+backend XC-004 record (only the lead-release / no-lead swamped-off flips did). Each lever now records every **real**
+change as one XC-004 event **and** one org-audit row, staged together through the shared `StaffChangeRecorder` —
+exactly like the existing `engine.swamped-mode.turned-off` flip. Names: `StaffChangeEventTypes` (pinned by
+`StaffChangeEventTypesTests`); payload builders: `EngineSteeringLeverRecords`; writer: `IEngineSteeringLeverRecorder`.
+
+| Route | Event type | Org-audit kind | Payload keys |
+|---|---|---|---|
+| `POST /api/engine/autonomy/swamped-mode` (`enabled: true`) | `engine.swamped-mode.turned-on` | `org.engine.swamped-mode-on` | `reason: "controller"`, `wasOn`, `isOn`, `scenarioMinute?` |
+| `POST /api/engine/autonomy/swamped-mode` (`enabled: false`) | `engine.swamped-mode.turned-off` (**reused**) | `org.engine.swamped-mode-off` (**reused**) | `reason: "controller"`, `wasOn`, `isOn`, `scenarioMinute?` |
+| `POST /api/engine/autonomy/kill-switch` | `engine.kill-switch.engaged` | `org.engine.kill-switch-engaged` | `mode` (`drop-to-suggest` \| `full-stop`), `fromPosture`, `toPosture`, `scenarioMinute?` |
+| `POST /api/engine/autonomy/restore` | `engine.autonomy.restored` | `org.engine.autonomy-restored` | `fromPosture`, `toPosture`, `scenarioMinute?` |
+
+- **One `engine.swamped-mode.turned-off` shape for every path:** `{reason, wasOn, isOn, scenarioMinute?}` with
+  `reason` = `controller` (the route), `lead-released` or `lead-transferred` (`EnrollmentService`; both record only when the flip really turned swamped mode off), `no-lead-recheck` (`ExerciseCallerRole`)
+  or `lead-lost-revert` (below). `isOn` is always `false` on this type.
+- **`scenarioMinute` is omitted** (never a fabricated `0`) when there is no scenario clock or the exercise's clock has
+  not started — an unstarted clock reads minute 0. The envelope's required `scenarioTime` keeps its existing fallback:
+  the live clock's instant, else the exercise's stored instant, else the wall clock (the pre-COR-050 placeholder every
+  staff event uses).
+- **Posture** (previous/new state of the safety clamp): `running` (no clamp) \| `clamped` (Suggest clamp: kill switch
+  drop-to-suggest or the degraded-mode clamp) \| `stopped` (kill switch full-stop).
+- **Envelope:** channel `system`, `actor.kind: "system"`, `actor.actingHumanId` = the verified **session** person
+  (`StaffUser.Id`, never the body `actingHumanId` — WR-2), `actor.sessionId` = that session, `actor.role` = the caller's
+  live enrollment role (null-omitted when it could not be read — never invented); target `exercise` / exercise id. The
+  audit row's `actorPersonId` is the same session person; event and audit share the payload verbatim. No identity is
+  ever written into the payload.
+- **Only real changes are recorded**, like `engine.provider_changed`: swamped ON while on / OFF while off, a kill
+  switch that leaves the posture where it was (e.g. drop-to-suggest under the degraded clamp), and a restore with
+  nothing clamped record nothing. A refused call (`400` — e.g. swamped ON while
+  `Generation:Governance:TimeoutAutoSendAuthorized` is false, an unknown kill-switch mode — or `403`) records nothing,
+  including the Tier-2 M-1 post-write reverts that put the state back exactly. **One exception:** a refused swamped ON
+  whose M-1 revert turns OFF swamped mode that was **already on** before the request (the lead was lost in between)
+  is a real ON→OFF change (re-checked just before the revert: if a concurrent lead release / no-lead heal already
+  turned it off, that OFF is the record and nothing more is written), recorded as `engine.swamped-mode.turned-off`
+  with `reason: "lead-lost-revert"` and a
+  **system** actor (no person — the revert is the lost lead's consequence, not the caller's choice). The revert is not
+  skipped for an already-on exercise: a concurrent demotion's OFF can land between the previous-state read and this
+  write, so only the post-write revert guarantees swamped mode never ends ON without a lead.
+- **Recorded last, in its own unit of work, never fatal:** each lever records after every one of its state changes
+  (the kill switch after its AC6 ambient demotion, in a `finally` so a client abort during the demotion's event commit
+  cannot skip it; the M-1 re-checks run with `CancellationToken.None` so an abort cannot skip a revert), through `IEngineSteeringLeverRecorder`, which writes in its own DI
+  scope / `PulseDbContext` (the `ExerciseCallerRole` no-lead precedent, WR-003) with `CancellationToken.None`. Any
+  failure — the exercise read, the save, or the recorder itself — is logged at Error and swallowed: the lever is
+  process memory, already live, and must neither become a `500` nor skip a safety effect.
+- **The previous state is read beside the write, not atomically** (`EngineAutonomyState` has no compare-and-set for
+  these levers): two concurrent levers on one exercise can leave one record's `wasOn` / `fromPosture` stale — the same
+  last-writer-wins window the state itself has.
+- **Known gaps (documented, not built):**
+  - **The degraded-mode clamp is not recorded by these records.** The automatic provider-degraded clamp
+    (`DegradeToSuggest`, a system action on provider failure) moves the posture to `clamped` without an
+    `engine.kill-switch.engaged`-style record; a later `engine.autonomy.restored` then shows `fromPosture: "clamped"`
+    with no preceding lever record. Its trace today is the provider-health path, not this family.
+  - **A restart loses the state without a marker.** Swamped mode and the clamp are process memory: after an App
+    Service restart every exercise comes back with swamped mode off and no clamp, and nothing records that transition
+    (no "state reset" record). Reading the last lever record as "current state" across a restart is therefore wrong.
+- **Why not in `EngineEventTypes`:** these are staff-change records (system channel + org audit) and share the
+  dotted, kebab-segment naming of the pre-existing `engine.swamped-mode.turned-off` they extend; `EngineEventTypes` is
+  the engine-loop taxonomy (dotted segments in lower_snake, e.g. `engine.autonomy_default_changed`;
+  `actor.kind: "engine"`) pinned by `EngineEventTaxonomyTests`.
+- **Consumers:** no report or export filters engine events by type today (`ExerciseReportService` and
+  `PostExportService` read only their own `export.*` types), so nothing had to pick these up. Any future
+  consumer that wants "every engine lever change" must read **both** families: the loop taxonomy and these
+  staff-change records.
+- **Client emits:**
+  - `engine.autonomy_changed` for the kill switch / restore (`useEngineControl.ts` `setMode`) is **retired on the live
+    path**: it was optimistic (sent before the POST, kept on rejection) and client-attributed, so it would double — and
+    could contradict — the server record. It is still emitted under `USE_MOCK_DATA` (mock mode has no backend, so it is
+    that mode's only record), and the hook's mock-only provider `degrade()` / `restore()` still emit it.
+  - `engine.swamped_mode_changed` (`useSwampedMode.ts`) is likewise **retired on the live path** (after #642): the
+    server's `engine.swamped-mode.turned-on` / `turned-off` is the record. It is still emitted under `USE_MOCK_DATA`.
+    Historical rows of both client types remain in the log; a consumer counting lever changes from the #618 cutover
+    on should count the server records.
+- **Tests:** `EngineReviewEndpointsTests.EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
+  (positive half for the three levers) and the `EngineReviewEndpointsTests.SteeringLevers.cs` lever tests (including
+  recorder-failure, degraded no-op and cross-exercise cases); `LeadControllerPostWriteRecheckTests` (#618 M-1 revert
+  cases); `EngineSteeringLeverRecorderTests` (own-scope write, never throws) — all Docker-gated;
+  `EngineSteeringLeverRecordsTests` and `StaffChangeEventTypesTests` (`[Fact]`).
 
 ## Build notes
 

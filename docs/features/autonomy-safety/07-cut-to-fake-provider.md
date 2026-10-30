@@ -86,7 +86,8 @@ provider goes reachable. Building it now (ahead of that signature) means the saf
       restore, carrying wall + scenario time, the acting human (COR-018, including the human behind a
       shared org account), the exercise, and the from/to provider names. This is a deliberate
       correction of the existing gap: kill-switch/restore emit **no** server-side telemetry today
-      (frontend emission is the sole audit trail) — this story does not repeat that gap. Whether the
+      (frontend emission is the sole audit trail) — this story does not repeat that gap. *(#618 has
+      since closed that gap: the kill switch / restore record server-side.)* Whether the
       event rides a new `engine.provider_cut_to_fake` / `engine.provider_restored` pair or an existing
       steering/autonomy-change taxonomy entry is an **open question to align with
       `engine-telemetry-tuning/01-engine-event-types.md` (#173)** before either vocabulary is

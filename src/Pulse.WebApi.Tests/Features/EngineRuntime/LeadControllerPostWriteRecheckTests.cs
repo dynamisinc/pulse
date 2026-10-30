@@ -108,6 +108,137 @@ public sealed class LeadControllerPostWriteRecheckTests
         state.SwampedModeEnabled.Should().BeFalse();
     }
 
+    // ---- #618: the M-1 reverts and the steering-lever record ---------------------------------------
+
+    [RequiresDockerFact]
+    public async Task SwampedOn_RevertedByM1_FromOff_RecordsNothing()
+    {
+        var harness = Build();
+        await using var _ = harness;
+        harness.ArmClock(harness.DemoteLead);
+
+        var result = await harness.Service.SetSwampedModeAsync(true, Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        harness.Autonomy.GetOrCreate(harness.ExerciseId).SwampedModeEnabled.Should().BeFalse();
+        harness.Records.Should().BeEmpty("the revert restored OFF exactly — nothing net changed, so nothing is recorded");
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedOn_RevertedByM1_WhenItWasAlreadyOn_RecordsALeadLostRevertOff_AsASystemAction()
+    {
+        var harness = Build();
+        await using var _ = harness;
+        var state = harness.Autonomy.GetOrCreate(harness.ExerciseId);
+        state.SetSwampedMode(true, "lead", 0);
+        harness.ArmClock(harness.DemoteLead);
+
+        var result = await harness.Service.SetSwampedModeAsync(true, Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        state.SwampedModeEnabled.Should().BeFalse("swamped mode must never end ON with no lead");
+        harness.SwampedAtRecordTime.Should().Equal([false], "the revert record is written AFTER the revert");
+        var record = harness.Records.Should().ContainSingle("ON -> OFF is a real change, even on a refused request").Subject;
+        record.EventType.Should().Be(EngineSteeringLeverRecords.SwampedModeOffEventType);
+        record.AuditKind.Should().Be(EngineSteeringLeverRecords.SwampedModeOffAuditKind);
+        record.Actor.Should().BeNull("the revert is the lost lead's consequence, a system action — not the caller's choice");
+        using var payload = System.Text.Json.JsonDocument.Parse(record.Payload);
+        payload.RootElement.GetProperty("reason").GetString().Should().Be("lead-lost-revert");
+        payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+        payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeFalse();
+        payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(0, "the harness clock is started at minute 0");
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedOn_RevertedByM1_WhenAConcurrentTurnOffAlreadyRan_NeitherRevertsNorRecordsAgain()
+    {
+        // #618 W-C: swamped was on; the lead is lost, and a concurrent TurnOff (the lead release / no-lead heal, which
+        // records its own OFF) lands between this ON's write and its re-check. The re-check must find it already off.
+        var hook = new FirstReaderHook();
+        var harness = Build(hook);
+        await using var _ = harness;
+        var state = harness.Autonomy.GetOrCreate(harness.ExerciseId);
+        state.SetSwampedMode(true, "lead", 0);
+        harness.ArmClock(harness.DemoteLead);
+        hook.OnFirstReader = () => state.SetSwampedMode(false, "system:no-lead", 0);
+
+        var result = await harness.Service.SetSwampedModeAsync(true, Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        hook.Fired.Should().BeTrue("the concurrent OFF ran between the write and the re-check");
+        state.SwampedModeEnabled.Should().BeFalse();
+        harness.Records.Should().BeEmpty("the concurrent OFF is the recorded change; a lead-lost-revert too would double it");
+    }
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_WhenTheRequestIsAbortedDuringTheAmbientDemotionCommit_StillRecordsTheAppliedLever()
+    {
+        // #618 W-A: the demotion is applied in memory, then its event commit rethrows the client abort — the kill switch
+        // (already applied) must still be recorded.
+        var harness = Build();
+        await using var _ = harness;
+        harness.Ambient.Set(harness.ExerciseId, new AmbientTierPolicy
+        {
+            Mode = AmbientPolicyMode.Autonomous,
+            MaxPerMinute = 1,
+            MaxPerHour = 1,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+            SetBy = "arrange",
+        });
+        using var aborted = new CancellationTokenSource();
+        await aborted.CancelAsync();
+
+        var act = () => harness.Service.EngageKillSwitchAsync(KillSwitchMode.FullStop, Input(harness.Lead), aborted.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the abort still surfaces");
+        harness.Autonomy.GetOrCreate(harness.ExerciseId).IsGenerationStopped.Should().BeTrue("the lever applied");
+        harness.Ambient.Get(harness.ExerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "the demotion applied in memory");
+        harness.Records.Should().ContainSingle("the applied kill switch is recorded despite the abort")
+            .Which.EventType.Should().Be(EngineSteeringLeverRecords.KillSwitchEngagedEventType);
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedOn_NoDemotion_RecordsOneTurnedOn()
+    {
+        var harness = Build();
+        await using var _ = harness;
+        harness.ArmClock(() => { });
+
+        var result = await harness.Service.SetSwampedModeAsync(true, Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Records.Should().ContainSingle().Which.EventType.Should().Be(EngineSteeringLeverRecords.SwampedModeOnEventType);
+    }
+
+    [RequiresDockerFact]
+    public async Task Restore_RevertedByM1_RecordsNothing()
+    {
+        var harness = Build();
+        await using var _ = harness;
+        harness.Autonomy.GetOrCreate(harness.ExerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead", 0);
+        harness.ArmClock(harness.DemoteLead);
+
+        var result = await harness.Service.RestoreFromSafetyAsync(Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        harness.Records.Should().BeEmpty("the clamp was put back exactly — nothing net changed");
+    }
+
+    [RequiresDockerFact]
+    public async Task Restore_NoDemotion_RecordsOneRestored()
+    {
+        var harness = Build();
+        await using var _ = harness;
+        harness.Autonomy.GetOrCreate(harness.ExerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead", 0);
+        harness.ArmClock(() => { });
+
+        var result = await harness.Service.RestoreFromSafetyAsync(Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Records.Should().ContainSingle().Which.EventType.Should().Be(EngineSteeringLeverRecords.AutonomyRestoredEventType);
+    }
+
     // ---- autonomy/restore ----------------------------------------------------------------------------
 
     [RequiresDockerFact]
@@ -319,7 +450,7 @@ public sealed class LeadControllerPostWriteRecheckTests
         TimeZone = "UTC",
     };
 
-    private Harness Build()
+    private Harness Build(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor? interceptor = null)
     {
         var exerciseId = Guid.NewGuid();
         Guid lead;
@@ -329,17 +460,22 @@ public sealed class LeadControllerPostWriteRecheckTests
         }
 
         var context = new ExerciseContext { CurrentExerciseId = exerciseId };
-        var db = _fixture.CreateContext(context);
+        var db = interceptor is null
+            ? _fixture.CreateContext(context)
+            : new PulseDbContext(
+                new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer(_fixture.ConnectionString!).AddInterceptors(interceptor).Options,
+                context);
         var native = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
         native.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
         var clock = new HookableClock(native);
-        var autonomy = new EngineAutonomyRegistry();
         var tiers = new EngineTierPolicyRegistry();
         var cut = new HookableCutRegistry(new GenerationProviderCutRegistry());
         var ambient = new EngineAmbientPolicyRegistry(
             Options.Create(new EngineAmbientGovernanceOptions { AmbientAutonomyAuthorized = true }),
             null);
 
+        var autonomy = new EngineAutonomyRegistry();
+        var recorder = new CapturingSteeringLeverRecorder(() => autonomy.GetOrCreate(exerciseId).SwampedModeEnabled);
         var service = new EngineReviewService(
             new EngineReviewStore(db),
             db,
@@ -355,9 +491,10 @@ public sealed class LeadControllerPostWriteRecheckTests
             cut,
             NullLogger<EngineReviewService>.Instance,
             ambient,
-            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = true }));
+            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = true }),
+            steeringLeverRecorder: recorder);
 
-        return new Harness(_fixture, exerciseId, lead, service, db, clock, autonomy, tiers, cut, ambient);
+        return new Harness(_fixture, exerciseId, lead, service, db, clock, autonomy, tiers, cut, ambient, recorder);
     }
 
     private sealed class Harness(
@@ -370,8 +507,15 @@ public sealed class LeadControllerPostWriteRecheckTests
         EngineAutonomyRegistry autonomy,
         EngineTierPolicyRegistry tierPolicy,
         HookableCutRegistry cut,
-        EngineAmbientPolicyRegistry ambient) : IAsyncDisposable
+        EngineAmbientPolicyRegistry ambient,
+        CapturingSteeringLeverRecorder recorder) : IAsyncDisposable
     {
+        /// <summary>The steering-lever records the service handed to its recorder (#618).</summary>
+        public System.Collections.Generic.IReadOnlyList<EngineSteeringLeverRecord> Records => recorder.Records;
+
+        /// <summary>Swamped mode as each record was handed over — pins that the service records after its state change.</summary>
+        public System.Collections.Generic.IReadOnlyList<bool> SwampedAtRecordTime => recorder.SwampedAtRecordTime;
+
         public Guid ExerciseId => exerciseId;
 
         /// <summary>The seeded lead controller — the session person every raise is made as.</summary>
@@ -404,6 +548,47 @@ public sealed class LeadControllerPostWriteRecheckTests
         }
 
         public async ValueTask DisposeAsync() => await db.DisposeAsync();
+    }
+
+    /// <summary>Runs <see cref="OnFirstReader"/> once, as the service's context issues its first query after arming.</summary>
+    private sealed class FirstReaderHook : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public Action? OnFirstReader { get; set; }
+
+        public bool Fired { get; private set; }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Fired && OnFirstReader is { } hook)
+            {
+                Fired = true;
+                hook();
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    /// <summary>Captures every steering-lever record instead of writing it (#618).</summary>
+    private sealed class CapturingSteeringLeverRecorder(Func<bool> swampedNow) : IEngineSteeringLeverRecorder
+    {
+        private readonly System.Collections.Generic.List<EngineSteeringLeverRecord> _records = [];
+        private readonly System.Collections.Generic.List<bool> _swampedAtRecordTime = [];
+
+        public System.Collections.Generic.IReadOnlyList<EngineSteeringLeverRecord> Records => _records;
+
+        public System.Collections.Generic.IReadOnlyList<bool> SwampedAtRecordTime => _swampedAtRecordTime;
+
+        public Task RecordAsync(EngineSteeringLeverRecord record)
+        {
+            _records.Add(record);
+            _swampedAtRecordTime.Add(swampedNow());
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>Delegates to the native clock, running <see cref="OnFirstRead"/> once on the first scenario-minute read.</summary>

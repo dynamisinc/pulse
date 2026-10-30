@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 
 /// <summary>
 /// Story 03's OWN composition-root seams — the three calls the orchestrator wires into <c>Program.cs</c>.
@@ -65,8 +66,16 @@ public static class LifecycleExtensions
 
         services.AddScoped<ExerciseLifecycleService>();
 
+        // exercise-build-golive/03: the go-live readiness checklist, read by GET /api/staff/readiness and (story 04)
+        // by the stage transition.
+        services.AddScoped<ExerciseReadinessService>();
+
         // The seam this slice OWNS: a fail-closed floor world-steering replaces at merge (see remarks).
         services.TryAddSingleton<ISteeringOverlaySource, NoSteeringOverlaySource>();
+
+        // #390: the post-commit transition seam this slice also OWNS. TryAdd, like the steering floor above:
+        // world-steering's AddPauseParticipantOverlay() replaces it (RemoveAll + add) with the overlay pusher.
+        services.TryAddSingleton<IExerciseLifecycleTransitionObserver, NoOpExerciseLifecycleTransitionObserver>();
 
         // The seams 01b owns: Replace, never TryAdd (see remarks — TryAdd here is the silent failure).
         services.Replace(ServiceDescriptor.Scoped<IShellVariantProjection, LifecycleShellVariantProjection>());

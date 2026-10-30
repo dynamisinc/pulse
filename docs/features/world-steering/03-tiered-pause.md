@@ -74,7 +74,16 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
       Only one tier is active at a time; selecting a new tier (or Resume) replaces the prior one.
       *(The tier state machine correctly represents scope; wiring the deferred consumers —
       `DraftTimerDriver`, inject-queue burst-suspend — to actually react to it is a follow-up, per
-      Out of Scope/Tests below.)*
+      Out of Scope/Tests below.)* *(Update 2026-10-20: **Pause engine** is now enforced server-side. While
+      the tier is `engine`, `ReactionLoopDriver.RunTickAsync` raises no new storyline work (no trigger, no
+      provider call, no `engine.generated`, no review item). MEASURE and the scenario clock keep running,
+      and each storyline's reaction cadence is re-based while held, so resuming produces no catch-up burst.
+      As a result, a storyline that never reacted, or whose silence window opened during the pause, waits
+      one cadence after resume before its first draft. An official post made during the pause still
+      addresses its storyline (silence clock reset, phase Addressed), but the engine's reply burst is
+      dropped, not deferred to resume.
+      Ambient chatter was already held by its publish gate. Already-queued drafts can still be approved,
+      and the console's kill-switch call is unchanged. Tests: `ReactionLoopEnginePauseTests`.)*
 - [x] `usePauseState()` exposes the active tier as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN /
       RUNNING; `<PausePill>` renders it as **dot + text**, never color-only (NFR-001) — this is the
       tier state the `staff-shell` header state pill overrides its label with while paused
@@ -96,6 +105,13 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
       is scoped to the active exercise (COR-001) and staff-only (XC-002).
 - [x] The tier control is **fully keyboard-operable** (NFR-001) — tab to each tier option, activate
       with Enter/Space, and the Freeze confirm step is reachable and dismissable by keyboard alone.
+
+### Ruling (Tom, 2026-10-19): Freeze means "participants held" (#379)
+- [x] **Freeze world** halts PARTICIPANT sim writes: post, reply, like/repost, follow, media upload and post edit
+      get `409 {"reason":"frozen"}` (`ParticipantWriteGate` + `.RefuseWhenWritesPaused()`; see
+      `exercise-build-golive/11`). It does **not** hold staff conduct: a controller's post as a persona still
+      publishes and reaches the held world. The participant's personal pin (a private bookmark) is exempt.
+      Pause injects and Pause engine leave participant writes allowed.
 
 ## Out of Scope
 Break Fiction (story 04, which implies Freeze); the exercise-clock's native/production mechanics

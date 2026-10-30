@@ -212,7 +212,7 @@ Proven by `OverlayComposition_ASteeringChosenInFictionRegister_SurvivesAConcurre
 `W-001` (a composition-root guard for the three wiring lines) was the **merger's**, and would have been red on
 this branch — **it has since been done**, see the wiring table above; `W-004` (participant writes accepted
 during `paused`) is **CTL-023's job** — hazard 1 forbids a second write-refusal mechanism in this slice, and it
-is a named merge obligation; `W-006` (`/hubs/exercise` un-gated) keeps its scope discipline, but its code
+is a named merge obligation; `W-006` (`/hubs/exercise` un-gated; **closed on the send side by #375, 2026-10-19**) keeps its scope discipline, but its code
 comment was changed from an assurance to a **named risk** — "nothing publishes into a
 build/completed/archived exercise" is an *assumption*, not an invariant (nothing consumes
 `ScenarioContentFires`, and the reaction loop does not deregister on `completed`).

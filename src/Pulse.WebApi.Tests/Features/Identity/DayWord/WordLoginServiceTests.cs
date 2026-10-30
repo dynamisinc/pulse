@@ -101,15 +101,17 @@ public sealed class WordLoginServiceTests
     [InlineData("staged")]
     [InlineData("live")]
     [InlineData("paused")]
+    [InlineData("completed")]
     [InlineData("active")]
-    public async Task ParticipantAccessibleLifecycleStates_Admit(string status)
+    [InlineData("complete")]
+    public async Task ParticipantReadLifecycleStates_Admit(string status)
     {
         var exercise = await SeedExerciseAsync(_fixture, status: status);
         await SeedAccountAsync(_fixture, exercise.Id, "jsmith");
         await SeedWordAsync(_fixture, exercise.Id, Today, Word);
 
         (await SignInAsync(exercise.Id, Body("jsmith", Word))).Outcome.Should().Be(
-            WordLoginOutcome.Authenticated, "{0} is participant-accessible (EL-11)", status);
+            WordLoginOutcome.Authenticated, "one rule for all (2026-10-19): {0} accepts participant reads, so it admits sign-in", status);
     }
 
     // ---------------------------------------------------------------- the uniform refusal (AC4)
@@ -214,11 +216,10 @@ public sealed class WordLoginServiceTests
 
     [RequiresDockerTheory]
     [InlineData("build")]
-    [InlineData("completed")]
     [InlineData("archived")]
     [InlineData("scheduled")]
     [InlineData("not-a-state")]
-    public async Task AnExerciseOutsideStagedLivePaused_IsRefused(string status)
+    public async Task AnExerciseWhoseParticipantReadsAreRefused_IsRefused(string status)
     {
         var exercise = await SeedExerciseAsync(_fixture, status: status);
         var account = await SeedAccountAsync(_fixture, exercise.Id, "jsmith");

@@ -36,19 +36,19 @@
  * integration) — this file has no import of, and no dependency on, that hook
  * (file-disjoint parallel build, implementation.md).
  *
- * TELEMETRY (ADP-041/§11, XC-004). The server records none (tracked in #618), so the
- * client emits ONE event per enable/disable the SERVER CONFIRMS (a 200 whose body's
- * `swampedMode` equals the request; never a refusal). It is AT-LEAST-ONCE and BEST-EFFORT:
- * the no-op guard reads a view that may be up to one poll interval stale, so two
- * controllers acting on the same stale view can each log a change. The event goes out via
- * the caller-safe `buildAndEmit`: `channel: 'system'`, `actor {
- * kind: 'engine', actingHumanId }` (the toggling controller), `eventType`
- * `'engine.swamped_mode_changed'` (an open string — no envelope migration),
- * carrying scenario time (COR-053) and the resulting state in `payload`.
+ * TELEMETRY (ADP-041/§11, XC-004). LIVE: the client emits NOTHING (#618). The server
+ * records every real change itself — `engine.swamped-mode.turned-on` / `turned-off` plus an
+ * org audit, attributed to the verified session person — so a client emit would double it
+ * (and carry a client-chosen acting human). MOCK (`USE_MOCK_DATA`, no backend): the client
+ * emits ONE event per enable/disable the store confirms, via the caller-safe
+ * `buildAndEmit`: `channel: 'system'`, `actor { kind: 'engine', actingHumanId }` (the
+ * toggling controller), `eventType` `'engine.swamped_mode_changed'`, carrying scenario
+ * time (COR-053) and the resulting state in `payload`.
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import { scenarioNow } from '@/core/clock'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
@@ -86,7 +86,8 @@ export interface UseSwampedModeResult {
   /**
    * Sets swamped mode on/off for this exercise. `setSwampedMode(true)` is a
    * NO-OP — rejected, not recorded, not logged — when `!isLead`. Every actual
-   * change (including disable) logs a telemetry event (ADP-041).
+   * change (including disable) is recorded by the server live (#618); mock mode
+   * logs a client telemetry event (ADP-041).
    */
   readonly setSwampedMode: (next: boolean) => void
   /** Any settings request (incl. this one's POST + re-read) is in flight — disable the control. */
@@ -187,7 +188,9 @@ export function useSwampedMode(): UseSwampedModeResult {
       }
 
       requestSwampedMode(next, actingHumanId, applied => {
-        // Emit only when the server's 200 body confirms the value we asked for.
+        // Live: the server records the change (#618) — never a client emit too.
+        if (!USE_MOCK_DATA) return
+        // Mock: emit only when the store confirms the value we asked for.
         if (applied !== next) return
         buildAndEmit({
           exerciseId,

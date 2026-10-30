@@ -178,17 +178,17 @@ internal static class MediaSeed
         DateTimeOffset? wallClock = null)
     {
         var id = Guid.NewGuid();
-        var extension = kind == MediaKinds.Image ? "png" : "mp4";
+        var extension = kind switch { MediaKinds.Image => "png", MediaKinds.Document => "pdf", _ => "mp4" };
         var asset = new MediaAsset
         {
             Id = id,
             ExerciseId = exercise.ExerciseId,
             Kind = kind,
-            ContentType = kind == MediaKinds.Image ? "image/png" : "video/mp4",
+            ContentType = kind switch { MediaKinds.Image => "image/png", MediaKinds.Document => "application/pdf", _ => "video/mp4" },
             BlobName = Pulse.WebApi.Features.Media.MediaBlobNames.Build(exercise.ExerciseId, id, extension),
             Bytes = 1234,
-            Width = 640,
-            Height = 480,
+            Width = kind == MediaKinds.Document ? null : 640,
+            Height = kind == MediaKinds.Document ? null : 480,
             DurationSec = kind == MediaKinds.Video ? 12.5 : null,
             OriginalFileName = fileName ?? $"seed-{id:N}.{extension}",
             UploadedByHumanId = uploadedBy,

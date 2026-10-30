@@ -346,6 +346,16 @@ describe('fetchRosterCards - errors', () => {
   })
 })
 
+describe('fetchRosterCards - null exerciseName (story 09)', () => {
+  it('accepts a null exerciseName and passes it through, with no fallback', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(
+      okResponse({ exerciseName: null, cards: buildMockCards(1), skipped: [] }),
+    )
+    const result = await fetchRosterCards([])
+    expect(result.exerciseName).toBeNull()
+  })
+})
+
 describe('fetchRosterCards - runtime guards', () => {
   const good = bodyFor(['a'])
 

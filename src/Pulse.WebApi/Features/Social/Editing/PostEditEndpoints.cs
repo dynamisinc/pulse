@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Follows;
@@ -47,6 +48,7 @@ public static class PostEditEndpoints
         services.TryAddScoped<IReadOnlySessionProbe, ReadOnlySessionProbe>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddPostSeamFallbacks();
+        services.TryAddParticipantWriteGate();
         services.AddScoped<PostEditService>();
 
         return services;
@@ -63,6 +65,10 @@ public static class PostEditEndpoints
         // POST /api/posts.
         endpoints.MapGroup(string.Empty)
             .DenyReadOnlySessions()
+
+            // #379: the shared held-world refusal (409 frozen) every participant write carries; the service asks the
+            // same gate, so a direct service call is refused identically.
+            .RefuseWhenWritesPaused()
             .MapPatch(EditRoute, EditPostAsync)
             .WithMetadata(new RequestSizeLimitAttribute(PostWriteEndpoints.MaxRequestBodyBytes));
 

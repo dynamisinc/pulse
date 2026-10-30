@@ -69,8 +69,9 @@ using Xunit;
 ///   revoked link.</description></item>
 ///   <item><description><b>03 x 05 x 04, disable.</b> A disabled person is refused by the link AND the word, and the card
 ///   sheet skips them as <c>disabled</c>.</description></item>
-///   <item><description><b>03 x 05, EndEx.</b> Once the exercise is <c>completed</c>, an enabled person with an active
-///   link and today's word is refused by both.</description></item>
+///   <item><description><b>03 x 05, closed run.</b> Once the exercise is <c>archived</c>, an enabled person with an active
+///   link and today's word is refused by both (one rule for all, 2026-10-19: sign-in follows participant reads, which
+///   <c>completed</c> still accepts and <c>archived</c> does not).</description></item>
 ///   <item><description><b>XC-004, no secret anywhere.</b> No event carries a link token, the word, an email address or
 ///   the SPA origin; the four <c>login</c> payloads (link and word, success and failure) are present; and every staff
 ///   event names the planner as a system actor with the acting human.</description></item>
@@ -212,22 +213,22 @@ public sealed class EasyLoginSeamTests
                 new RosterCardsRequestBody { ParticipantIds = new List<string?> { jane.Id } })))
             .Sheet!.Skipped.Should().ContainSingle(skip => skip.Reason == "disabled");
 
-        // ---- 03 x 05: at EndEx an enabled person is refused by both ---------------------------------------------------
+        // ---- 03 x 05: once archived an enabled person is refused by both ----------------------------------------------
         (await InScope(services, s => s.GetRequiredService<ParticipantAccessService>().ReissueAsync(Guid.Parse(bob.Id))))
             .Outcome.Should().Be(ParticipantAccessOutcome.Ok);
         var bobUrl = (await ListAsync(services)).Participants.Single(p => p.Id == bob.Id).Link.JoinUrl!;
         await using (var db = _fixture.CreateContext())
         {
-            (await db.Exercises.SingleAsync(e => e.Id == exercise.Id)).Status = "completed";
+            (await db.Exercises.SingleAsync(e => e.Id == exercise.Id)).Status = "archived";
             await db.SaveChangesAsync();
         }
 
         (await InScope(services, s => s.GetRequiredService<JoinLoginService>().JoinAsync(
                 new JoinRequestBody { Token = PersonalLinkSeed.TokenOf(bobUrl) })))
-            .Outcome.Should().Be(JoinLoginOutcome.Rejected, "EL-11: no new sign-in after EndEx");
+            .Outcome.Should().Be(JoinLoginOutcome.Rejected, "no sign-in once the run is archived");
         (await InScope(services, s => s.GetRequiredService<WordLoginService>().SignInAsync(
                 new WordSignInRequestBody { SignInName = "bjones", Word = "brave-otter-42" })))
-            .Outcome.Should().Be(WordLoginOutcome.Rejected, "EL-11: no new sign-in after EndEx");
+            .Outcome.Should().Be(WordLoginOutcome.Rejected, "no sign-in once the run is archived");
 
         // ---- XC-004: no secret anywhere, every sign-in shape present, every staff event attributed ----------------------
         var events = await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id);

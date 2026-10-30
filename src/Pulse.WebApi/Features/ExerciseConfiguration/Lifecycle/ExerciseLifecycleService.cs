@@ -6,8 +6,10 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -43,6 +45,12 @@ public enum ExerciseLifecycleOutcome
 
     /// <summary>The resolved scope has no <c>Exercise</c> row — the endpoint returns 404.</summary>
     NotFound,
+
+    /// <summary>
+    /// exercise-build-golive/04: a stage (build → staged) refused because a blocking readiness item is open — the
+    /// endpoint returns 409 with the open items; nothing changed.
+    /// </summary>
+    ReadinessBlocked,
 }
 
 /// <summary>
@@ -54,11 +62,13 @@ public sealed class ExerciseLifecycleResult
     private ExerciseLifecycleResult(
         ExerciseLifecycleOutcome outcome,
         ExerciseLifecycleSnapshot? snapshot,
-        string? error)
+        string? error,
+        IReadOnlyList<ReadinessItem>? openBlocking = null)
     {
         Outcome = outcome;
         Snapshot = snapshot;
         Error = error;
+        OpenBlocking = openBlocking;
     }
 
     /// <summary>Which outcome occurred.</summary>
@@ -69,6 +79,11 @@ public sealed class ExerciseLifecycleResult
 
     /// <summary>The human-readable reason — non-null for the <c>400</c> and <c>409</c> outcomes.</summary>
     public string? Error { get; }
+
+    /// <summary>
+    /// The open blocking readiness items — non-null only for <see cref="ExerciseLifecycleOutcome.ReadinessBlocked"/>.
+    /// </summary>
+    public IReadOnlyList<ReadinessItem>? OpenBlocking { get; }
 
     /// <summary>A successful read or transition.</summary>
     /// <param name="snapshot">The (post-transition) lifecycle snapshot.</param>
@@ -90,6 +105,17 @@ public sealed class ExerciseLifecycleResult
     /// <returns>A conflict result.</returns>
     public static ExerciseLifecycleResult TransitionNotAllowed(string error) =>
         new(ExerciseLifecycleOutcome.TransitionNotAllowed, null, error);
+
+    /// <summary>A stage refused by the readiness gate (exercise-build-golive/04) — nothing was persisted.</summary>
+    /// <param name="message">The short human-readable reason.</param>
+    /// <param name="openBlocking">The blocking items that are open.</param>
+    /// <returns>A readiness-blocked result.</returns>
+    public static ExerciseLifecycleResult ReadinessBlocked(string message, IReadOnlyList<ReadinessItem> openBlocking)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(openBlocking);
+        return new ExerciseLifecycleResult(ExerciseLifecycleOutcome.ReadinessBlocked, null, message, openBlocking);
+    }
 
     /// <summary>The fail-closed result for an unresolved exercise scope.</summary>
     /// <returns>A scope-unresolved result.</returns>
@@ -134,8 +160,22 @@ public sealed class ExerciseLifecycleResult
 /// clock read and carrying the from/to states plus the acting staff human. A REJECTED transition writes
 /// nothing and emits nothing — the audit trail records what happened, not what was attempted.
 /// </para>
+/// <para>
+/// <b>After the commit (#390).</b> An applied transition then notifies the one
+/// <see cref="IExerciseLifecycleTransitionObserver"/> (world-steering pushes the participant overlay from it), best
+/// effort: after the commit, with <see cref="CancellationToken.None"/>, and with any failure logged and swallowed —
+/// the transition has already happened, so a broken notification must never report it as failed.
+/// </para>
+/// <para>
+/// <b>The stage readiness gate (exercise-build-golive/04).</b> A transition whose target is <c>staged</c> first runs
+/// <see cref="ExerciseReadinessService"/> and is refused (<see cref="ExerciseLifecycleOutcome.ReadinessBlocked"/>, no
+/// write, no event) while any blocking item is <c>open</c>; <c>notChecked</c> items never block. The checklist reads
+/// <see cref="IExerciseContext"/>, so the gate only evaluates when the exercise being moved IS the resolved scope;
+/// otherwise (the org-tier entry point naming an exercise other than the scope) staging is refused outright rather
+/// than judged against a different exercise's checklist. StartEx and every other transition are not gated.
+/// </para>
 /// </remarks>
-public sealed class ExerciseLifecycleService
+public sealed partial class ExerciseLifecycleService
 {
     private const string TransitionedEventType = "exercise.lifecycle.transitioned";
     private const string SystemActorKind = "system";
@@ -144,23 +184,38 @@ public sealed class ExerciseLifecycleService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly IExerciseLifecycleTransitionObserver _transitionObserver;
+    private readonly ILogger<ExerciseLifecycleService> _logger;
+    private readonly ExerciseReadinessService _readiness;
 
-    /// <summary>Creates the service over persistence, the resolved scope, and the staff-session seam.</summary>
+    /// <summary>Creates the service over persistence, the resolved scope, the staff-session seam and readiness.</summary>
     /// <param name="dbContext">The persistence context the status is read and written through.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope — the ONLY source of "which exercise".</param>
     /// <param name="currentStaffSession">Identifies the acting staff human for the XC-004 event.</param>
+    /// <param name="transitionObserver">Notified, best effort, after an applied transition commits (#390).</param>
+    /// <param name="logger">Logs a failed post-commit notification.</param>
+    /// <param name="readiness">The go-live checklist the stage transition is gated on (exercise-build-golive/04).</param>
     public ExerciseLifecycleService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        ICurrentStaffSessionAccessor currentStaffSession)
+        ICurrentStaffSessionAccessor currentStaffSession,
+        IExerciseLifecycleTransitionObserver transitionObserver,
+        ILogger<ExerciseLifecycleService> logger,
+        ExerciseReadinessService readiness)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(transitionObserver);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(readiness);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _currentStaffSession = currentStaffSession;
+        _transitionObserver = transitionObserver;
+        _logger = logger;
+        _readiness = readiness;
     }
 
     /// <summary>
@@ -326,6 +381,17 @@ public sealed class ExerciseLifecycleService
                 $"'{from}' -> '{target}' is not an allowed lifecycle transition ({allowedText}).");
         }
 
+        // exercise-build-golive/04: the stage readiness gate, BEFORE any mutation. Only the staged target is gated;
+        // StartEx (staged -> live) shows readiness at the decision but never re-runs it.
+        if (string.Equals(target, ExerciseLifecycleStates.Staged, StringComparison.Ordinal))
+        {
+            var refusal = await CheckStageReadinessAsync(exerciseId, cancellationToken);
+            if (refusal is not null)
+            {
+                return refusal;
+            }
+        }
+
         exercise.Status = target;
 
         // One server clock read shared by the entity write and its telemetry (never client input).
@@ -386,7 +452,71 @@ public sealed class ExerciseLifecycleService
         // ONE unit of work: the status change and its audit event commit together or not at all.
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        // #390: ONLY after a successful commit (every refusal returned above, and a failed save threw). Best effort.
+        await NotifyTransitionedAsync(exercise, from);
+
         return ExerciseLifecycleResult.Ok(Snapshot(exerciseId, target, exercise.FirstLiveAt));
+    }
+
+    /// <summary>
+    /// Tells the <see cref="IExerciseLifecycleTransitionObserver"/> about a COMMITTED transition. Never throws: the
+    /// change has already happened, so a failure here is logged and swallowed rather than surfaced as a failed
+    /// transition. <see cref="CancellationToken.None"/> on purpose — a client aborting after the commit must not
+    /// suppress the announcement of a change that did happen.
+    /// </summary>
+    private async Task NotifyTransitionedAsync(Exercise exercise, string from)
+    {
+        try
+        {
+            await _transitionObserver.OnTransitionedAsync(exercise, from, CancellationToken.None);
+        }
+#pragma warning disable CA1031 // Best effort by design: the transition has committed; nothing here may undo or fail it.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogTransitionObserverFailed(ex, exercise.Id, from, exercise.Status);
+        }
+    }
+
+    /// <summary>Source-generated warning for a failed post-commit notification (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The lifecycle transition of exercise {ExerciseId} ({From} -> {To}) COMMITTED, but notifying its " +
+                  "transition observer failed; connected participants may not see the change until they re-read it.")]
+    private partial void LogTransitionObserverFailed(Exception exception, Guid exerciseId, string from, string to);
+
+    /// <summary>
+    /// The stage gate: <c>null</c> when the exercise may be staged, else the refusal. Read-only — it writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// The checklist is computed from <see cref="IExerciseContext"/> (COR-001), never from an exercise id. So when the
+    /// exercise being moved is not the resolved scope (only reachable through the org-tier
+    /// <see cref="TransitionTenantCheckedAsync"/>), the checklist would describe a DIFFERENT exercise; rather than judge
+    /// one exercise by another's readiness, staging is refused there (fail closed).
+    /// </remarks>
+    private async Task<ExerciseLifecycleResult?> CheckStageReadinessAsync(
+        Guid exerciseId,
+        CancellationToken cancellationToken)
+    {
+        if (_exerciseContext.CurrentExerciseId != exerciseId)
+        {
+            // Not ReadinessBlocked: that 409 body always means "these items are open", and none were judged.
+            return ExerciseLifecycleResult.TransitionNotAllowed(
+                "Readiness can only be checked from inside the exercise, so it cannot be staged from here.");
+        }
+
+        var readiness = await _readiness.GetAsync(cancellationToken);
+        return readiness.Outcome switch
+        {
+            ExerciseReadinessOutcome.Ok when readiness.Report!.Ready => null,
+            ExerciseReadinessOutcome.Ok => ExerciseLifecycleResult.ReadinessBlocked(
+                "The exercise cannot be staged while blocking readiness items are open.",
+                readiness.Report!.OpenBlocking),
+            ExerciseReadinessOutcome.NotFound => ExerciseLifecycleResult.NotFound(),
+
+            // Unreachable (the scope matched a loaded row above); fail closed rather than stage unchecked.
+            _ => ExerciseLifecycleResult.ScopeUnresolved(),
+        };
     }
 
     /// <summary>Builds the snapshot for a stored status value.</summary>

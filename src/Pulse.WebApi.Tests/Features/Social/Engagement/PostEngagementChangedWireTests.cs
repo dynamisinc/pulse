@@ -11,6 +11,7 @@ using Moq;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Engagement;
+using Pulse.WebApi.Tests.Features.Realtime;
 using Xunit;
 
 /// <summary>
@@ -57,7 +58,7 @@ public sealed class PostEngagementChangedWireTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        await new SignalRFeedBroadcaster(hubContext.Object).BroadcastPostEngagementChangedAsync(exerciseA, change);
+        await TestFeedBroadcasters.Create(hubContext.Object).BroadcastPostEngagementChangedAsync(exerciseA, change);
 
         groupA.Verify(
             p => p.SendCoreAsync(

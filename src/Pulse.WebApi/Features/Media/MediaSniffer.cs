@@ -8,7 +8,7 @@ using Pulse.WebApi.Data.Entities;
 /// The outcome of a successful magic-byte sniff — the ONLY source of an upload's kind, MIME type and blob
 /// extension.
 /// </summary>
-/// <param name="Kind"><see cref="MediaKinds.Image"/> or <see cref="MediaKinds.Video"/>.</param>
+/// <param name="Kind"><see cref="MediaKinds.Image"/>, <see cref="MediaKinds.Video"/> or <see cref="MediaKinds.Document"/>.</param>
 /// <param name="ContentType">The canonical MIME type stored on the asset and the blob.</param>
 /// <param name="Extension">The blob-name extension (no dot).</param>
 public sealed record SniffedMediaType(string Kind, string ContentType, string Extension);
@@ -16,22 +16,39 @@ public sealed record SniffedMediaType(string Kind, string ContentType, string Ex
 /// <summary>
 /// Decides an upload's type from its LEADING BYTES alone (demo-polish BM AC "Types by magic bytes only",
 /// NFR-004). The file name, its extension and the client's <c>Content-Type</c> are never inputs — this type
-/// cannot even see them. An allowlist: JPEG, PNG, GIF87a/89a, WebP, MP4 (by <c>ftyp</c> major brand) and WebM
-/// (EBML + <c>webm</c> DocType). Everything else — SVG, HTML, executables, PDFs, empty or truncated headers,
-/// QuickTime/3GP/HEIF/AVIF ISO-BMFF brands, Matroska — is <c>null</c> (the endpoint's 415).
+/// cannot even see them. An allowlist: JPEG, PNG, GIF87a/89a, WebP, MP4 (by <c>ftyp</c> major brand), WebM
+/// (EBML + <c>webm</c> DocType) and — press-room story 02 — PDF (a <c>%PDF-n.n</c> header within the first
+/// <see cref="DocumentHeaderWindow"/> bytes, after an inert prefix only). Everything else — SVG, HTML, executables,
+/// Office files, empty or truncated headers, QuickTime/3GP/HEIF/AVIF ISO-BMFF brands, Matroska — is <c>null</c> (the
+/// endpoint's 415). Which KINDS a route accepts is the route's decision: <c>POST /api/media</c> still answers 415 for a
+/// sniffed document.
 /// </summary>
 /// <remarks>
 /// A polyglot (a valid PNG signature followed by markup) sniffs as PNG and is then stored and served STRICTLY as
 /// <c>image/png</c>: the browser never treats it as a document, and the read SAS pins the response
 /// <c>Content-Type</c> to the stored value.
+/// <para>
+/// <b>PDF prefix tolerance, tightened.</b> Readers accept a PDF header anywhere in the first 1024 bytes. The bytes
+/// before it may only be printable ASCII, whitespace or ESC (a PJL print-job prefix) and never <c>&lt;</c> or
+/// <c>&gt;</c>: an HTML/SVG/XML document, an executable or an archive with a <c>%PDF-</c> string near its start is
+/// still rejected, never typed as a document.
+/// </para>
 /// </remarks>
 public static class MediaSniffer
 {
     /// <summary>
-    /// How many leading bytes the upload pipeline reads before sniffing. Enough for every signature here,
-    /// including a WebM EBML header (typically ~40 bytes).
+    /// How many leading bytes every image/video signature needs, including a WebM EBML header (typically ~40 bytes).
     /// </summary>
     public const int HeadLength = 64;
+
+    /// <summary>How far into the file a PDF header may start (the spec's reader tolerance).</summary>
+    public const int DocumentHeaderWindow = 1024;
+
+    /// <summary>
+    /// How many leading bytes the upload pipeline reads before sniffing: enough for a PDF header at the end of
+    /// <see cref="DocumentHeaderWindow"/> (and so for every shorter signature).
+    /// </summary>
+    public const int ReadHeadLength = DocumentHeaderWindow + 8;
 
     private static readonly SniffedMediaType Jpeg = new(MediaKinds.Image, "image/jpeg", "jpg");
     private static readonly SniffedMediaType Png = new(MediaKinds.Image, "image/png", "png");
@@ -39,6 +56,7 @@ public static class MediaSniffer
     private static readonly SniffedMediaType WebP = new(MediaKinds.Image, "image/webp", "webp");
     private static readonly SniffedMediaType Mp4 = new(MediaKinds.Video, "video/mp4", "mp4");
     private static readonly SniffedMediaType WebM = new(MediaKinds.Video, "video/webm", "webm");
+    private static readonly SniffedMediaType Pdf = new(MediaKinds.Document, "application/pdf", "pdf");
 
     private static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     private static readonly byte[] EbmlMagic = [0x1A, 0x45, 0xDF, 0xA3];
@@ -56,7 +74,7 @@ public static class MediaSniffer
     private static readonly HashSet<string> WebPChunkTypes = new(StringComparer.Ordinal) { "VP8 ", "VP8L", "VP8X" };
 
     /// <summary>Sniffs <paramref name="head"/> (the file's first bytes).</summary>
-    /// <param name="head">Up to <see cref="HeadLength"/> leading bytes of the upload.</param>
+    /// <param name="head">Up to <see cref="ReadHeadLength"/> leading bytes of the upload.</param>
     /// <returns>The sniffed type, or <c>null</c> when the bytes are not an allowed media type.</returns>
     public static SniffedMediaType? Sniff(ReadOnlySpan<byte> head)
     {
@@ -90,7 +108,42 @@ public static class MediaSniffer
             return WebM;
         }
 
+        if (IsPdf(head))
+        {
+            return Pdf;
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// A <c>%PDF-</c> + digit + <c>.</c> + digit header starting within <see cref="DocumentHeaderWindow"/> bytes, whose
+    /// prefix (if any) is inert: printable ASCII, whitespace or ESC, and no <c>&lt;</c>/<c>&gt;</c> (see remarks).
+    /// </summary>
+    private static bool IsPdf(ReadOnlySpan<byte> head)
+    {
+        var limit = Math.Min(head.Length, DocumentHeaderWindow + 8);
+        for (var start = 0; start + 8 <= limit && start < DocumentHeaderWindow; start++)
+        {
+            var candidate = head.Slice(start, 8);
+            if (candidate[..5].SequenceEqual("%PDF-"u8)
+                && char.IsAsciiDigit((char)candidate[5])
+                && candidate[6] == (byte)'.'
+                && char.IsAsciiDigit((char)candidate[7]))
+            {
+                return true;
+            }
+
+            var prefixByte = head[start];
+            var inert = prefixByte is 0x09 or 0x0A or 0x0C or 0x0D or 0x1B
+                || (prefixByte >= 0x20 && prefixByte <= 0x7E && prefixByte != (byte)'<' && prefixByte != (byte)'>');
+            if (!inert)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     /// <summary><c>RIFF</c> + size + <c>WEBP</c> + a <c>VP8 </c>/<c>VP8L</c>/<c>VP8X</c> first chunk.</summary>

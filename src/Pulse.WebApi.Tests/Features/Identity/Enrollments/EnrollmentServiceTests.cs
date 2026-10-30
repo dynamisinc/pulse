@@ -263,9 +263,14 @@ public sealed class EnrollmentServiceTests
             EnrollmentService.SwampedModeOffAuditKind,
             EnrollmentService.RevokedAuditKind,
         ]);
-        (await read.TelemetryEvents.IgnoreQueryFilters()
-                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.SwampedModeOffEventType))
-            .Should().Be(1);
+        var flip = await read.TelemetryEvents.IgnoreQueryFilters()
+            .SingleAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.SwampedModeOffEventType);
+
+        // #618 W5: the ONE swamped-off shape {reason, wasOn, isOn, scenarioMinute?} — no clock here, so no minute.
+        using var payload = System.Text.Json.JsonDocument.Parse(flip.Payload!);
+        payload.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("reason", "wasOn", "isOn");
+        payload.RootElement.GetProperty("reason").GetString().Should().Be("lead-released");
+        payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeFalse();
     }
 
     [RequiresDockerFact]

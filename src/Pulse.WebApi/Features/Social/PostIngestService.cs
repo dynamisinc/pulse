@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Threads;
@@ -143,6 +144,7 @@ public sealed partial class PostIngestService
     private readonly IReplyParentResolver? _replyParentResolver;
     private readonly IParticipantPostProjector? _projector;
     private readonly IPostEngagementReader? _engagementReader;
+    private readonly IExerciseClock? _exerciseClock;
 
     /// <summary>Creates the ingest service with its persistence, scope, and broadcast collaborators.</summary>
     /// <param name="dbContext">The persistence context the post and its telemetry event are written through.</param>
@@ -166,6 +168,11 @@ public sealed partial class PostIngestService
     /// The engagement read the feed projection uses, for a reply's parent push (DF-17). Optional: when absent (a test
     /// that builds the service by hand), a reply pushes no parent counts.
     /// </param>
+    /// <param name="exerciseClock">
+    /// The native exercise clock (fix/noise-new-posts-clock). When the exercise's clock is started, it stamps the post's
+    /// scenario time for every origin (see <see cref="ResolveScenarioTime"/>). Optional: DI always supplies it; a test
+    /// that builds the service by hand without one keeps the client-supplied value.
+    /// </param>
     public PostIngestService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -174,7 +181,8 @@ public sealed partial class PostIngestService
         ILogger<PostIngestService>? logger = null,
         IReplyParentResolver? replyParentResolver = null,
         IParticipantPostProjector? projector = null,
-        IPostEngagementReader? engagementReader = null)
+        IPostEngagementReader? engagementReader = null,
+        IExerciseClock? exerciseClock = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -188,6 +196,7 @@ public sealed partial class PostIngestService
         _replyParentResolver = replyParentResolver;
         _projector = projector;
         _engagementReader = engagementReader;
+        _exerciseClock = exerciseClock;
     }
 
     /// <summary>
@@ -282,10 +291,14 @@ public sealed partial class PostIngestService
                 request.ScenarioTime,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal,
-                out var scenarioTime))
+                out var clientScenarioTime))
         {
             return PostIngestResult.Invalid("scenarioTime must be an ISO-8601 instant.");
         }
+
+        // fix/noise-new-posts-clock: ONE clock, the server's. The client value is still required and validated above
+        // (compatibility), but a started clock overrides it — see ResolveScenarioTime.
+        var scenarioTime = ResolveScenarioTime(exerciseId, origin, clientScenarioTime, request.Backdate);
 
         // 2b. demo-polish BP: the engagement baseline (staff only), the attachments and the reply parent. All of
         //     them are settled BEFORE anything is added to the unit of work, so a refusal writes nothing.
@@ -341,8 +354,9 @@ public sealed partial class PostIngestService
 
         // 4. Build the post. ExerciseId is STAMPED from the resolved scope (never the client body); CreatedWallClock
         //    is the SERVER clock (never client); the three provenance columns come from the server-derived
-        //    attribution (never the client body). CreatedScenarioTime is client-supplied this phase (COR-050 backend
-        //    clock is B3). Provenance is staff/telemetry-only — never projected onto a participant response.
+        //    attribution (never the client body). CreatedScenarioTime is the SERVER exercise clock whenever it is
+        //    started (ResolveScenarioTime), the client value otherwise. Provenance is staff/telemetry-only — never
+        //    projected onto a participant response.
         var post = new Post
         {
             Id = Guid.NewGuid(),
@@ -453,6 +467,43 @@ public sealed partial class PostIngestService
 
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
+    }
+
+    /// <summary>
+    /// The scenario instant a post is stamped with (fix/noise-new-posts-clock): the exercise clock's
+    /// <see cref="IExerciseClock.CurrentScenarioTime"/> whenever it is non-null (started, running OR frozen), for EVERY
+    /// origin — so a participant post, a controller-as-persona post and a noise/inject/engine post made at the same
+    /// moment carry the same scenario time and sort together. Two exceptions keep the client value:
+    /// <list type="bullet">
+    ///   <item>the clock is not started (or no clock is available) — today's behaviour;</item>
+    ///   <item>a staff <c>controller-as-persona</c> write carrying <c>backdate: true</c> (the seed's deliberately
+    ///   backdated opening feed) — only when that value is not in the future: a client instant later than the started
+    ///   clock is clamped to the clock (review W-003). <c>backdate</c> is ignored for every other origin: the origin is
+    ///   server-derived (<see cref="PostAttribution"/>), so a participant can never claim it.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="exerciseId">The server-resolved exercise.</param>
+    /// <param name="origin">The server-derived origin.</param>
+    /// <param name="clientScenarioTime">The validated client-supplied instant.</param>
+    /// <param name="backdate">The request's <c>backdate</c> flag.</param>
+    /// <returns>The scenario instant to persist, emit and broadcast.</returns>
+    private DateTimeOffset ResolveScenarioTime(
+        Guid exerciseId, string origin, DateTimeOffset clientScenarioTime, bool? backdate)
+    {
+        var serverScenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId);
+        if (serverScenarioTime is not { } server)
+        {
+            return clientScenarioTime;
+        }
+
+        if (backdate == true && string.Equals(origin, ControllerAsPersonaOrigin, StringComparison.Ordinal))
+        {
+            // Review W-003: backdate means "earlier", never "later" — a future instant is clamped to the server clock,
+            // so no staff write can sit above posts the clock has not reached yet.
+            return clientScenarioTime > server ? server : clientScenarioTime;
+        }
+
+        return server;
     }
 
     /// <summary>

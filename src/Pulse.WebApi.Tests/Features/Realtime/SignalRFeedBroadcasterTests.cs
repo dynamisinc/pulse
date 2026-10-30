@@ -7,9 +7,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Moderation;
 
 /// <summary>
@@ -34,7 +38,7 @@ public class SignalRFeedBroadcasterTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        var broadcaster = new SignalRFeedBroadcaster(hubContext.Object);
+        var broadcaster = TestFeedBroadcasters.Create(hubContext.Object);
 
         await broadcaster.BroadcastPostAsync(exerciseId, post);
 
@@ -65,7 +69,7 @@ public class SignalRFeedBroadcasterTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        var broadcaster = new SignalRFeedBroadcaster(hubContext.Object);
+        var broadcaster = TestFeedBroadcasters.Create(hubContext.Object);
 
         await broadcaster.BroadcastPostAsync(exerciseA, SamplePost());
 
@@ -82,7 +86,7 @@ public class SignalRFeedBroadcasterTests
     public async Task BroadcastPostAsync_NullPost_Throws()
     {
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
-        var broadcaster = new SignalRFeedBroadcaster(hubContext.Object);
+        var broadcaster = TestFeedBroadcasters.Create(hubContext.Object);
 
         var act = async () => await broadcaster.BroadcastPostAsync(Guid.NewGuid(), null!);
 
@@ -106,7 +110,7 @@ public class SignalRFeedBroadcasterTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        await new SignalRFeedBroadcaster(hubContext.Object).BroadcastPostRemovedAsync(exerciseId, postId);
+        await TestFeedBroadcasters.Create(hubContext.Object).BroadcastPostRemovedAsync(exerciseId, postId);
 
         clients.Verify(c => c.Group($"exercise:{exerciseId}"), Times.Once);
         clients.Verify(
@@ -144,7 +148,7 @@ public class SignalRFeedBroadcasterTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        await new SignalRFeedBroadcaster(hubContext.Object).BroadcastPostRemovedAsync(exerciseA, Guid.NewGuid());
+        await TestFeedBroadcasters.Create(hubContext.Object).BroadcastPostRemovedAsync(exerciseA, Guid.NewGuid());
 
         groupA.Verify(p => p.SendCoreAsync("PostRemoved", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()), Times.Once);
         staffA.Verify(
@@ -183,6 +187,189 @@ public class SignalRFeedBroadcasterTests
         task.IsCompletedSuccessfully.Should().BeTrue("the default implementation is a completed no-op");
         await task;
     }
+
+    // ---- #375: the EndEx send gate ---------------------------------------------------------------------
+
+    /// <summary>The five participant frames the broadcaster sends, by client event name.</summary>
+    public static readonly TheoryData<string> AllFrames = new()
+    {
+        "PostReceived",
+        "PostRemoved",
+        "PostPinChanged",
+        "PostEdited",
+        "PostEngagementChanged",
+    };
+
+    /// <summary>Every (frame, closed status) pair: build, completed, archived, an unknown literal, and a missing row.</summary>
+    public static TheoryData<string, string?> FramesInClosedStates()
+    {
+        var data = new TheoryData<string, string?>();
+        foreach (var frame in AllFrames)
+        {
+            foreach (var status in new[] { "build", "completed", "archived", "not-a-state", null })
+            {
+                data.Add(frame, status);
+            }
+        }
+
+        return data;
+    }
+
+    /// <summary>Every (frame, open status) pair: staged, live, paused, and the legacy <c>active</c> literal.</summary>
+    public static TheoryData<string, string> FramesInOpenStates()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var frame in AllFrames)
+        {
+            foreach (var status in new[] { "staged", "live", "paused", "active" })
+            {
+                data.Add(frame, status);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(FramesInClosedStates))]
+    public async Task Broadcast_WhenTheExerciseIsNotParticipantAccessible_NeverReachesTheParticipantGroup_OnlyTheStaffGroup(
+        string frame, string? status)
+    {
+        // #375: after EndEx (or in build/archived, or on an unreadable status) a participant tab still connected to
+        // /hubs/exercise must receive NOTHING. Staff consoles keep their live view through the staff group.
+        var exerciseId = Guid.NewGuid();
+        var participantGroup = new Mock<IClientProxy>();
+        var staffGroup = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}")).Returns(participantGroup.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}:staff")).Returns(staffGroup.Object);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
+
+        await SendAsync(TestFeedBroadcasters.Create(hubContext.Object, status), frame, exerciseId);
+
+        clients.Verify(
+            c => c.Group($"exercise:{exerciseId}"),
+            Times.Never,
+            $"a {frame} frame in lifecycle state '{status ?? "(no exercise row)"}' must fail closed: the participant group is never even addressed");
+        participantGroup.Verify(
+            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        staffGroup.Verify(
+            p => p.SendCoreAsync(frame, It.Is<object?[]>(args => args.Length == 1), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "staff consoles keep their live view of a closed exercise through the staff-only group");
+    }
+
+    [Theory]
+    [MemberData(nameof(FramesInOpenStates))]
+    public async Task Broadcast_WhenTheExerciseIsParticipantAccessible_ReachesTheExerciseWideGroup_AndNotTheStaffGroup(
+        string frame, string status)
+    {
+        var exerciseId = Guid.NewGuid();
+        var participantGroup = new Mock<IClientProxy>();
+        var staffGroup = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}")).Returns(participantGroup.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}:staff")).Returns(staffGroup.Object);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
+
+        await SendAsync(TestFeedBroadcasters.Create(hubContext.Object, status), frame, exerciseId);
+
+        participantGroup.Verify(
+            p => p.SendCoreAsync(frame, It.Is<object?[]>(args => args.Length == 1), It.IsAny<CancellationToken>()),
+            Times.Once,
+            $"in '{status}' participants are admitted, so the frame goes to the exercise-wide group as before");
+        clients.Verify(
+            c => c.Group($"exercise:{exerciseId}:staff"),
+            Times.Never,
+            "staff connections are in the exercise-wide group too, so they get the frame exactly once");
+    }
+
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    [InlineData("active")]
+    [InlineData("scheduled")]
+    [InlineData("complete")]
+    [InlineData("not-a-state")]
+    [InlineData(null)]
+    public void TheSendGatePredicate_IsTheRestGatesPredicate_AndTheLifecycleBehaviourHook(string? status)
+    {
+        // #375: the hub send gate must agree with ExerciseLifecycleGatingMiddleware (which calls
+        // IsParticipantAccessible) and with the AC7 behaviour hook, for every literal including legacy and unknown.
+        Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle.ExerciseLifecycleStates.IsParticipantAccessible(status)
+            .Should().Be(
+                Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle.ExerciseLifecycleStates.BehaviourOf(status).ParticipantAccessOpen,
+                "the REST gate and the behaviour hook must never disagree about who is admitted");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllFrames))]
+    public async Task Broadcast_WhenTheStatusReadThrows_AddressesNeitherGroup_AndPropagates(string frame)
+    {
+        // #375 S-1: an unreadable lifecycle (database down) must not fall through to the participant group, and must
+        // not be swallowed either: the caller sees the failure, and nothing is sent to anyone.
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
+        var broadcaster = new SignalRFeedBroadcaster(
+            hubContext.Object,
+            (_, _) => throw new InvalidOperationException("status read failed"),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SignalRFeedBroadcaster>.Instance);
+
+        var act = () => SendAsync(broadcaster, frame, Guid.NewGuid());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("status read failed");
+        clients.Verify(c => c.Group(It.IsAny<string>()), Times.Never, "no group, participant or staff, is addressed");
+    }
+
+    [Fact]
+    public void AddSocialRealtimeHub_Alone_RegistersTheLifecycleReader_SoTheBroadcasterResolves_WithoutReplacingAHostsOwn()
+    {
+        // #375: the broadcaster now needs ExerciseLifecycleStatusReader. AddSocialRealtimeHub must supply it itself
+        // (not rely on AddPauseParticipantOverlay being wired), and only by TryAdd, so a host's own reader wins.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSocialRealtimeHub();
+
+        using (var provider = services.BuildServiceProvider())
+        using (var scope = provider.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<IFeedBroadcaster>().Should().BeOfType<SignalRFeedBroadcaster>();
+        }
+
+        var hostsOwn = TestFeedBroadcasters.FixedStatus("live");
+        var overridden = new ServiceCollection();
+        overridden.AddSingleton(hostsOwn);
+        overridden.AddSocialRealtimeHub();
+
+        overridden.Where(d => d.ServiceType == typeof(ExerciseLifecycleStatusReader)).Should().ContainSingle()
+            .Which.ImplementationInstance.Should().BeSameAs(hostsOwn, "the registration is TryAdd");
+    }
+
+    /// <summary>Sends <paramref name="frame"/> through the matching broadcaster method with a minimal payload.</summary>
+    private static Task SendAsync(SignalRFeedBroadcaster broadcaster, string frame, Guid exerciseId) => frame switch
+    {
+        "PostReceived" => broadcaster.BroadcastPostAsync(exerciseId, SamplePost()),
+        "PostRemoved" => broadcaster.BroadcastPostRemovedAsync(exerciseId, Guid.NewGuid()),
+        "PostPinChanged" => broadcaster.BroadcastPostPinChangedAsync(exerciseId, Guid.NewGuid(), pinnedForAll: true),
+        "PostEdited" => broadcaster.BroadcastPostEditedAsync(exerciseId, new PostEditedDto
+        {
+            PostId = Guid.NewGuid().ToString(),
+            Text = "corrected",
+            Edited = new PostEditedSummaryDto { Count = 1, ScenarioTime = "2033-09-04T13:05:00.0000000-04:00" },
+            Version = 1,
+        }),
+        "PostEngagementChanged" => broadcaster.BroadcastPostEngagementChangedAsync(
+            exerciseId, PostEngagementChangedDto.For(Guid.NewGuid(), new ParticipantPostCounts(1, 0, 0), 1)),
+        _ => throw new ArgumentOutOfRangeException(nameof(frame), frame, "not a broadcaster frame"),
+    };
 
     /// <summary>A double written before takedown existed: it implements only <c>BroadcastPostAsync</c>.</summary>
     private sealed class PostOnlyBroadcaster : IFeedBroadcaster

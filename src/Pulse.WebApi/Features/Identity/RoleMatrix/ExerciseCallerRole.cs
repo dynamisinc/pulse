@@ -201,11 +201,12 @@ public sealed class ExerciseCallerRole
             return;
         }
 
-        var scenarioMinute = clock?.CurrentScenarioMinute(exerciseId) ?? 0;
         var now = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
-        var payload = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{{\"reason\":\"{NoLeadRecheckReason}\",\"wasOn\":true,\"scenarioMinute\":{scenarioMinute}}}");
+
+        // #618: the ONE swamped-off shape {reason, wasOn, isOn, scenarioMinute?} every path records (the minute is
+        // omitted while the scenario clock has not started, never a fabricated 0).
+        var payload = EngineSteeringLeverRecords.SwampedModePayload(
+            NoLeadRecheckReason, wasOn: true, isOn: false, EngineSteeringLeverRecords.ScenarioMinuteOrNull(clock, exerciseId));
 
         try
         {

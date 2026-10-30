@@ -19,19 +19,21 @@
  *
  * MOCK <-> LIVE (UAT engine-pause fix; COR-001/018). The local per-exercise
  * store above is ALWAYS the optimistic UI source `<EngineControlBar>` /
- * `DraftTimerDriver` read `effective` from, in BOTH modes, and the
- * `engine.autonomy_changed` telemetry below is ALWAYS emitted in BOTH modes
- * too — the backend `kill-switch`/`restore` endpoints mutate in-memory
- * autonomy state but emit no telemetry of their own (no autonomy event type
- * exists there yet), so this frontend emit is the ONLY audit trail of a
- * steering action; skipping it live would leave zero record. Behind the ONE
- * `USE_MOCK_DATA` flag (`@/core/config/mockData`), `setMode` additionally:
- *   - mock: stops there (unchanged legacy behavior — no backend call);
- *   - live (`USE_MOCK_DATA === false`): ALSO fires
- *     `liveEngineControlActions.setMode` (the real `kill-switch`/`restore`
- *     POST) and, if it rejects, REVERTS the optimistic update — the kill
- *     switch must never claim a safety state that didn't actually take (the
- *     telemetry already logged the attempted change either way). `degrade`/
+ * `DraftTimerDriver` read `effective` from, in BOTH modes. Behind the ONE
+ * `USE_MOCK_DATA` flag (`@/core/config/mockData`), `setMode` then:
+ *   - mock: emits the `engine.autonomy_changed` telemetry below and stops
+ *     there (no backend exists in mock mode, so this emit is its only record);
+ *   - live (`USE_MOCK_DATA === false`): emits NO client telemetry for the
+ *     kill switch (#618) — the backend `kill-switch`/`restore` endpoints now
+ *     record each REAL change themselves (`engine.kill-switch.engaged` /
+ *     `engine.autonomy.restored` + org audit, attributed to the verified
+ *     session person). A client emit here was optimistic (sent before the
+ *     POST, kept on rejection) and carried a client-supplied acting human, so
+ *     it would double — and could contradict — the server's record. Live
+ *     fires `liveEngineControlActions.setMode` (the real `kill-switch`/
+ *     `restore` POST) and, if it rejects, REVERTS the optimistic update — the
+ *     kill switch must never claim a safety state that didn't actually take
+ *     (a refused POST is recorded by nobody: nothing changed). `degrade`/
  *     `restore` (the mock provider-degraded clamp) are UNCHANGED — a separate
  *     mock, not part of this flip.
  *
@@ -70,8 +72,9 @@
  * `resetForTests`) so a remount under a different exercise reads a distinct
  * state and no exercise's engine-control state leaks into another's.
  *
- * TELEMETRY (ADP-041/§11, XC-004). Every actual `setMode`/`degrade`/`restore`
- * transition (a value that changes) emits ONE event via the caller-safe
+ * TELEMETRY (ADP-041/§11, XC-004). IN MOCK MODE ONLY (`USE_MOCK_DATA`), every
+ * actual `setMode`/`degrade`/`restore` transition (a value that changes)
+ * emits ONE event via the caller-safe
  * `buildAndEmit`: `eventType: 'engine.autonomy_changed'` (an open string — no
  * envelope migration), `channel: 'system'`, `actor { kind: 'engine',
  * actingHumanId }`, scenario time (COR-053), `payload.cause` distinguishing
@@ -305,17 +308,19 @@ export function useEngineControl(): UseEngineControlResult {
       const next: EngineControlState = { ...current, mode }
       // Optimistic in BOTH modes — the console must flip instantly either way.
       setFor(exerciseId, next)
-      // Logged in BOTH modes too — the backend kill-switch/restore endpoints
-      // emit no telemetry of their own, so this is the only audit trail.
-      emit('kill-switch', next)
 
-      if (USE_MOCK_DATA) return
+      if (USE_MOCK_DATA) {
+        // Mock has no backend, so the client emit is its only record.
+        emit('kill-switch', next)
+        return
+      }
 
-      // Live: additionally fire the real kill-switch/restore POST. On
-      // rejection, REVERT the optimistic flip above — the switch must never
-      // claim a safety state (e.g. "STOPPED") that the backend didn't
-      // actually apply. The telemetry above still stands as the record of the
-      // attempted change.
+      // Live: fire the real kill-switch/restore POST — and emit NOTHING here
+      // (#618): the server records the real change itself, attributed to the
+      // verified session person. On rejection, REVERT the optimistic flip
+      // above — the switch must never claim a safety state (e.g. "STOPPED")
+      // that the backend didn't actually apply; a refused change is recorded
+      // by nobody.
       //
       // KNOWN GAP (out of scope here): the endpoints return the authoritative
       // EngineAutonomyStateDto, but we discard it and keep the optimistic
@@ -375,7 +380,8 @@ export function useEngineControl(): UseEngineControlResult {
         degradedReason: reason.trim() || 'generation provider degraded',
       }
       setFor(exerciseId, next)
-      emit('degraded-mode', next)
+      // DEV-only provider mock: never a client emit on the live path (#618 S-B).
+      if (USE_MOCK_DATA) emit('degraded-mode', next)
     },
     [exerciseId, emit],
   )
@@ -385,7 +391,7 @@ export function useEngineControl(): UseEngineControlResult {
     if (!current.degraded) return
     const next: EngineControlState = { ...current, degraded: false, degradedReason: null }
     setFor(exerciseId, next)
-    emit('restore', next)
+    if (USE_MOCK_DATA) emit('restore', next) // #618 S-B: mock-only, like degrade()
   }, [exerciseId, emit])
 
   return {

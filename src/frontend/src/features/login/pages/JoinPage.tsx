@@ -220,7 +220,7 @@ function useResolvedExerciseName(): string | undefined {
     queryFn: resolveExerciseContext,
     retry: false,
   })
-  return data?.exerciseName
+  return data?.exerciseName ?? undefined
 }
 
 /** The join page. See the module header for the full contract. */

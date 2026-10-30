@@ -1,6 +1,6 @@
 # Story: Refuse participant writes in Freeze and pause (#379)
 
-**Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress (#379: server-side refusal done; see the ACs)
 **Requirements:** CTL-023, COR-032, SOC-001  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §8.2 (L: live or staged (dry run); refused when paused or frozen), §10 (A5)  ·  **Issue:** #379
 **Stack:** backend  ·  **Review tier:** Tier-2 (correctness, security)  ·  **Wave:** A5
 
@@ -8,12 +8,25 @@
 Sim writes are lifecycle-gated: allowed in `live` and `staged` (dry runs), refused when paused or at the Freeze tier ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.1 "A5 adds that Freeze and pause refuse participant writes", tracker #379). Pause tiers per D5-amended CTL-023.
 
 ## Acceptance Criteria
-- [ ] Given Freeze world (and the tier that pauses participant activity), when a participant posts, replies, reacts, follows or uploads an avatar, then the request is refused (409 `exercise-frozen`) with no state change and a participant-visible, in-fiction-safe message.
-- [ ] Given Pause injects or Pause engine only, participant writes remain allowed (per tier definitions).
-- [ ] Given `live` or `staged` (and not paused or Freeze), participant writes are allowed. Given `build`, `completed` or `archived`, or lifecycle `paused`, or the Freeze pause tier, participant writes are refused; readonly sessions remain read-only.
-- [ ] Controller and staff writes are unaffected by Freeze except where the matrix says otherwise.
+- [x] Given Freeze world (and the tier that pauses participant activity), when a participant posts, replies, reacts, follows or uploads an avatar, then the request is refused (409 `exercise-frozen`) with no state change and a participant-visible, in-fiction-safe message.
+      **As built:** the wire token is **`frozen`** (`409 {"reason":"frozen"}`), not `exercise-frozen`. It reuses the
+      token `PATCH /api/posts/{id}` already returned (`PostEditRefusalReasons.Frozen`), so the client sees one
+      refusal shape across every participant write. The refusal is the shared `ParticipantWriteGate`, applied by
+      `.RefuseWhenWritesPaused()` before each handler runs. The covered routes are post/reply, reaction PUT/DELETE,
+      follow POST/DELETE, `POST /api/media` and the post edit. The participant message is the composer's existing
+      generic in-fiction refusal copy (`classifyPublishFailure` → `'refused'`). Reactions and follows roll back
+      optimistically. No new tier-specific copy was added (see the a11y/two-worlds ACs below).
+- [x] Given Pause injects or Pause engine only, participant writes remain allowed (per tier definitions).
+- [x] Given `live` or `staged` (and not paused or Freeze), participant writes are allowed. Given `build`, `completed` or `archived`, or lifecycle `paused`, or the Freeze pause tier, participant writes are refused; readonly sessions remain read-only.
+      *(`build`/`completed`/`archived` were already refused with 403 by `ExerciseLifecycleGatingMiddleware`, and the
+      gate refuses them too. `paused` and Freeze are the new 409s. A read-only session is still 403 from
+      `DenyReadOnlySessions()`, which runs first.)*
+- [x] Controller and staff writes are unaffected by Freeze except where the matrix says otherwise.
+      *(A live staff session passes the filter. See the Freeze-semantics ruling below.)*
 - [ ] Refusals are telemetered (XC-004) with the actor and tier, stamped with the **server** scenario time (never a client value); no content from the refused body is stored.
-- [ ] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
+- [x] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
+      *(No new routes or ids. The gate reads only the server-resolved scope. The Freeze tier is per exercise, pinned
+      over HTTP: Freeze on A leaves a participant post in B at 201.)*
 - [ ] Accessibility (NFR-001): the refusal message is announced in a live region and is not color-only.
 - [ ] Two worlds: participant message uses the brand skin; no COBRA.
 - [ ] User guide (C5): `controller-guide.md` (tiers) and `participant-guide.md` updated in the same PR.
@@ -47,6 +60,16 @@ Jump, so every post after a Freeze would get a 400.)*
 (`PostIngestServiceObserverTests`, `PostIngestPostCommitTests`, `PostMediaWriteTests`) need an `IExerciseClock` stub
 once ingest stops honouring the client value. None is known to assert a round-trip of the client value.
 
+### Ruling (Tom, 2026-10-19)
+- **Personal pin: "Allow pins".** `kind=pin` on `PUT/DELETE /api/posts/{id}/reactions/{kind}` is a private
+  bookmark, not a world write, so it is **exempt** from the held-world refusal: pin and unpin work while paused or
+  frozen. Every other reaction kind (`like`, `repost`) stays refused. The exemption is an exact, case-sensitive
+  match on `kind`, so `PIN` stays refused.
+- **Freeze semantics: "Participants held"** (CTL-023; recorded in world-steering story 03 too). Freeze holds
+  PARTICIPANTS. Staff-as-persona posts still publish and reach the held world.
+- **No separate frozen-clock condition.** A Freeze tier refuses whatever the clock reads. A clock frozen without a
+  Freeze tier or a paused lifecycle does not refuse.
+
 ## Out of Scope
 Changing tier semantics; client-side optimistic UI beyond showing the refusal.
 
@@ -58,6 +81,30 @@ Wave A5, after identity 17 (matrix) and A3.
 
 ## Tests
 Tier x state x route matrix tests; participant RTL for the message.
+
+As built (#379):
+- `ParticipantWriteGateTests.IsRefused_ForEveryTierAndLifecycleStatus` (AC-1, AC-2, AC-3)
+- `ParticipantWriteGateTests.FreezeTier_RefusesRegardlessOfTheClockState` (AC-1, ruling)
+- `ParticipantWriteGateTests.AFrozenClockWithoutAFreezeTier_DoesNotRefuse` (ruling)
+- `ParticipantWriteGateTests.FreezeInOneExercise_DoesNotRefuseAnother` (AC-6)
+- `ParticipantWriteGateSqlTests.IsRefusedAsync_ReadsTheStoredStatus_AndFailsClosedOnAnUnknownExercise` (AC-3)
+- `ParticipantWritePauseEndpointTests.TopLevelPost_WhileHeld_Is409Frozen_AndWritesAndBroadcastsNothing` (AC-1)
+- `ParticipantWritePauseEndpointTests.Reply_WhileHeld_Is409Frozen_AndWritesAndBroadcastsNothing` (AC-1)
+- `ParticipantWritePauseEndpointTests.Reaction_WhileHeld_Is409Frozen_AndWritesAndBroadcastsNothing` (AC-1)
+- `ParticipantWritePauseEndpointTests.Unreact_WhileHeld_Is409Frozen_AndTheReactionStaysActive` (AC-1)
+- `ParticipantWritePauseEndpointTests.Follow_WhileHeld_Is409Frozen_AndWritesNothing` (AC-1)
+- `ParticipantWritePauseEndpointTests.Unfollow_WhileHeld_Is409Frozen_AndTheFollowStays` (AC-1)
+- `ParticipantWritePauseEndpointTests.TopLevelPost_AtTheFreezeTier_WithTheClockRunning_IsStill409Frozen` (ruling)
+- `ParticipantWritePauseEndpointTests.PersonalPin_PutAndDelete_WhileHeld_Succeed` (ruling: allow pins)
+- `ParticipantWritePauseEndpointTests.NearMissPinKind_WhileHeld_IsStillRefused` (ruling: allow pins)
+- `ParticipantWritePauseEndpointTests.InjectsOrEngineTier_ParticipantWrites_AreStillAccepted` (AC-2)
+- `ParticipantWritePauseEndpointTests.StaffControllerAsPersonaPost_WhileHeld_IsNotRefused` (AC-4, ruling)
+- `ParticipantWritePauseEndpointTests.FreezingExerciseA_DoesNotRefuseAParticipantPostInExerciseB` (AC-6)
+- `MediaPausedUploadTests.ParticipantUpload_WhileHeld_Is409Frozen_AndStoresNothing` (AC-1)
+- `MediaPausedUploadTests.ParticipantUpload_AtTheInjectsOrEngineTier_IsStillAccepted` (AC-2)
+- `MediaPausedUploadTests.StaffUpload_WhileHeld_IsNotRefused` (AC-4)
+- `PostEditEndpointTests.FreezeTier_WithTheClockRunning_StillRefusesTheEdit_WithFrozen` (AC-1, ruling)
+- `PostEditEndpointTests.FrozenClock_WithNoFreezeTierAndALiveLifecycle_DoesNotRefuseTheEdit` (ruling)
 
 ### Copilot review 3 fold (2026-10-16)
 - Fixed in place: the Context and the lifecycle AC no longer say live-only or refuse `staged`; writes are allowed in `live` and `staged`, refused when paused/Freeze and in build/completed/archived. The review-2 note is now consistent, not contradictory.

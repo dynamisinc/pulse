@@ -175,6 +175,31 @@ public static class ExerciseLifecycleStates
         && canonical is Staged or Live or Paused;
 
     /// <summary>
+    /// <b>The live-push rule (#375).</b> Whether a hub frame (<c>PostReceived</c> and the other
+    /// <c>IFeedBroadcaster</c> frames) may be sent to the exercise-wide participant group in
+    /// <paramref name="state"/>. Outside it, <c>SignalRFeedBroadcaster</c> sends to the staff-only group instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Equal to <see cref="IsParticipantAccessible"/> today, by design — but a SEPARATE question.</b> REST
+    /// access answers "may a participant READ this exercise's surface?"; this answers "may new content be PUSHED
+    /// live into an open participant tab?". A planned follow-up opens participant REST <i>reads</i> in
+    /// <c>completed</c> (a browsable after-action world); live pushes must stay closed there, because the run is
+    /// over and nothing should keep arriving. Keeping the two predicates apart means that change edits
+    /// <see cref="IsParticipantAccessible"/> alone and cannot silently reopen the hub. Do not re-express one in
+    /// terms of the other.
+    /// </para>
+    /// <para>
+    /// Fails closed exactly like the access rule: an unknown literal or a missing row is never push-open.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when live frames may reach the exercise's participants.</returns>
+    public static bool IsLivePushOpen(string? state) =>
+        TryParse(state, out var canonical)
+        && canonical is Staged or Live or Paused;
+
+    /// <summary>
     /// <b>The overlay-endpoint carve-out (Tier-2 human ruling, decision 2).</b> Whether
     /// <c>GET /api/overlay-state</c> — and ONLY that route — is served in <paramref name="state"/>: every
     /// participant-accessible state, plus <c>completed</c>.
@@ -199,6 +224,28 @@ public static class ExerciseLifecycleStates
     public static bool IsOverlayStateServed(string? state) =>
         IsParticipantAccessible(state)
         || (TryParse(state, out var canonical) && canonical is Completed);
+
+    /// <summary>
+    /// <b>One rule for all (Tom, 2026-10-19).</b> Whether a participant-world sign-in may admit a session in
+    /// <paramref name="state"/>: exactly when <see cref="ExerciseLifecycleBehaviour.ParticipantReadsAccepted"/> holds,
+    /// so <c>staged</c>, <c>live</c>, <c>paused</c> and <c>completed</c>. <c>build</c>, <c>archived</c> and an
+    /// unrecognized or missing status are refused (fail closed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every participant sign-in path asks THIS question and no other: the join link, the day word, the participant
+    /// password, the shared view-only credential, and the refresh of a participant or view-only session. Staff sign-in
+    /// does not. A session is admitted wherever its holder could read, and nowhere else.
+    /// </para>
+    /// <para>
+    /// This is deliberately NOT <see cref="IsParticipantAccessible"/>, which still refuses <c>completed</c> and is what
+    /// the lifecycle gate serves participant routes on. The two differ only in <c>completed</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when a participant-world sign-in may admit a session.</returns>
+    public static bool IsParticipantSignInAllowed(string? state) =>
+        BehaviourOf(state).ParticipantReadsAccepted;
 
     /// <summary>
     /// The per-state behaviour hooks (AC7) other subsystems subscribe to instead of each keeping its own copy
@@ -228,6 +275,7 @@ public static class ExerciseLifecycleStates
             Staged => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = true,
                 AmbientWorldRuns = true,
                 ClockRuns = false,
@@ -239,6 +287,7 @@ public static class ExerciseLifecycleStates
             Live => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = true,
                 AmbientWorldRuns = true,
                 ClockRuns = true,
@@ -251,6 +300,7 @@ public static class ExerciseLifecycleStates
             Paused => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = false,
                 AmbientWorldRuns = false,
                 ClockRuns = false,
@@ -258,8 +308,10 @@ public static class ExerciseLifecycleStates
                 IsTerminal = false,
             },
 
-            // Completed (EndEx) and Archived: the run is over. Everything is off; archived is terminal.
-            Completed => ExerciseLifecycleBehaviour.Closed,
+            // Completed (EndEx) and Archived: the run is over. Everything is off; archived is terminal. Completed alone
+            // still accepts participant READS (one rule for all, 2026-10-19): the run's content stays readable after
+            // EndEx, so a participant may still sign in to read it. Nothing else opens.
+            Completed => ExerciseLifecycleBehaviour.Closed with { ParticipantReadsAccepted = true },
             _ => ExerciseLifecycleBehaviour.Closed with { IsTerminal = true },
         };
     }
@@ -283,13 +335,36 @@ public sealed record ExerciseLifecycleBehaviour
     /// <summary>Whether a participant may be served this exercise at all (the gating middleware's question).</summary>
     public bool ParticipantAccessOpen { get; init; }
 
+    /// <summary>
+    /// Whether participant READS are accepted in this state: <c>staged</c>, <c>live</c>, <c>paused</c> and
+    /// <c>completed</c>; never <c>build</c>, <c>archived</c> or an unknown state (Tom's "one rule for all" ruling,
+    /// 2026-10-19).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The sign-in rule reads this flag.</b> Every participant sign-in path admits a session exactly when it holds,
+    /// through <see cref="ExerciseLifecycleStates.IsParticipantSignInAllowed"/>.
+    /// </para>
+    /// <para>
+    /// <b>It is also the flag for the participant REST read carve-out in <c>completed</c>.</b> It differs from
+    /// <see cref="ParticipantAccessOpen"/> only in <c>completed</c>, where reads are accepted but the gate does not yet
+    /// open. Today the lifecycle gating middleware still serves participant routes on
+    /// <see cref="ParticipantAccessOpen"/> (plus the overlay carve-out), so in <c>completed</c> a signed-in participant
+    /// reaches <c>/api/overlay-state</c> only. A follow-up that opens participant reads in <c>completed</c> should key the
+    /// gate on THIS flag rather than adding a parallel rule, so sign-in and reads cannot drift apart.
+    /// </para>
+    /// </remarks>
+    public bool ParticipantReadsAccepted { get; init; }
+
     /// <summary>Whether participant sim WRITES (post/reply/react) are meaningful in this state.</summary>
     /// <remarks>
-    /// <b>Advisory in this story, not enforced by it.</b> <c>paused</c> reports <c>false</c> while
-    /// <see cref="ParticipantAccessOpen"/> stays <c>true</c> (the holding page must render), but this story's
-    /// gating middleware refuses service on <see cref="ParticipantAccessOpen"/> alone — refusing a write in a
-    /// paused world is CTL-023's tiered-pause behaviour (world-steering), and adding a second, parallel
-    /// enforcement of it here is exactly the duplication hazard 1 forbids.
+    /// <b>Enforced (#379).</b> <c>paused</c> reports <c>false</c> while <see cref="ParticipantAccessOpen"/> stays
+    /// <c>true</c> (the holding page must render), so the gating middleware still SERVES a paused exercise; the
+    /// write refusal is <c>Pulse.WebApi.Features.EngineRuntime.Steering.ParticipantWriteGate</c>, applied to every
+    /// participant write route by <c>Pulse.WebApi.Features.Identity.SharedAccess.ParticipantWritePauseFilter</c>
+    /// (<c>.RefuseWhenWritesPaused()</c>): a participant post, reply, reaction, follow, media upload or post edit
+    /// gets <c>409 {"reason":"frozen"}</c> before its handler runs, staff sessions excepted. That gate is the one
+    /// enforcement point (it also covers the Freeze pause tier); this middleware does not duplicate it.
     /// </remarks>
     public bool ParticipantWritesAccepted { get; init; }
 

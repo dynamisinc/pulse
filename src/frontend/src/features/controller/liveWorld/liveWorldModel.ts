@@ -331,10 +331,21 @@ export function ingest(
   return rows === state.rows && pending === state.pending ? state : { rows, pending }
 }
 
-/** Moves every pending arrival into `rows` (the "N new" action). A no-op when none. */
+/**
+ * Moves every pending arrival into `rows` (the "N new" action). A no-op when none.
+ *
+ * The revealed arrivals SURVIVE the {@link MAX_ROWS} cap: when the merge overflows it is
+ * the oldest EXISTING rows that fall off the tail, never the rows the controller just
+ * asked to see. (Sorting the union and slicing would drop a revealed row whose scenario
+ * stamp sorts below the full list, so "N new" would clear the control and show nothing.)
+ * `pending` is bounded at {@link MAX_PENDING} <= {@link MAX_ROWS}, so the room is never
+ * negative; it is clamped anyway.
+ */
 export function mergePending(state: LiveWorldState): LiveWorldState {
   if (state.pending.length === 0) return state
-  return { rows: mergeSorted(state.rows, state.pending, MAX_ROWS), pending: [] }
+  const room = Math.max(0, MAX_ROWS - state.pending.length)
+  const kept = state.rows.length > room ? state.rows.slice(0, room) : state.rows
+  return { rows: mergeSorted(kept, state.pending, Infinity), pending: [] }
 }
 
 // -----------------------------------------------------------------------------

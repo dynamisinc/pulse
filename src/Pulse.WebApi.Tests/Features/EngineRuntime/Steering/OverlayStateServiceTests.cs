@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.EngineRuntime.Steering;
 
 using System;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Xunit;
@@ -201,5 +202,57 @@ public sealed class OverlayStateServiceTests
 
         nullState.Should().Throw<ArgumentException>();
         blankRegister.Should().Throw<ArgumentException>();
+    }
+
+    // ---- #390 Gate-1 WR-001: the per-exercise publish lock --------------------------------------
+
+    [Fact]
+    public async Task AcquirePublishLockAsync_SerializesPublishesForOneExercise()
+    {
+        var store = new OverlayStateService();
+        var exerciseId = Guid.NewGuid();
+
+        var first = await store.AcquirePublishLockAsync(exerciseId);
+        var second = store.AcquirePublishLockAsync(exerciseId);
+
+        await Task.Delay(50);
+        second.IsCompleted.Should().BeFalse("a second publisher for the SAME exercise must wait for the first");
+
+        first.Dispose();
+        using var acquired = await second.WaitAsync(TimeSpan.FromSeconds(5));
+        acquired.Should().NotBeNull("releasing the first hands the lock to the waiter");
+    }
+
+    [Fact]
+    public async Task AcquirePublishLockAsync_IsPerExercise_AndDisposingTwiceReleasesOnce()
+    {
+        var store = new OverlayStateService();
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+
+        var heldA = await store.AcquirePublishLockAsync(exerciseA);
+        using (await store.AcquirePublishLockAsync(exerciseB).WaitAsync(TimeSpan.FromSeconds(5)))
+        {
+            // B is never blocked by A (COR-001: one exercise's publish can never stall another's).
+        }
+
+        heldA.Dispose();
+        heldA.Dispose();
+
+        using var reacquired = await store.AcquirePublishLockAsync(exerciseA).WaitAsync(TimeSpan.FromSeconds(5));
+        var contender = store.AcquirePublishLockAsync(exerciseA);
+        await Task.Delay(50);
+        contender.IsCompleted.Should().BeFalse(
+            "a double Dispose must release ONCE — releasing twice would let two publishers in together");
+        reacquired.Dispose();
+        (await contender.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+    }
+
+    [Fact]
+    public async Task AcquirePublishLockAsync_EmptyExercise_Throws()
+    {
+        var act = () => new OverlayStateService().AcquirePublishLockAsync(Guid.Empty);
+
+        await act.Should().ThrowAsync<ArgumentException>("COR-001: a publish lock must name an exercise");
     }
 }

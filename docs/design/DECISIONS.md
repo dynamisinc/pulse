@@ -960,3 +960,16 @@ on these two personas: name, follower count and join date.
 `Kestrel` also matches ASP.NET Core's Kestrel web server (for example `LoginRequestLimitTests`). The old
 names stay searchable as `fulton|fulco|newsline`. In the backend, the intended leftovers are the
 `RetiredHandles` table and the rename tests.
+
+### FIC-002 — Demo media may come from the Dynamis team or be generated (Tom, 2026-10-19)
+**Decision.** Plan decision 2 and S2's "Media rules" AC allowed royalty-free stock from Pexels or Pixabay
+only. On 2026-10-19 Tom widened the source rule for the demo pack. Two more sources are now allowed: media
+the Dynamis team supplies and holds the licence for, and images generated for the pack, AI-generated
+included. Every other media rule stands: no recognisable faces, real logos or brands, licence plates, news
+brands or landmarks; alt text describes the final shot; all metadata is stripped before commit.
+
+**Recorded in** [`docs/demo/pack/CREDITS.md`](../demo/pack/CREDITS.md). A team-supplied file is `STOCK`
+with Source "Dynamis team" and URL "internal", and keeps any original credit line found in its metadata in
+Notes. A generated file is `GENERATED` once Tom approves it, `GENERATED DRAFT` until then. The 2026-10-19
+media swap applied it: 14 team-supplied files, the AI-generated advisory sign (P2), and 8 resident avatars
+and banners drawn in code as drafts.

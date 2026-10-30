@@ -304,6 +304,11 @@ public class ExerciseRealtimeHubIsolationTests
                 // Test-only: signal when OnConnectedAsync (and so the group join) has completed. StartAsync returns
                 // at the handshake, BEFORE the join, so a broadcast sent straight after it can miss the group.
                 services.Configure<HubOptions>(options => options.AddFilter(Connected));
+
+                // #375: the real broadcaster reads the exercise's lifecycle status before every send and fails closed
+                // to the staff group without a participant-accessible row. This host has no database, so answer
+                // 'live' — these tests are about WHICH exercise a frame reaches, not the lifecycle gate.
+                services.Replace(ServiceDescriptor.Singleton(TestFeedBroadcasters.FixedStatus("live")));
             });
         }
 

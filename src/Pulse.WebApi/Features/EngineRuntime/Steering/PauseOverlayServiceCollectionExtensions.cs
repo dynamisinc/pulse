@@ -72,10 +72,73 @@ public static class PauseOverlayServiceCollectionExtensions
         services.TryAddSingleton<PauseTierReader>(provider =>
             exerciseId => provider.GetRequiredService<PauseTierRegistry>().GetTier(exerciseId));
 
-        // The lifecycle status the PUSH side gates on (CR-001), resolved through its OWN scope per call: the
-        // publisher is a singleton and PulseDbContext is scoped, so a constructor-injected context would be a
-        // captive dependency. IServiceScopeFactory lives here in the factory rather than in the publisher's
-        // signature, which keeps that signature free of any persistence type (AC7's assertion).
+        // The lifecycle status the PUSH side gates on (CR-001). Shared with the feed broadcaster's EndEx send gate
+        // (#375), so both register it through the one TryAdd below.
+        services.TryAddExerciseLifecycleStatusReader();
+
+        // #390 Gate-1 WR-002: the COMPOSED overlay the pause publisher pushes — the same read the GET performs
+        // (ParticipantShellConfigService.GetOverlayStateAsync): the exercise row (or the unconfigured fallback) through
+        // ExerciseShellConfigSource, then the registered IOverlayStateProjection — in its OWN scope per call, for the
+        // same captive-dependency reason as the lifecycle reader above.
+        services.TryAddSingleton<ComposedOverlayStateReader>(provider =>
+            async (exerciseId, cancellationToken) =>
+            {
+                await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+
+                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition carries,
+                // never a client-supplied id, so this read stays inside the caller's tenant.
+                var exercise = await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == exerciseId, cancellationToken);
+                var source = exercise is null
+                    ? ExerciseShellConfigSource.Unconfigured(exerciseId)
+                    : ExerciseShellConfigSource.FromExercise(exercise);
+
+                return await scope.ServiceProvider.GetRequiredService<IOverlayStateProjection>()
+                    .ProjectAsync(source, cancellationToken);
+            });
+
+        services.RemoveAll<IPauseOverlayPublisher>();
+        services.AddSingleton<IPauseOverlayPublisher, PauseOverlayPublisher>();
+
+        // #390: a LIFECYCLE transition pushes the participant overlay too (the push side of the GET's
+        // "lifecycle wins"). REPLACES AddExerciseLifecycle()'s TryAdded no-op — RemoveAll + add, so it wins in either
+        // wiring order, exactly like the publisher swap above. A singleton that reads through the ComposedOverlayStateReader
+        // registered above (its OWN scope per notification, committed state at ticket time — PR #651 review W1): see
+        // LifecycleOverlayPublisher's remarks for why not scoped.
+        services.RemoveAll<IExerciseLifecycleTransitionObserver>();
+        services.AddSingleton<IExerciseLifecycleTransitionObserver, LifecycleOverlayPublisher>();
+
+        // The READ side (Tom's ruling, 2026-07-27): the pause store contributes to the exercise-configuration
+        // overlay seam by DECORATING the lifecycle projection — endex > pre-start > pause > none. See
+        // SteeringPauseOverlayProjection for the chain, and for why ISteeringOverlaySource is deliberately left
+        // at its no-op floor rather than being the seam used here.
+        //
+        // The inner projection is registered as its CONCRETE type so the decorator can depend on it without
+        // resolving IOverlayStateProjection (which is itself) — TryAdd, so a host that registers it some other
+        // way still wins. Scoped, matching the seam and the request-scoped unit of work behind it.
+        services.TryAddScoped<LifecycleOverlayStateProjection>();
+        services.Replace(ServiceDescriptor.Scoped<IOverlayStateProjection, SteeringPauseOverlayProjection>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the database-backed <see cref="ExerciseLifecycleStatusReader"/> (TryAdd, so a host or test that
+    /// registered its own reader first still wins). Shared by <see cref="AddPauseParticipantOverlay"/> (the
+    /// pause-overlay push gate, CR-001) and <c>RealtimeExtensions.AddSocialRealtimeHub</c> (the feed broadcaster's
+    /// EndEx send gate, #375), so neither depends on the other being wired.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection TryAddExerciseLifecycleStatusReader(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Resolved through its OWN scope per call: the publisher is a singleton and PulseDbContext is scoped, so a
+        // constructor-injected context would be a captive dependency. IServiceScopeFactory lives here in the factory
+        // rather than in the publisher's signature, which keeps that signature free of any persistence type (AC7's
+        // assertion).
         //
         // Exercise is the SCOPE, not an IExerciseScoped entity, so PulseDbContext's global read filter is a no-op
         // on this table — this is a direct read by the SERVER-resolved id the transition carries, never a
@@ -93,20 +156,6 @@ public static class PauseOverlayServiceCollectionExtensions
                     .Select(exercise => exercise.Status)
                     .SingleOrDefaultAsync(cancellationToken);
             });
-
-        services.RemoveAll<IPauseOverlayPublisher>();
-        services.AddSingleton<IPauseOverlayPublisher, PauseOverlayPublisher>();
-
-        // The READ side (Tom's ruling, 2026-07-27): the pause store contributes to the exercise-configuration
-        // overlay seam by DECORATING the lifecycle projection — endex > pre-start > pause > none. See
-        // SteeringPauseOverlayProjection for the chain, and for why ISteeringOverlaySource is deliberately left
-        // at its no-op floor rather than being the seam used here.
-        //
-        // The inner projection is registered as its CONCRETE type so the decorator can depend on it without
-        // resolving IOverlayStateProjection (which is itself) — TryAdd, so a host that registers it some other
-        // way still wins. Scoped, matching the seam and the request-scoped unit of work behind it.
-        services.TryAddScoped<LifecycleOverlayStateProjection>();
-        services.Replace(ServiceDescriptor.Scoped<IOverlayStateProjection, SteeringPauseOverlayProjection>());
 
         return services;
     }

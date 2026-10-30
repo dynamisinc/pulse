@@ -40,3 +40,39 @@ Endpoint tests (incl. foreign-org, last-admin: revoke-role and disable of the la
 
 ### Copilot review 3 fold (2026-10-16)
 - Changed: last-admin safeguard now also covers disabling a person, counts enabled org admins only, and returns 409 `last-org-admin`; tests added.
+
+## A1b/A1c reality check (2026-10-19)
+Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs above are history and stay; where this section contradicts one, **this section wins**. No ACs were ticked.
+
+### 1. Already satisfied by shipped code (reuse, do not rebuild)
+- `Person.OrgRole` / `Person.IsOrgAdmin` / `Person.OrgAdminRole`, `DisabledAt`, `LockedOutUntil`, `FailedLoginCount` exist (`Data/Entities/Person.cs`). **No migration is needed for the directory itself.**
+- Sign-in already honours `DisabledAt` (uniform 401): `StaffSignInLockout.IsBlocked`, `PulsePasswordIdentityProvider.AuthenticatePulsePasswordAsync` (`Features/Identity/...`), and `OrgStaffLoginService.ChooseAsync` ("choice-stale"). The "disabled sign-in returns the uniform 401" half of the Disable AC needs only a test, not code.
+- Org-admin-only gate: `OrgAdminAuthorizationFilter.OrgAdminOnly` (`Features/ExerciseLifecycleAdmin`), over `StaffCallerContext` (`IsOrgScope`, `OrganizationId`, `Role`). Planner/controller/evaluator get 403 from it today (it already guards `GET /api/org/staff-assignments`).
+- Tenant bound: `InOrganization(...)` on `People`/`StaffUsers`; bare-404 pattern as in `EnrollmentService.FindReachableAsync`.
+- Audit: `OrgAuditEvent` + `StaffChangeRecorder`. Live-connection cut: `ISessionConnectionRevoker` (`AddEnrollments` registers it with `TryAdd`).
+- Read seam to extend: `OrgStaffDirectoryService.ListAsync` (`GET /api/org/staff-assignments`) already returns the org's staff enrollments across exercises; the "enrollments summary" column can reuse its join.
+- Frontend home exists: `features/exerciseLifecycleAdmin` (the org-admin surface family, route `/staff/exercises`, `staffRouteRegistry.tsx`, `isDefaultFor: ['orgAdmin']`) and `core/auth/rolePermissions.ts` (`can()`/`usePermissions()`). Gate new controls through it.
+
+### 2. Stale or contradicted (reworded)
+| Original AC | Problem | Replace with |
+|---|---|---|
+| Technical Notes: "`features/orgAdmin/` directory page" | No such folder. The org-admin surface family lives in `features/exerciseLifecycleAdmin/` (A1c). | "Directory page lives in `features/exerciseLifecycleAdmin/` (or a sibling `features/orgPeople/` registered as a second `administer`-group surface in `staffRouteRegistry.tsx` with `allowedRoles: ['orgAdmin']`). Gate controls with `can()`." Add `manageOrgPeople` (orgAdmin only) to the `StaffAction` table in `rolePermissions.ts`. |
+| Telemetry (XC-004) "emits an event ... in the same unit of work" | A `TelemetryEvent` requires a non-empty `ExerciseId` (write guard); an org-level people change has no exercise. `StaffChangeRecorder.Stage` is exercise-bound. | "Org-level changes (grant/revoke `OrgRole`, disable/enable) write an `OrgAuditEvent` (`ExerciseId` null, `ActorPersonId`, `SubjectPersonId`, kinds `org.person.org-role-granted`, `org.person.org-role-revoked`, `org.person.disabled`, `org.person.enabled`) in the same unit of work. No XC-004 `TelemetryEvent` is emitted unless the change touches an exercise (it does not here). Add an org-level overload to `StaffChangeRecorder` rather than a fake exercise id." |
+| Grant / revoke org admin | Sign-in mints an org-scope session only if the person has a `StaffUser` facet (`OrgStaffLoginService.MintAsync`; `PulsePasswordIdentityProvider` rejects a person with no facet). `GrantAsync` creates the facet only on an enrollment. | Add: "Granting `OrgRole = orgAdmin` creates the person's `StaffUser` facet when missing (same Id as the `Person`, `ExternalSubject = pulse\|{id:N}`, as `EnrollmentService.GrantAsync` does), in the same transaction. Test: a freshly granted admin with a password can sign in org-scope." |
+| Grant / revoke: "org admin sets/clears `OrgRole`" | Org admin is `Person.OrgRole`, not an exercise role (A1b). An org-admin's in-exercise access is a **planner enrollment** (migration + `OrgAdminSeedService`). | Add: "Clearing `OrgRole` does **not** remove the person's exercise enrollments. Granting does not create any. The org admin enrolls themselves (story 20, audited `org.enrollment.self-granted`) to act inside an exercise." |
+| Last org admin (`409 last-org-admin`) | Not implemented anywhere (grep: no `last-org-admin`). Existing seed query counts `OrgRole` without `DisabledAt`. | Keep the AC, but state the count is `OrgRole = orgAdmin AND DisabledAt IS NULL`, evaluated in the same transaction as the write with a serializable/`UPDLOCK` read (two concurrent revokes of two admins must not leave zero). Add a race test. |
+| Disable: "all that person's sessions are revoked" | `EnrollmentService.RevokeExerciseSessionsAsync` is per-exercise. Org-scope sessions have `ExerciseId` null. | "Revoke every live `Session` where `PersonId` or `StaffUserId` is the person (any `ExerciseId`, including null), then cut connections via `ISessionConnectionRevoker` after commit." New shared helper (e.g. `PersonSessionRevoker`); do not copy the exercise-bound one. |
+| Role gating: "Planner ... refused (403) on every `/api/org/people*` route" | Correct, and now enforced by the A1c declarative role matrix. | Add: "Each route is registered in the route x role matrix (`RoleMatrixTests`, story 17) as orgAdmin-only; the avatar-read exception stays." |
+
+### 3. Still to build (seams)
+- Backend: `Features/Org/People/*` slice (list/search/page, `PATCH` org-role, `PATCH` disabled), `AddOrgPeople()/MapOrgPeopleEndpoints()` one-liners for the orchestrator, `OrgAdminOnly` filter, `PersonSessionRevoker`, org-audit overload. The route family is `/api/org/people` (the existing `/api/org/*` routes are the pattern: mapped in `ExerciseLifecycleAdminEndpoints`).
+- Frontend: directory table (COBRA, dense), React Query hooks over the shared axios client, service in the `orgExercisesService` style.
+- Wiring: `Program.cs` and `staffRouteRegistry.tsx` lines + `CompositionRootWiringTests` allow-list go through the orchestrator.
+
+### 4. Migration
+**None for this story.** (`Person.AvatarBlobName` belongs to story 23's A2 migration, not here.) Do not add columns here; if the PR split puts the single A2 migration in the first A2 PR, this story merely rides on it.
+
+### 5. Dependencies on #602 (must-fix hardening)
+- **Hard dependency, serial:** the lockout counter atomicity fix (L-4) must land first or together. Disable/enable and the directory's "unlock" interact with `FailedLoginCount`/`LockedOutUntil`; building on the read-modify-write `StaffSignInLockout.RecordFailure` would copy the undercount.
+- Soft: M-2 (timing side channels) is not touched by this story, but a list/search endpoint that confirms an email exists is an org-admin-only, authenticated read, so no oracle is added.
+- L-2 (race between `Register` and `RevokeAsync`) matters for the "abort live SignalR connections on disable" AC: the test must open the connection before the change, as the AC says, and the connection re-check after `Register` should land before this story's disable is called safe.

@@ -172,8 +172,9 @@
  * and `useSwampedMode` derives its flag from `settings.autonomy.swampedMode`. A 400/403
  * leaves `settings` untouched and sets `swampedError` (kept apart from `error`, and a
  * 403 does NOT flip the sticky `forbidden`: it is the lead gate, like ambient).
- * `onConfirmed` fires once, after the POST's 200 (never on a refusal) — the caller's
- * telemetry hook, since the server records none (#618). Mock: instant local flip.
+ * `onConfirmed` fires once, after the POST's 200 (never on a refusal). Live, the server
+ * records the change itself (#618), so `useSwampedMode` emits nothing from it; it is the
+ * mock-mode telemetry hook only. Mock: instant local flip.
  *
  * **Queueing + background refresh (CR-001).** A swamped request made while another request
  * is in flight is queued (first wins: further swamped clicks are ignored while one is
@@ -189,8 +190,8 @@
  * settings leak into another's.
  *
  * ## NO TELEMETRY EMITTED HERE
- * Unlike the kill switch (whose backend endpoints emit no autonomy events, so
- * the frontend emit is the sole audit trail), story 05's two settings
+ * Like the kill-switch / restore / swamped-mode endpoints (which record their
+ * own staff-change events since #618), story 05's two settings
  * endpoints emit their own server-side XC-004 events
  * (`engine.autonomy_default_changed` / `engine.tier_policy_changed`) — see
  * that story's "Build notes". Duplicating an emit here would double the audit

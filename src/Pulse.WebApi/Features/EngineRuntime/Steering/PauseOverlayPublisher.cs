@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
+using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
@@ -20,6 +21,19 @@ using Pulse.WebApi.Features.Realtime;
 /// <param name="exerciseId">The server-resolved exercise (COR-001).</param>
 /// <returns>The exercise's currently-recorded pause tier.</returns>
 public delegate PauseTier PauseTierReader(Guid exerciseId);
+
+/// <summary>
+/// Reads the COMPOSED participant overlay for an exercise — exactly what <c>GET /api/overlay-state</c> serves: the
+/// exercise row through <c>ExerciseShellConfigSource</c> (or its unconfigured fallback), then the registered
+/// <see cref="Pulse.WebApi.Features.ExerciseConfiguration.IOverlayStateProjection"/>, in a DI scope of its own (#390
+/// Gate-1 WR-002). A delegate, like <see cref="PauseTierReader"/> and <see cref="ExerciseLifecycleStatusReader"/>, so
+/// the singleton <see cref="PauseOverlayPublisher"/> reaches scoped persistence without a captive dependency and its
+/// constructor stays free of any persistence type.
+/// </summary>
+/// <param name="exerciseId">The server-resolved exercise (COR-001).</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>The composed overlay, as the GET would serve it now.</returns>
+public delegate Task<OverlayStateResponse> ComposedOverlayStateReader(Guid exerciseId, CancellationToken cancellationToken);
 
 /// <summary>
 /// The REAL <see cref="IPauseOverlayPublisher"/> (feature: world-steering, story 08; CTL-023, COR-001, XC-001,
@@ -50,7 +64,7 @@ public delegate PauseTier PauseTierReader(Guid exerciseId);
 /// </para>
 /// <para>
 /// <b>Two worlds (XC-002).</b> The pushed payload is <see cref="ParticipantOverlayStateDto"/>, built only from
-/// an <see cref="OverlayStateSnapshot"/>. Exactly two fields of the transition are read —
+/// the composed participant <see cref="OverlayStateResponse"/> (the GET body) plus the store's sequence. Exactly two fields of the transition are read —
 /// <see cref="PauseTierTransition.ExerciseId"/> (the fan-out scope) and
 /// <see cref="PauseTierTransition.OverlayRegister"/> (the controller's presentation choice, which IS what
 /// participants are meant to see). <see cref="PauseTierTransition.ActingHumanId"/> is read NOWHERE in this type,
@@ -67,9 +81,23 @@ public delegate PauseTier PauseTierReader(Guid exerciseId);
 /// <b>Out-of-order publishes (the story-07 review's SG-206 note).</b> The registry publishes outside its lock,
 /// so two rapid transitions can arrive here in either order. This publisher therefore (a) takes a monotonic
 /// ticket from <see cref="OverlayStateService.NextSequence"/> BEFORE it reads anything, (b) reads the tier from
-/// the registry rather than trusting <see cref="PauseTierTransition.To"/>, and (c) broadcasts the snapshot the
-/// store holds AFTER the write. See <see cref="OverlayStateService"/> for why all three together make the
+/// the registry rather than trusting <see cref="PauseTierTransition.To"/>, and (c) broadcasts the composed overlay
+/// read AFTER the write (which reflects the store's current snapshot). See <see cref="OverlayStateService"/> for why all three together make the
 /// participant overlay converge on the true final state, and why no single one of them suffices.
+/// </para>
+/// <para>
+/// <b>The pushed frame is the COMPOSED overlay, not the raw store (#390 Gate-1 WR-002).</b> After writing the store,
+/// the frame is built by <see cref="ParticipantOverlayStateDto.FromComposed"/> from the
+/// <see cref="ComposedOverlayStateReader"/> — the same projection the GET serves — with the store's post-write
+/// sequence. So a Resume while the LIFECYCLE is <c>paused</c> pushes the lifecycle's holding page (as the GET does),
+/// not a raw <c>none</c> that would drop the holding page over a paused exercise. One projection, one wire shape, for
+/// both pushers.
+/// </para>
+/// <para>
+/// <b>Serialized per exercise (#390 Gate-1 WR-001).</b> The whole ticket → tier read → lifecycle read → store write →
+/// compose → send sequence runs under <see cref="OverlayStateService.AcquirePublishLockAsync"/>, which
+/// <see cref="LifecycleOverlayPublisher"/> also holds, so a lifecycle push can never project the store between this
+/// publish's ticket and its write.
 /// </para>
 /// <para>
 /// <b>No telemetry (XC-004).</b> Nothing is emitted here: story 07's console-side <c>steering_action</c> already
@@ -106,6 +134,7 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
     private readonly OverlayStateService _overlayState;
     private readonly PauseTierReader _tierReader;
     private readonly ExerciseLifecycleStatusReader _lifecycleStatusReader;
+    private readonly ComposedOverlayStateReader _composedOverlayReader;
     private readonly ILogger<PauseOverlayPublisher> _logger;
 
     /// <summary>Creates the publisher over the shared exercise hub, the overlay store, and the two readers.</summary>
@@ -117,24 +146,30 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
     /// on the GET (CR-001). A delegate rather than an injected scope factory, mirroring
     /// <paramref name="tierReader"/> — which is also what keeps this constructor free of any persistence type.
     /// </param>
+    /// <param name="composedOverlayReader">
+    /// Reads the composed overlay the GET serves, so the pushed frame matches it (#390 Gate-1 WR-002).
+    /// </param>
     /// <param name="logger">Logs a swallowed publish failure, and a suppressed publish — never silent.</param>
     public PauseOverlayPublisher(
         IHubContext<ExerciseRealtimeHub> hubContext,
         OverlayStateService overlayState,
         PauseTierReader tierReader,
         ExerciseLifecycleStatusReader lifecycleStatusReader,
+        ComposedOverlayStateReader composedOverlayReader,
         ILogger<PauseOverlayPublisher> logger)
     {
         ArgumentNullException.ThrowIfNull(hubContext);
         ArgumentNullException.ThrowIfNull(overlayState);
         ArgumentNullException.ThrowIfNull(tierReader);
         ArgumentNullException.ThrowIfNull(lifecycleStatusReader);
+        ArgumentNullException.ThrowIfNull(composedOverlayReader);
         ArgumentNullException.ThrowIfNull(logger);
 
         _hubContext = hubContext;
         _overlayState = overlayState;
         _tierReader = tierReader;
         _lifecycleStatusReader = lifecycleStatusReader;
+        _composedOverlayReader = composedOverlayReader;
         _logger = logger;
     }
 
@@ -159,8 +194,34 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
         // (Copilot review, PR #386). Null means "we failed before the registry read".
         PauseTier? authoritativeTier = null;
 
+        // PR #651 review W2: the lock wait, the composed read and the hub send are BOUNDED, so a stuck participant
+        // pipe can neither hang this (the controller's pause-tier POST awaits it) nor hold the lock indefinitely.
+        // The tier/lifecycle reads and the store write are deliberately NOT on this token: they are what keeps the
+        // GET truthful, so they still run even when the bound was spent waiting for the lock.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(PublishTimeout);
+        var bounded = timeout.Token;
+
         try
         {
+            // WR-001 (#390 Gate-1): held across the WHOLE sequence below, shared with LifecycleOverlayPublisher, and
+            // released by `using` on every exit — the suppression return, a timeout and any exception included.
+            //
+            // W2 DEGRADED PATH: if the lock is not free within the bound (another publish for this exercise is stuck
+            // in its send), the store is STILL written below — unserialized, but sequence-guarded — so the GET and
+            // every reconnect/visibility re-GET serve the truth; only this push is skipped (and logged).
+            IDisposable? publishLock = null;
+            try
+            {
+                publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, bounded).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                LogPublishLockTimedOut(exerciseId, PublishTimeout.TotalMilliseconds);
+            }
+
+            using var heldLock = publishLock;
+
             // The ticket comes FIRST, so the last-invoked publish holds the highest one (see the remarks).
             //
             // SG-002 (Gate-2), examined and DELIBERATELY NOT CHANGED: a suppressed Freeze below burns this
@@ -213,16 +274,34 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
                     sequence)
                 : _overlayState.Apply(exerciseId, OverlayStateWire.None, OverlayStateWire.InFiction, sequence);
 
+            if (publishLock is null)
+            {
+                // W2 degraded path (see above): the store is written; the push is skipped.
+                return;
+            }
+
             // Store BEFORE push: a reconnecting participant's GET must never read older state than a push that
-            // has already gone out. The pushed value is the store's CURRENT snapshot, not the one this call
-            // hoped to write — so a write that lost to a newer one broadcasts the newer state.
+            // has already gone out. WR-002: the pushed value is the COMPOSED overlay the GET serves, read AFTER the
+            // write — so the lifecycle's precedence applies to this channel too, and a write that lost to a newer
+            // one still broadcasts the newer state (the projection reads the store's current snapshot). The
+            // sequence is the store's post-write one, as before.
+            var composed = await _composedOverlayReader(exerciseId, bounded).WaitAsync(bounded).ConfigureAwait(false);
+
+            // WaitAsync bounds a transport that ignores the token, so the lock is released within the bound.
             await _hubContext.Clients
                 .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
                 .SendAsync(
                     OverlayStateChangedEvent,
-                    ParticipantOverlayStateDto.FromSnapshot(snapshot),
-                    cancellationToken: cancellationToken)
+                    ParticipantOverlayStateDto.FromComposed(composed, snapshot.Sequence),
+                    cancellationToken: bounded)
+                .WaitAsync(bounded)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // W2: the BOUND fired (not the caller's cancellation) — treated like any other push failure (WR-004): the
+            // tier, clock freeze and store write stand, and participants heal on their next re-GET.
+            LogOverlayPushTimedOut(exerciseId, PublishTimeout.TotalMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -232,6 +311,26 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             LogOverlayPushFailed(ex, exerciseId, authoritativeTier ?? transition.To);
         }
     }
+
+    /// <summary>
+    /// The bound on the lock wait, the composed read and the hub send (PR #651 review W2). Defaults to
+    /// <see cref="OverlayStateService.DefaultPublishTimeout"/>; settable only so tests can use a short bound.
+    /// </summary>
+    internal TimeSpan PublishTimeout { get; init; } = OverlayStateService.DefaultPublishTimeout;
+
+    /// <summary>Source-generated warning: the publish lock was not free within the bound (W2's degraded path).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The overlay publish lock for exercise {ExerciseId} was not free within {TimeoutMs} ms; the overlay " +
+                  "store was written WITHOUT it and this push was skipped — participants see the change on their next re-read.")]
+    private partial void LogPublishLockTimedOut(Guid exerciseId, double timeoutMs);
+
+    /// <summary>Source-generated warning: the composed read or hub send exceeded the bound (W2).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The participant overlay push for exercise {ExerciseId} did not complete within {TimeoutMs} ms and was " +
+                  "abandoned; the tier, its clock effect and the overlay store STAND.")]
+    private partial void LogOverlayPushTimedOut(Guid exerciseId, double timeoutMs);
 
     /// <summary>Source-generated warning for an unscoped publish (CA1848: no per-call allocation).</summary>
     [LoggerMessage(
