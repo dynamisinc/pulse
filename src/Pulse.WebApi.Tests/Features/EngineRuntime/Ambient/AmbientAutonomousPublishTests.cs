@@ -185,7 +185,7 @@ public sealed class AmbientAutonomousPublishTests
             context.CurrentExerciseId = harness.ExerciseId;
             var db = scope.ServiceProvider.GetRequiredService<PulseDbContext>();
             var service = new EngineReviewService(
-                new EngineReviewStore(db),
+                new EngineReviewStore(db, new EngineReviewTickSignal()),
                 db,
                 context,
                 harness.Clock,

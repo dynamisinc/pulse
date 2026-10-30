@@ -754,7 +754,7 @@ public sealed class EngineSettingsServiceTests
         var registry = autonomy ?? new EngineAutonomyRegistry();
         var tiers = tierPolicy ?? new EngineTierPolicyRegistry();
         var service = new EngineReviewService(
-            new EngineReviewStore(db),
+            new EngineReviewStore(db, new EngineReviewTickSignal()),
             db,
             context,
             clock,

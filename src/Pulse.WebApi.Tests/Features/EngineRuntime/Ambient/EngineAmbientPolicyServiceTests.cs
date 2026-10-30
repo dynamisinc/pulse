@@ -604,7 +604,7 @@ public sealed class EngineAmbientPolicyServiceTests
                 Microsoft.Extensions.Options.Options.Create(new EngineAmbientGovernanceOptions { AmbientAutonomyAuthorized = authorized }),
                 loops);
             Service = new EngineReviewService(
-                new EngineReviewStore(_db),
+                new EngineReviewStore(_db, new EngineReviewTickSignal()),
                 _db,
                 context,
                 clock,

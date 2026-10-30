@@ -89,6 +89,7 @@ public sealed partial class EngineReviewService
     private readonly EngineAmbientPolicyRegistry _ambientPolicy;
     private readonly bool _timeoutAutoSendAuthorized;
     private readonly IEngineSteeringLeverRecorder _steeringLeverRecorder;
+    private readonly EngineReviewTickSignal? _tickSignal;
 
     /// <summary>
     /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
@@ -127,6 +128,11 @@ public sealed partial class EngineReviewService
     /// Records the swamped-mode / kill-switch / restore levers (#618). Optional so existing direct constructions keep
     /// compiling; when absent (never in the DI-built service — <c>AddEngineReview</c> registers it) nothing is recorded.
     /// </param>
+    /// <param name="tickSignal">
+    /// Wakes the sleeping <see cref="EngineReviewTickHost"/> when a re-roll restarts a countdown. Optional so existing
+    /// direct constructions keep compiling; when absent (never in the DI-built service — <c>AddEngineReview</c>
+    /// registers it) nothing is woken.
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -143,7 +149,8 @@ public sealed partial class EngineReviewService
         ILogger<EngineReviewService> logger,
         EngineAmbientPolicyRegistry? ambientPolicy = null,
         IOptions<EngineAmbientGovernanceOptions>? governance = null,
-        IEngineSteeringLeverRecorder? steeringLeverRecorder = null)
+        IEngineSteeringLeverRecorder? steeringLeverRecorder = null,
+        EngineReviewTickSignal? tickSignal = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -175,6 +182,7 @@ public sealed partial class EngineReviewService
         _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
         _timeoutAutoSendAuthorized = governance?.Value.TimeoutAutoSendAuthorized ?? false;
         _steeringLeverRecorder = steeringLeverRecorder ?? NullSteeringLeverRecorder.Instance;
+        _tickSignal = tickSignal;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -352,7 +360,21 @@ public sealed partial class EngineReviewService
             item.Disposition = DraftDisposition.Queued;
         }
 
-        await CommitDecisionAsync(item, exerciseId, EngineReviewAction.ReRoll, input.ActingHumanId, input.TimeZone, cancellationToken);
+        try
+        {
+            await CommitDecisionAsync(item, exerciseId, EngineReviewAction.ReRoll, input.ActingHumanId, input.TimeZone, cancellationToken);
+        }
+        finally
+        {
+            // The auto-HOLD tick may be sleeping with nothing to count down. In a finally: CommitDecisionAsync saves and
+            // THEN broadcasts, so a failed broadcast (or a request cancelled after the commit) must not leave a restarted
+            // countdown unwatched. If the save itself failed the wake is spurious, which costs one sweep.
+            if (item.Disposition == DraftDisposition.CountingDown)
+            {
+                _tickSignal?.Wake();
+            }
+        }
+
         return EngineReviewActionResult.Ok(EngineReviewItemDto.FromEntity(item));
     }
 
@@ -2142,32 +2164,100 @@ public sealed class EngineAutonomyProviderHealthListener : IProviderHealthListen
 /// </remarks>
 public sealed partial class EngineReviewTickHost : BackgroundService
 {
-    /// <summary>How often the auto-HOLD tick runs. Scenario countdowns are minute-granular, so a short wall-clock cadence is ample.</summary>
+    /// <summary>
+    /// How often the auto-HOLD tick runs while any item is counting down, and the wait before the first sweep after
+    /// start-up. Scenario countdowns are minute-granular, so a short wall-clock cadence is ample.
+    /// </summary>
     public static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// The wait after a sweep that found no countdown that can progress: indefinitely, until
+    /// <see cref="EngineReviewTickSignal"/> wakes the tick. A countdown expires against its exercise's scenario minute,
+    /// so nothing can expire while nothing counts down or while every counting-down exercise's clock is frozen or not
+    /// started. Every write that starts a countdown wakes the tick, and so does every clock change (a
+    /// <c>WakeOnClockChange</c> observer), so an idle tick does no database work and the serverless database can
+    /// auto-pause between exercises — Freeze included.
+    /// </summary>
+    public static readonly TimeSpan IdleSleep = Timeout.InfiniteTimeSpan;
+
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly EngineReviewTickSignal _signal;
+    private readonly IExerciseClock _clock;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<EngineReviewTickHost> _logger;
 
     /// <summary>Creates the tick host over the scope factory it opens per-exercise scopes from.</summary>
     /// <param name="scopeFactory">The DI scope factory (per-exercise <see cref="IServiceScope"/>).</param>
+    /// <param name="signal">The wake-up line every countdown-starting write and every clock change pokes.</param>
+    /// <param name="clock">The exercise clock: a countdown on a frozen or unstarted clock cannot expire.</param>
+    /// <param name="timeProvider">The server clock the cadence runs on.</param>
     /// <param name="logger">The logger for resilient per-tick diagnostics.</param>
-    public EngineReviewTickHost(IServiceScopeFactory scopeFactory, ILogger<EngineReviewTickHost> logger)
+    public EngineReviewTickHost(
+        IServiceScopeFactory scopeFactory,
+        EngineReviewTickSignal signal,
+        IExerciseClock clock,
+        TimeProvider timeProvider,
+        ILogger<EngineReviewTickHost> logger)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
+        ArgumentNullException.ThrowIfNull(signal);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _scopeFactory = scopeFactory;
+        _signal = signal;
+        _clock = clock;
+        _timeProvider = timeProvider;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The wait before the next sweep: <see cref="TickInterval"/> while any countdown can progress (or after a failed
+    /// sweep, so the safety tick keeps retrying), <see cref="IdleSleep"/> otherwise.
+    /// </summary>
+    /// <param name="progressingExercises">How many counting-down exercises the last sweep found with a running clock.</param>
+    /// <param name="sweepFailed">Whether the last sweep failed.</param>
+    /// <returns>How long to wait (a wake-up still cuts it short).</returns>
+    public static TimeSpan NextDelay(int progressingExercises, bool sweepFailed) =>
+        sweepFailed || progressingExercises > 0 ? TickInterval : IdleSleep;
+
+    /// <summary>
+    /// How many of <paramref name="countingDownExercises"/> can see a countdown expire: those whose clock is running
+    /// (started and not frozen). A frozen clock holds its minute and an unstarted one reads minute 0 forever.
+    /// </summary>
+    /// <param name="countingDownExercises">The exercises with an item counting down.</param>
+    /// <param name="clock">The exercise clock.</param>
+    /// <returns>The count.</returns>
+    public static int CountProgressing(IEnumerable<Guid> countingDownExercises, IExerciseClock clock)
+    {
+        ArgumentNullException.ThrowIfNull(countingDownExercises);
+        ArgumentNullException.ThrowIfNull(clock);
+        return countingDownExercises.Count(clock.IsRunning);
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TickInterval);
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        // Never run inline in the host's start-up. The first sweep runs one TickInterval after start: it is what
+        // picks up countdowns that survived a restart, since nothing wakes the tick for those.
+        await Task.Yield();
+
+        var delay = TickInterval;
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await TickAsync(stoppingToken).ConfigureAwait(false);
+                await _signal.WaitAsync(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            try
+            {
+                var progressing = await TickAsync(stoppingToken).ConfigureAwait(false);
+                delay = NextDelay(progressing, sweepFailed: false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -2177,6 +2267,7 @@ public sealed partial class EngineReviewTickHost : BackgroundService
             {
                 // A transient failure (e.g. the database briefly unreachable) must not kill the safety tick.
                 LogTickFailed(ex);
+                delay = NextDelay(progressingExercises: 0, sweepFailed: true);
             }
         }
     }
@@ -2188,7 +2279,11 @@ public sealed partial class EngineReviewTickHost : BackgroundService
     private partial void LogTickFailed(Exception exception);
 
     /// <summary>Sweeps the active exercises and drives the auto-HOLD evaluation for each within its own scope.</summary>
-    private async Task TickAsync(CancellationToken cancellationToken)
+    /// <returns>
+    /// How many counting-down exercises have a running clock (the loop picks its cadence from it). Every counting-down
+    /// exercise is still evaluated, exactly as before; the count only decides whether the next tick is needed.
+    /// </returns>
+    private async Task<int> TickAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<Guid> exercises;
         await using (var sweepScope = _scopeFactory.CreateAsyncScope())
@@ -2217,5 +2312,7 @@ public sealed partial class EngineReviewTickHost : BackgroundService
             var service = scope.ServiceProvider.GetRequiredService<EngineReviewService>();
             await service.EvaluateAutoHoldAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        return CountProgressing(exercises, _clock);
     }
 }

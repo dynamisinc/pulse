@@ -172,8 +172,10 @@ public sealed class ScenarioClockEndpointTests
 
         factory.Services.GetRequiredService<IExerciseClockChangeSink>().Should().BeOfType<ExerciseClockWriteThrough>(
             "the push composes with story 18's write-through; it must never displace it");
-        factory.Services.GetServices<IExerciseClockChangeObserver>().Should().ContainSingle()
-            .Which.Should().BeOfType<ScenarioClockChangedPublisher>();
+        // Observers are additive (the idle background services also observe the clock, to wake on a start or unfreeze),
+        // so pin the push itself: registered exactly once, not "the only observer".
+        factory.Services.GetServices<IExerciseClockChangeObserver>().OfType<ScenarioClockChangedPublisher>().Should()
+            .ContainSingle("the ScenarioClockChanged push observes the clock exactly once");
         factory.Services.GetRequiredService<IExerciseClock>().Should().BeOfType<ExerciseClockService>();
     }
 
