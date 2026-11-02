@@ -273,8 +273,9 @@ public sealed class ContentReadService
     private bool HasResolvedScope() => _exerciseContext.CurrentExerciseId is { } id && id != Guid.Empty;
 
     /// <summary>
-    /// The enabled outlets a list draws from, by id: the whole channel, or one outlet plus its enabled children (the wire
-    /// room and its org newsrooms, PRS-010/012). Null when <paramref name="outletSlug"/> names no enabled outlet.
+    /// The enabled outlets a list draws from, by id: the whole channel, or one outlet plus its enabled DIRECT children
+    /// (the wire room and its org newsrooms, PRS-010/012: the press model is one level deep). Null when
+    /// <paramref name="outletSlug"/> names no enabled outlet.
     /// </summary>
     private async Task<Dictionary<Guid, Outlet>?> ListOutletsAsync(
         string channelId, string? outletSlug, CancellationToken cancellationToken)

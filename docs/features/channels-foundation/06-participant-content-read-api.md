@@ -17,7 +17,7 @@ channel's link previews (posts/04) call. The participant projector is the **only
 - [x] **No leakage (XC-002).** Responses never include origin, acting human, wall clock, status, background tag, featured rank, version, inject id, external ref, or silent-rewrite history; a silently rewritten item shows only its current content and the moved `updatedScenarioTime` (the Updated stamp, FC-1) with no `revisions[]` entry for it.
 - [x] **Channel gate.** Every route is behind `RequireChannelEnabled(channel)`; a disabled channel is a 404 (story 08).
 - [x] **Link resolver.** Given `GET /api/link-previews?path=/news/newsline-7/emergency-call-delays`, then it returns `{ title, description?, image?, sourceName, permalink }` for a published, in-scope item and 404 for anything else (external URLs, other exercises, drafts, non-content paths); it performs **no** outbound fetch (SOC-004).
-- [x] **Scenario time + host-relative.** Every instant is a `scenarioTime` ISO string and every URL field is host-relative (FC-9.2/9.3).
+- [x] **Scenario time + host-relative.** Every instant is a `scenarioTime` ISO string and every URL field is host-relative (FC-9.2/9.3). *(Built note: permalinks, `homeRoute` and link-card `permalink` are host-relative; signed media `url`/`posterUrl` are whatever `IMediaUrlSigner` mints (absolute SAS/dev-media URLs), per the F02 contract decision that media URLs are exempt. Tests prove the shape with a host-relative fake signer.)*
 - [x] **Telemetry is not emitted here** (views are client-reported via story 15 so a list scan is not a read); nothing is written on GET.
 
 ## Out of Scope

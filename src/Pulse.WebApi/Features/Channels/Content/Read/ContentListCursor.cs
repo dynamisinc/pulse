@@ -23,10 +23,19 @@ using System.Text;
 /// </list>
 /// </para>
 /// <para>A cursor from one ordering is refused by the other (a 400), so a client cannot splice a plain page onto a
-/// featured one.</para>
+/// featured one. It is NOT bound to the <c>outlet</c>/<c>category</c> filters (the <c>AlertReader</c> cursor is not
+/// either): replaying it under other filters resumes from the same instant over the other row set, within the same
+/// exercise scope.</para>
+/// <para><b>Best effort inside a tie.</b> An item published at the cursor's own frozen instant between two page reads
+/// can shift the tie offset by one (a duplicate or a skip within that instant). A stable tiebreak needs a sequence
+/// column, which the frozen M1 schema does not have; the realtime <c>ContentPublished</c> frame (story 09) still
+/// delivers such an item.</para>
 /// </remarks>
 internal readonly record struct ContentListCursor(ContentListStage Stage, long UtcTicks, int Served)
 {
+    /// <summary>The largest offset a cursor may carry (far beyond any real page walk; bounds a forged <c>Skip</c>).</summary>
+    public const int MaxServed = 10_000;
+
     private const char RecencyTag = 'r';
     private const char FeaturedTag = 'f';
     private const char FeaturedRestTag = 'n';
@@ -67,7 +76,8 @@ internal readonly record struct ContentListCursor(ContentListStage Stage, long U
             || parts[0].Length != 1
             || !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var ticks)
             || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var served)
-            || served < 1)
+            || served < 1
+            || served > MaxServed)
         {
             return false;
         }

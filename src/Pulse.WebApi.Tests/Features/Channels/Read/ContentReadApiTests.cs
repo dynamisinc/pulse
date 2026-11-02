@@ -7,7 +7,12 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Text.Json.Nodes;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Tests.Data;
 using Xunit;
@@ -213,6 +218,107 @@ public sealed class ContentReadApiTests
     }
 
     [RequiresDockerFact]
+    public async Task List_Featured_EqualRanksAndATieInTheTail_PageWithNoDuplicateOrSkip()
+    {
+        var (exercise, token) = await _seed.ExerciseAsync();
+        var outlet = await _seed.OutletAsync(exercise.Id, "news", "newsline-7");
+        var t = ContentReadSeeder.BaseTime;
+        await _seed.ItemAsync(outlet, "rank-1-newer", published: t.AddHours(-1), featuredRank: 1);
+        await _seed.ItemAsync(outlet, "rank-1-older", published: t.AddHours(-3), featuredRank: 1);
+        await _seed.ItemAsync(outlet, "rank-2", published: t.AddHours(-2), featuredRank: 2);
+        for (var i = 0; i < 4; i++)
+        {
+            await _seed.ItemAsync(outlet, $"tail-tie-{i}", published: t);
+        }
+
+        await _seed.ItemAsync(outlet, "tail-old", published: t.AddHours(-9));
+
+        using var factory = new ContentReadFactory(_seed.ConnectionString);
+        using var client = factory.CreateClientFor(exercise.Host, token);
+
+        foreach (var limit in new[] { 1, 2, 3, 4 })
+        {
+            // limit=3 ends page 1 exactly on the last featured row; limit=1/2 cross the tail tie with the FeaturedRest offset.
+            var slugs = await DrainAsync(client, $"/api/channels/news/content?featured=true&limit={limit}");
+            slugs.Should().HaveCount(8, "limit {0}", limit).And.OnlyHaveUniqueItems();
+            slugs.Take(3).Should().Equal(["rank-1-newer", "rank-1-older", "rank-2"], "limit {0}", limit);
+            slugs.Skip(3).Take(4).Should().BeEquivalentTo(Enumerable.Range(0, 4).Select(i => $"tail-tie-{i}"));
+            slugs[^1].Should().Be("tail-old");
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task List_Featured_WithNothingFeatured_IsThePlainRecencyOrder_AndComposesWithFilters()
+    {
+        var (exercise, token) = await _seed.ExerciseAsync();
+        var outlet = await _seed.OutletAsync(exercise.Id, "news", "newsline-7");
+        var other = await _seed.OutletAsync(exercise.Id, "news", "courier-ledger");
+        var t = ContentReadSeeder.BaseTime;
+        await _seed.ItemAsync(outlet, "b", published: t.AddMinutes(-1), category: "Local");
+        await _seed.ItemAsync(outlet, "a", published: t, category: "Local");
+        await _seed.ItemAsync(outlet, "c", published: t.AddMinutes(-2), category: "Weather");
+        await _seed.ItemAsync(other, "elsewhere", published: t.AddMinutes(1), category: "Local", featuredRank: 1);
+
+        using var factory = new ContentReadFactory(_seed.ConnectionString);
+        using var client = factory.CreateClientFor(exercise.Host, token);
+
+        (await DrainAsync(client, "/api/channels/news/content?featured=true&outlet=newsline-7&limit=1"))
+            .Should().Equal("a", "b", "c");
+        (await DrainAsync(client, "/api/channels/news/content?featured=true&outlet=newsline-7&category=Local&limit=1"))
+            .Should().Equal("a", "b");
+        (await SlugsAsync(client, "/api/channels/news/content?featured=true&category=Local"))
+            .Should().Equal("elsewhere", "a", "b");
+    }
+
+    [RequiresDockerFact]
+    public async Task List_Row_IsTheSameShapeAsTheRealtimeContentPublishedFrame()
+    {
+        var (exercise, token) = await _seed.ExerciseAsync();
+        var outlet = await _seed.OutletAsync(exercise.Id, "news", "newsline-7");
+        var item = await _seed.ItemAsync(outlet, "parity", featuredRank: 2, category: "Local", configure: i =>
+        {
+            i.Kicker = "Developing";
+            i.UpdatedScenarioTime = ContentReadSeeder.BaseTime.AddMinutes(5);
+        });
+        await _seed.MediaAsync(item, ChannelVocabulary.MediaRoleHero, 0, "Dispatch floor", asHero: true);
+
+        using var factory = new ContentReadFactory(_seed.ConnectionString);
+        using var client = factory.CreateClientFor(exercise.Host, token);
+
+        using var list = await GetJsonAsync(client, "/api/channels/news/content");
+        var row = JsonNode.Parse(list.RootElement.GetProperty("items")[0].GetRawText());
+
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exercise.Id;
+        var db = scope.ServiceProvider.GetRequiredService<PulseDbContext>();
+        var stored = await db.ContentItems.AsNoTracking().SingleAsync(i => i.Id == item.Id);
+        var frame = await scope.ServiceProvider.GetRequiredService<ContentProjector>().ToSummaryAsync(stored);
+
+        JsonNode.DeepEquals(row, JsonSerializer.SerializeToNode(frame)).Should().BeTrue(
+            "the REST list row and the ContentPublished frame are merged by id on the client, so they must not drift "
+            + "(row {0} vs frame {1})",
+            row!.ToJsonString(),
+            JsonSerializer.Serialize(frame));
+    }
+
+    [RequiresDockerFact]
+    public async Task Permalink_AKindWithNoDescriptor_ProjectsAnEmptyPayload()
+    {
+        var (exercise, token) = await _seed.ExerciseAsync();
+        var outlet = await _seed.OutletAsync(exercise.Id, "weather", "weather-desk");
+        await _seed.ItemAsync(outlet, "unknown-kind", configure: i => i.Kind = ChannelVocabulary.KindWeatherProduct);
+
+        using var factory = new ContentReadFactory(_seed.ConnectionString);
+        using var client = factory.CreateClientFor(exercise.Host, token);
+
+        var raw = await (await client.GetAsync("/api/channels/weather/content/weather-desk/unknown-kind")).Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(raw);
+
+        doc.RootElement.GetProperty("payload").EnumerateObject().Should().BeEmpty("fail closed: never the raw stored payload");
+        raw.Should().NotContain("north");
+    }
+
+    [RequiresDockerFact]
     public async Task Permalink_Published_IsTheParticipantShape_WithVisibleRevisionsOnly_AndTheProjectedPayload()
     {
         var (exercise, token) = await _seed.ExerciseAsync();
@@ -328,6 +434,7 @@ public sealed class ContentReadApiTests
         await _seed.ItemAsync(outlet, "a-deleted", deleted: true);
         await _seed.ItemAsync(outlet, "a-deleted-retraction", status: ChannelVocabulary.StatusRetracted, deleted: true);
         await _seed.ItemAsync(disabledOutlet, "on-a-disabled-outlet");
+        await _seed.ItemAsync(disabledOutlet, "retracted-on-a-disabled-outlet", status: ChannelVocabulary.StatusRetracted);
         await _seed.ItemAsync(deletedOutlet, "on-a-deleted-outlet");
         await _seed.ItemAsync(foreignOutlet, "other-exercise-story");
 
@@ -344,6 +451,7 @@ public sealed class ContentReadApiTests
                      "/api/channels/news/content/newsline-7/a-deleted",
                      "/api/channels/news/content/newsline-7/a-deleted-retraction",
                      "/api/channels/news/content/closed-desk/on-a-disabled-outlet",
+                     "/api/channels/news/content/closed-desk/retracted-on-a-disabled-outlet",
                      "/api/channels/news/content/gone-desk/on-a-deleted-outlet",
                      "/api/channels/news/content/newsline-7/other-exercise-story",
                      "/api/channels/news/content/NEWSLINE-7/a-draft",
@@ -486,7 +594,7 @@ public sealed class ContentReadApiTests
     }
 
     private static string ProjectorIso(DateTimeOffset value) =>
-        Pulse.WebApi.Features.Channels.Content.Publish.ContentProjector.Iso(value);
+        ContentProjector.Iso(value);
 
     private static IEnumerable<string> Keys(JsonElement element) => element.EnumerateObject().Select(p => p.Name);
 

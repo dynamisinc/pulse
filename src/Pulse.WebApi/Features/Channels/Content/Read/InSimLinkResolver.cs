@@ -16,8 +16,9 @@ using Pulse.WebApi.Features.Channels.Enablement;
 /// </para>
 /// <para>
 /// <b>Channel gate.</b> The route is channel-agnostic (Social calls it), so the TARGET channel's enablement is checked
-/// here with <see cref="IChannelEnablement"/>, the same rule <c>RequireChannelEnabled</c> applies: a card for a disabled
-/// channel would be a link into an unreachable route.
+/// here with <see cref="IChannelEnablement"/>: a card for a disabled channel would be a link into an unreachable route.
+/// Unlike <c>RequireChannelEnabled</c> there is NO staff bypass: a link card is participant-world data (it is embedded
+/// in posts participants see), so it follows the participant rule even when a staff session asks.
 /// </para>
 /// </remarks>
 public sealed class InSimLinkResolver : IInSimLinkResolver

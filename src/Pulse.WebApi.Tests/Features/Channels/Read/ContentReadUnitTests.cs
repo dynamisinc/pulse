@@ -33,6 +33,7 @@ public sealed class ContentReadUnitTests
     [InlineData("q:1:1")]
     [InlineData("rr:1:1")]
     [InlineData("r:1:1:1")]
+    [InlineData("f:0:10001")]
     public void Cursor_RefusesAnythingItDidNotIssue(string text)
     {
         var value = text.Contains(':', StringComparison.Ordinal)
