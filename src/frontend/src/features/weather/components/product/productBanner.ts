@@ -61,7 +61,8 @@ export function productBanner(
       return null
     case 'pending': {
       const ms = Date.parse(product.payload.effectiveScenarioTime) - instant(scenarioNow)
-      return { state, text: `EFFECTIVE IN ${formatCountdown(ms)}` }
+      // Unreachable while productState needs a parseable instant to say pending; never "IN NaN".
+      return { state, text: Number.isFinite(ms) ? `EFFECTIVE IN ${formatCountdown(ms)}` : 'PENDING' }
     }
     case 'expired':
       return { state, text: 'EXPIRED' }
