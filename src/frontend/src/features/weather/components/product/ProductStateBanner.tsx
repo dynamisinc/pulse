@@ -17,6 +17,9 @@
  * always-mounted `role="status"` region announces state CHANGES (EXPIRED,
  * CANCELLED, IN EFFECT, PENDING) once each; the countdown is never announced.
  * `className` styles the visible banner, so an active product takes no space.
+ * Switching one instance between snapshot and live mode (`scenarioNow` set /
+ * unset) remounts it, and a flip in that same render is not announced; callers
+ * pick one mode per instance.
  *
  * Participant world: CSS Module + skin variables, no COBRA, no MUI.
  */
