@@ -265,6 +265,11 @@ public sealed class RoleMatrixTests
         Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
         Probe("POST /api/outlets/reorder", ControllerOnly);
         Probe("POST /api/outlets/defaults", ControllerOnly);
+
+        // weather-source 02 (#753): weather zone writes are controller-only (story AC "Staff CRUD").
+        Probe("POST /api/weather/zones", ControllerOnly);
+        Probe("PUT /api/weather/zones/{id:guid}", ControllerOnly);
+        Probe("DELETE /api/weather/zones/{id:guid}", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
