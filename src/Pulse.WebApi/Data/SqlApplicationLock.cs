@@ -15,8 +15,8 @@ public static class SqlApplicationLock
     /// <param name="resource">The lock name (at most 255 characters); include the scope, e.g. the exercise id.</param>
     /// <param name="timeoutMilliseconds">How long to wait for it.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
-    /// <returns><c>true</c> when granted; <c>false</c> on timeout or deadlock (the caller answers a retryable error).</returns>
-    /// <exception cref="InvalidOperationException">No transaction is open (the lock would be released at once).</exception>
+    /// <returns><c>true</c> when granted; <c>false</c> on timeout, cancel or deadlock (the caller answers a retryable error).</returns>
+    /// <exception cref="InvalidOperationException">No transaction is open (the lock would be released at once), or the call itself failed.</exception>
     public static async Task<bool> TryAcquireExclusiveAsync(
         this DatabaseFacade database, string resource, int timeoutMilliseconds, CancellationToken cancellationToken = default)
     {
@@ -36,6 +36,14 @@ public static class SqlApplicationLock
                 SELECT @result AS [Value];
                 """)
             .ToListAsync(cancellationToken);
-        return result.Count == 1 && result[0] >= 0;
+        var status = result.Count == 1 ? result[0] : -999;
+
+        // 0/1 granted; -1 timeout, -2 cancelled, -3 deadlock victim: retryable. Anything else (-999) is a call error.
+        return status switch
+        {
+            >= 0 => true,
+            -1 or -2 or -3 => false,
+            _ => throw new InvalidOperationException($"sp_getapplock failed for '{resource}' (status {status})."),
+        };
     }
 }

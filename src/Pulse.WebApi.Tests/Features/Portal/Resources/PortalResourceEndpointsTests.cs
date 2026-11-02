@@ -4,11 +4,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Portal.Contracts;
@@ -465,6 +468,58 @@ public sealed class PortalResourceEndpointsTests
 
         await using var db = host.Db(exerciseId);
         (await db.PortalResources.CountAsync()).Should().Be(0);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData(Route)]
+    [InlineData(Route + "/reorder")]
+    public async Task ARefusedCaller_WithAMalformedBody_IsStillRefused_NotA400(string path)
+    {
+        await using var host = await StartAsync();
+        var (exerciseId, _) = await host.SeedExerciseAsync();
+        var evaluator = await host.AddStaffAsync(exerciseId, "evaluator");
+
+        foreach (var (staff, expected) in new[] { ((Guid?)evaluator, HttpStatusCode.Forbidden), (null, HttpStatusCode.Unauthorized) })
+        {
+            host.ActAs(exerciseId, staff);
+            foreach (var content in new HttpContent[]
+                     {
+                         new StringContent("{ not json", Encoding.UTF8, "application/json"),
+                         new StringContent("title=x", Encoding.UTF8, "text/plain"),
+                     })
+            {
+                var response = await host.Client.PostAsync(new Uri(path, UriKind.Relative), content);
+                response.StatusCode.Should().Be(expected, "the body is read only after the staff and role filters");
+            }
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task AShelfLockHeldElsewhere_MakesAWriteARetryable409_NotA500()
+    {
+        await using var host = await StartAsync();
+        var (exerciseId, staff) = await host.SeedExerciseAsync();
+        var row = await host.AddResourceAsync(exerciseId, "Held", sortOrder: 1);
+        host.ActAs(exerciseId, staff);
+
+        // Another writer holds the exercise's shelf lock in an open transaction for longer than the service waits.
+        await using var holder = host.Db(exerciseId);
+        await using var transaction = await holder.Database.BeginTransactionAsync();
+        (await holder.Database.TryAcquireExclusiveAsync($"pulse:portal-resources:{exerciseId:N}", 1000))
+            .Should().BeTrue();
+
+        var create = await host.PostAsync(Route, PortalResourceTestHost.Body());
+        var reorder = await host.PostAsync($"{Route}/reorder", new { orderedIds = new[] { row.Id } });
+        var delete = await host.DeleteAsync(row.Id);
+
+        foreach (var response in new[] { create, reorder, delete })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("try again");
+        }
+
+        await transaction.RollbackAsync();
+        (await host.PostAsync(Route, PortalResourceTestHost.Body())).StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     // ---- AC "Soft delete (XC-010)" ------------------------------------------------------------------

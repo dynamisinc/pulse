@@ -192,7 +192,8 @@ public static class PortalResourceEndpoints
         {
             return await httpContext.Request.ReadFromJsonAsync<T>(cancellationToken);
         }
-        catch (Exception ex) when (ex is JsonException or BadHttpRequestException)
+        catch (Exception ex) when (ex is JsonException
+            or BadHttpRequestException { StatusCode: not StatusCodes.Status413PayloadTooLarge })
         {
             return null;
         }
