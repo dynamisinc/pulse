@@ -265,6 +265,11 @@ public sealed class RoleMatrixTests
         Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
         Probe("POST /api/outlets/reorder", ControllerOnly);
         Probe("POST /api/outlets/defaults", ControllerOnly);
+
+        // exercise-portal 03 (#769): portal config is the planner's and the controller's (story AC "Staff write"). The
+        // body binds (its required members are present, so no role gets a binding 400 before the gate) and its stale
+        // version makes an admitted probe stop at the handler's 409 without writing a row.
+        Probe("PUT /api/portal/config", PlannerOrController, "{\"layoutKey\":\"anchor\",\"version\":999}");
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
