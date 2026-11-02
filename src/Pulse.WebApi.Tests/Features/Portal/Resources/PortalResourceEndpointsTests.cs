@@ -515,7 +515,7 @@ public sealed class PortalResourceEndpointsTests
         foreach (var response in new[] { create, reorder, delete })
         {
             response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-            (await response.Content.ReadAsStringAsync()).Should().Contain("try again");
+            (await response.Content.ReadAsStringAsync()).Should().Contain("being changed by someone else", "the busy answer, not the stale-version one");
         }
 
         await transaction.RollbackAsync();
