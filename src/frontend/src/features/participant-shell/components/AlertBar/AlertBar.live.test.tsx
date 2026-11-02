@@ -98,6 +98,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Restored here, not in the tests, so a failed assertion cannot leak a scroll position.
+  Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
   vi.useRealTimers()
   vi.unstubAllGlobals()
   alertPauseBridge.reset()
@@ -148,7 +150,6 @@ describe('AlertBar (live) — two active alerts: a warning forces the band, the 
     fireEvent.scroll(window)
     expect(screen.queryByTestId('pulse-alert-bar-expand')).toBeNull()
     expect(screen.getByTestId('pulse-alert-bar-timestamp')).toBeInTheDocument()
-    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
   })
 
   it('escalates to the full band the moment a pushed warning arrives', async () => {
@@ -243,7 +244,6 @@ describe('AlertBar (live) — five active alerts rotate in severity-then-recency
 
     expect(screen.queryByTestId('pulse-alert-bar-details')).toBeNull()
     expect(host).not.toHaveAttribute('data-rotation-paused')
-    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
   })
 
   it('holds on the first alert under prefers-reduced-motion', async () => {
