@@ -55,6 +55,35 @@ public sealed class OrgNewsroomProvisionerTests : IDisposable
     }
 
     [Fact]
+    public async Task EveryProvisionedRow_PassesF03sOwnOutletWriteRules()
+    {
+        // The provisioner writes outlets directly (a grant can be participant-side); this pins it to F03's rules.
+        await _harness.AddOrgAsync(_harness.ExerciseId, "Fulton County EM", "@FultonEM");
+        await _harness.AddOrgAsync(_harness.ExerciseId, new string('N', 140), new string('h', 120));
+        await ProvisionAsync();
+
+        foreach (var outlet in await NewsroomsAsync())
+        {
+            var request = new OutletWriteRequest
+            {
+                ChannelId = outlet.ChannelId,
+                Slug = outlet.Slug,
+                Name = outlet.Name,
+                ParentOutletId = outlet.ParentOutletId?.ToString(),
+                PairedPersonaId = outlet.PairedPersonaId?.ToString(),
+                LogoMediaId = outlet.LogoMediaId?.ToString(),
+                Categories = [],
+                SkinKey = outlet.SkinKey,
+                Enabled = outlet.Enabled,
+                SortOrder = outlet.SortOrder,
+            };
+
+            var parsed = OutletWriteValidator.Parse(request, existing: null, new SkinOverridesValidator());
+            parsed.Error.Should().BeNull(outlet.Slug);
+        }
+    }
+
+    [Fact]
     public async Task EachNewsroom_EmitsOneOutletCreateEvent_AttributedToTheStaffUser()
     {
         var staff = Guid.NewGuid();

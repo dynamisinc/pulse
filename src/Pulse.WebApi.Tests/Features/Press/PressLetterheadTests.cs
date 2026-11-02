@@ -62,9 +62,11 @@ public sealed class PressLetterheadTests
 
         errors.Should().BeEmpty();
         PressLetterhead.Read(cleared!.ToJsonString(), null).Should().Be(new ReleaseLetterheadDto());
+        cleared["ext"].Should().BeNull("clearing the letterhead leaves no empty press bag or ext behind");
 
-        var (_, tooLong) = PressLetterhead.Write(_validator, SkinKey, null, new string('a', 301), null);
-        tooLong.Should().ContainSingle().Which.Should().Contain("letterheadAddress");
+        var (_, tooLong) = PressLetterhead.Write(
+            _validator, SkinKey, null, new string('a', 301), new ReleaseContactDto { Name = new string('b', 121) });
+        tooLong.Should().HaveCount(2, "every over-long field is reported, not just the first");
     }
 
     [Fact]

@@ -19,6 +19,18 @@ public static partial class ReleaseDek
 {
     private const string Ellipsis = "…";
 
+    // A sentence end this close to the start is an abbreviation ("Dr.", "U.S.", "St.") more often than a sentence.
+    private const int MinSentenceLength = 20;
+
+    private const int RegexTimeoutMs = 250;
+
+    // Title, address and organization abbreviations common in releases; a period after one does not end a sentence.
+    private static readonly HashSet<string> Abbreviations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dr", "mr", "mrs", "ms", "st", "sgt", "lt", "capt", "gov", "sen", "rep", "gen", "no", "jr", "sr", "inc", "co",
+        "corp", "ave", "rd", "blvd", "mt", "ft", "dept", "approx", "vs", "etc",
+    };
+
     /// <summary>Derives the dek.</summary>
     /// <param name="headline">The release headline (the last fallback, when the org name is blank too).</param>
     /// <param name="bodyText">The body: sanitized HTML (the <c>rich-tables</c> profile) or plain text; may be null.</param>
@@ -26,7 +38,17 @@ public static partial class ReleaseDek
     /// <returns>A non-empty dek of at most <see cref="PressVocabulary.DekMaxLength"/> characters.</returns>
     public static string Derive(string? headline, string? bodyText, string? orgName)
     {
-        var sentence = FirstSentence(bodyText ?? string.Empty);
+        string? sentence;
+        try
+        {
+            sentence = FirstSentence(bodyText ?? string.Empty);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // A pathological body never blocks a write: it simply gets the org dek.
+            sentence = null;
+        }
+
         if (sentence is not null)
         {
             return Fit(sentence);
@@ -52,8 +74,38 @@ public static partial class ReleaseDek
             return null;
         }
 
-        var end = SentenceEnd().Match(block);
-        return end.Success ? block[..(end.Index + 1)] : block;
+        // The first terminator that ends a real sentence: far enough in, and followed by the end of the block or by a
+        // capital, digit or quote (so "U.S. officials" and "Dr. Lee" do not end it).
+        foreach (Match end in SentenceEnd().Matches(block))
+        {
+            var length = end.Index + 1;
+            var next = block[length..].TrimStart();
+            if (next.Length == 0
+                || (length >= MinSentenceLength
+                    && !IsAbbreviation(block, end.Index)
+                    && (char.IsUpper(next[0]) || char.IsDigit(next[0]) || next[0] is '"' or '“' or '\'')))
+            {
+                return block[..length];
+            }
+        }
+
+        return block;
+    }
+
+    /// <summary>
+    /// Whether the period at <paramref name="index"/> closes an abbreviation: an initial ("J."), a dotted token ("U.S."),
+    /// or a listed word ("Dr.", "St.").
+    /// </summary>
+    private static bool IsAbbreviation(string block, int index)
+    {
+        if (block[index] != '.')
+        {
+            return false;
+        }
+
+        var start = block.LastIndexOf(' ', index) + 1;
+        var token = block[start..index];
+        return token.Length == 1 || token.Contains('.', StringComparison.Ordinal) || Abbreviations.Contains(token);
     }
 
     /// <summary>Removes every match, innermost first, until none is left (nested lists/tables).</summary>
@@ -72,7 +124,9 @@ public static partial class ReleaseDek
 
     private static string? FirstBlock(string html)
     {
-        var text = WebUtility.HtmlDecode(AnyTag().Replace(BlockBoundary().Replace(html, "\n"), string.Empty));
+        // Decoded text goes through the plain-text cleaner again, so an encoded "&lt;b&gt;" never becomes markup in the dek.
+        var text = PressPlainText.Clean(
+            WebUtility.HtmlDecode(AnyTag().Replace(BlockBoundary().Replace(html, "\n"), string.Empty)), multiline: true);
         foreach (var line in text.Split('\n'))
         {
             var block = Collapse(line);
@@ -93,6 +147,11 @@ public static partial class ReleaseDek
         }
 
         var limit = PressVocabulary.DekMaxLength - Ellipsis.Length;
+        if (char.IsHighSurrogate(text[limit - 1]))
+        {
+            limit--;
+        }
+
         var cut = text.LastIndexOf(' ', limit);
         var head = cut > 0 ? text[..cut] : text[..limit];
         return head.TrimEnd(' ', ',', ';', ':', '-', '—') + Ellipsis;
@@ -100,26 +159,26 @@ public static partial class ReleaseDek
 
     private static string Collapse(string text) => Whitespace().Replace(text, " ").Trim();
 
-    [GeneratedRegex(@"<(script|style|template)\b[^>]*>.*?</\1\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    [GeneratedRegex(@"<(script|style|template)\b[^>]*>.*?</\1\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline, RegexTimeoutMs)]
     private static partial Regex Hidden();
 
-    [GeneratedRegex(@"<table\b[^>]*>(?:(?!<table\b).)*?</table\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    [GeneratedRegex(@"<table\b[^>]*>(?:(?!<table\b).)*?</table\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline, RegexTimeoutMs)]
     private static partial Regex Table();
 
-    [GeneratedRegex(@"<(ul|ol)\b[^>]*>(?:(?!<(?:ul|ol)\b).)*?</\1\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    [GeneratedRegex(@"<(ul|ol)\b[^>]*>(?:(?!<(?:ul|ol)\b).)*?</\1\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline, RegexTimeoutMs)]
     private static partial Regex List();
 
     [GeneratedRegex(
         @"<\s*/?\s*(p|div|br|li|ul|ol|h[1-6]|blockquote|table|thead|tbody|tfoot|tr|td|th|caption|hr|pre|section|article)\b[^>]*>",
-        RegexOptions.IgnoreCase)]
+        RegexOptions.IgnoreCase, RegexTimeoutMs)]
     private static partial Regex BlockBoundary();
 
-    [GeneratedRegex(@"<[^>]*>")]
+    [GeneratedRegex(@"<[^>]*>", RegexOptions.None, RegexTimeoutMs)]
     private static partial Regex AnyTag();
 
-    [GeneratedRegex(@"[.!?](?=\s|$)")]
+    [GeneratedRegex(@"[.!?](?=\s|$)", RegexOptions.None, RegexTimeoutMs)]
     private static partial Regex SentenceEnd();
 
-    [GeneratedRegex(@"\s+")]
+    [GeneratedRegex(@"\s+", RegexOptions.None, RegexTimeoutMs)]
     private static partial Regex Whitespace();
 }

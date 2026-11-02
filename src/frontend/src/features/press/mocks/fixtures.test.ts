@@ -15,7 +15,7 @@ import { PARTICIPANT_PAYLOAD_KEYS } from '../contract/vocabulary'
 import { isForbiddenKey } from '@/features/portal/contract'
 import {
   MOCK_EMBARGOED_RELEASE_AUTHOR,
-  MOCK_FULTON_ORG,
+  MOCK_KESTREL_ORG,
   MOCK_HARBOR_ORG,
   MOCK_PENDING_RELEASE_AUTHOR,
   MOCK_PUBLISHED_RELEASE_AUTHOR,
@@ -38,7 +38,7 @@ const authorReleases = [
   MOCK_PENDING_RELEASE_AUTHOR,
 ]
 
-const orgs = [MOCK_FULTON_ORG, MOCK_HARBOR_ORG]
+const orgs = [MOCK_KESTREL_ORG, MOCK_HARBOR_ORG]
 
 /** Every string anywhere in `value`, with its JSON path. */
 function strings(value: unknown, path = '$'): [string, string][] {
@@ -72,7 +72,7 @@ describe('press fixtures', () => {
   })
 
   it('one org has a full letterhead, the other is NEUTRAL (all null)', () => {
-    const full = MOCK_FULTON_ORG.letterhead
+    const full = MOCK_KESTREL_ORG.letterhead
     expect(full.logo).not.toBeNull()
     expect(full.address).not.toBeNull()
     expect(full.defaultContact).not.toBeNull()

@@ -94,6 +94,7 @@ public static class PressLetterhead
             ext[PressVocabulary.SkinExtNamespace] = bag;
         }
 
+        var errors = new List<string>();
         foreach (var (key, value, max) in fields)
         {
             var cleaned = value is null ? null : PressPlainText.Clean(value, multiline: false);
@@ -105,10 +106,27 @@ public static class PressLetterhead
 
             if (PressPlainText.CodePointLength(cleaned) > max)
             {
-                return (null, [$"ext.press.{key}: must be at most {max} characters"]);
+                errors.Add($"ext.press.{key}: must be at most {max} characters");
+                continue;
             }
 
             bag[key] = cleaned;
+        }
+
+        // Clearing the letterhead leaves no empty press bag (or empty ext) behind.
+        if (bag.Count == 0)
+        {
+            ext.Remove(PressVocabulary.SkinExtNamespace);
+        }
+
+        if (ext.Count == 0)
+        {
+            copy.Remove("ext");
+        }
+
+        if (errors.Count > 0)
+        {
+            return (null, errors);
         }
 
         var result = validator.Validate(skinKey, copy);

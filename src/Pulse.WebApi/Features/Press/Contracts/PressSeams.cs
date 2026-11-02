@@ -101,6 +101,11 @@ public sealed record ReleasePublishedEvent(
 /// Creates the per-org newsroom outlets under The Wire Room (PRS-012, Q2). Idempotent; runs in the resolved exercise.
 /// Called on exercise setup (<see cref="ProvisionAsync"/>) and on an org grant (<see cref="EnsureForPersonaAsync"/>).
 /// </summary>
+/// <remarks>
+/// It saves through the request's scoped context, and on a lost slug race it clears that context's change tracker before
+/// retrying, so call it BEFORE staging any other change in the same scope. Neither caller is wired yet: story 04's org
+/// resolver (grant) and the exercise-setup flow pick it up.
+/// </remarks>
 public interface IOrgNewsroomProvisioner
 {
     /// <summary>Ensures one newsroom per publishing org persona (every persona bound to a PIO enrollment).</summary>

@@ -87,6 +87,55 @@ public sealed class ReleaseKindDescriptorTests : IDisposable
     }
 
     [Fact]
+    public async Task Approval_IsServerOwned_IgnoredOnCreate_AndCarriedForwardOnEdit()
+    {
+        var org = await _harness.AddOrgAsync(_harness.ExerciseId, "Fulton County EM", "FultonEM");
+        using var scope = _harness.InA();
+        var create = PressHarness.Payload(org);
+        create["approval"] = new JsonObject { ["required"] = false };
+
+        (await _descriptor.ValidatePayloadAsync(create, PressHarness.Context(scope, _harness.ExerciseId))).IsValid.Should().BeTrue();
+        create["approval"].Should().BeNull("an author cannot opt out of (or into) approval through the payload");
+
+        var item = Pulse.WebApi.Tests.Data.ChannelRows.ContentItem(_harness.ExerciseId, _harness.WireRoomId, "held-release");
+        item.ChannelId = ChannelVocabulary.Press;
+        item.Kind = ChannelVocabulary.KindRelease;
+        item.PayloadJson = """{"approval":{"required":true}}""";
+        scope.Db.ContentItems.Add(item);
+        await scope.Db.SaveChangesAsync();
+
+        var edit = PressHarness.Payload(org);
+        edit["approval"] = new JsonObject { ["required"] = false };
+        var context = PressHarness.Context(scope, _harness.ExerciseId) with { ContentItemId = item.Id };
+        (await _descriptor.ValidatePayloadAsync(edit, context)).IsValid.Should().BeTrue();
+        edit["approval"]!["required"]!.GetValue<bool>().Should().BeTrue("the stored value wins over the write");
+    }
+
+    [Fact]
+    public async Task TheOrgRef_IsAnEnabledNewsroomUnderTheWireRoom_ElseThePersonaName()
+    {
+        var org = await _harness.AddOrgAsync(_harness.ExerciseId, "Fulton County EM", "FultonEM");
+        var newsroom = await ProvisionAsync();
+        using var scope = _harness.InA();
+        var outlet = await scope.Db.Outlets.SingleAsync(o => o.Id == newsroom);
+        outlet.Name = "Fulton County Newsroom";
+        outlet.Enabled = false;
+        await scope.Db.SaveChangesAsync();
+
+        var payload = PressHarness.Payload(org);
+        (await _descriptor.ValidatePayloadAsync(payload, PressHarness.Context(scope, _harness.ExerciseId))).IsValid.Should().BeTrue();
+        payload["org"]!["outletId"].Should().BeNull("a disabled newsroom is not the org ref");
+        payload["org"]!["name"]!.GetValue<string>().Should().Be("Fulton County EM");
+
+        outlet.Enabled = true;
+        outlet.ParentOutletId = null;
+        await scope.Db.SaveChangesAsync();
+        var moved = PressHarness.Payload(org);
+        (await _descriptor.ValidatePayloadAsync(moved, PressHarness.Context(scope, _harness.ExerciseId))).IsValid.Should().BeTrue();
+        moved["org"]!["outletId"].Should().BeNull("only a child of The Wire Room is an org newsroom");
+    }
+
+    [Fact]
     public async Task InputPath_DefaultsToRich_AndAnUnknownValueIsRefused()
     {
         var org = await _harness.AddOrgAsync(_harness.ExerciseId, "Fulton County EM", "FultonEM");

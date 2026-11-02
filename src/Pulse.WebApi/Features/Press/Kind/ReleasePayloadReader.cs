@@ -52,7 +52,8 @@ internal static class ReleasePayloadReader
         var documentId = ReadDocument(payload["document"], fromStore, errors, out var fileName, out var sizeBytes);
         var boilerplate = ReadText(payload, "boilerplate", PressVocabulary.BoilerplateMaxLength, multiline: true, fromStore, errors);
         var crossPost = ReadCrossPost(payload["crossPost"], fromStore, errors);
-        var approvalRequired = ReadApproval(payload["approval"], fromStore, errors);
+        // approval is server-owned: a write never sets it (the descriptor carries the stored value forward).
+        var approvalRequired = fromStore ? ReadApproval(payload["approval"]) : null;
 
         string? orgName = null;
         Guid? orgOutletId = null;
@@ -255,22 +256,16 @@ internal static class ReleasePayloadReader
         return errors.Count > before ? null : new ReleaseCrossPostDto { Text = text };
     }
 
-    private static bool? ReadApproval(JsonNode? node, bool fromStore, List<string> errors)
-    {
-        if (node is null)
-        {
-            return null;
-        }
+    /// <summary>The <c>approval.required</c> of a stored payload, or null.</summary>
+    /// <param name="stored">The stored payload, or null.</param>
+    /// <returns>The flag, or null when absent or malformed.</returns>
+    public static bool? StoredApproval(JsonObject? stored) => stored is null ? null : ReadApproval(stored["approval"]);
 
-        if (node is JsonObject approval && approval["required"] is { } required
-            && required.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
-        {
-            return required.GetValue<bool>();
-        }
-
-        Fail(fromStore, errors, "payload.approval: must be { required: boolean } or null");
-        return null;
-    }
+    private static bool? ReadApproval(JsonNode? node) =>
+        node is JsonObject approval && approval["required"] is { } required
+            && required.GetValueKind() is JsonValueKind.True or JsonValueKind.False
+                ? required.GetValue<bool>()
+                : null;
 
     private static string? ReadText(
         JsonObject parent,
@@ -304,7 +299,7 @@ internal static class ReleasePayloadReader
             if (fromStore)
             {
                 // A stored value over the cap (a cap tightened later) is cut rather than dropped.
-                return new string([.. cleaned.EnumerateRunes().Take(maxLength).SelectMany(r => r.ToString())]);
+                return string.Concat(cleaned.EnumerateRunes().Take(maxLength).Select(r => r.ToString())).TrimEnd();
             }
 
             errors.Add($"{prefix}{key}: must be at most {maxLength} characters");

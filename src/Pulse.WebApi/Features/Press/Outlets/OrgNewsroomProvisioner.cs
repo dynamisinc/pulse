@@ -199,6 +199,9 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
+            // Best effort: there is no unique index on (exercise, channel, paired persona), so two concurrent runs are
+            // kept from both creating a newsroom only because they derive the SAME slug for the same persona, and the
+            // slug index refuses the second. A second lost race propagates.
             // A concurrent run (or an outlet create) took a slug first. Nothing of this attempt was saved; the retry
             // re-reads, so a newsroom the other run created now counts as existing.
             _dbContext.ChangeTracker.Clear();
@@ -283,7 +286,7 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
                 ExerciseId = exerciseId,
                 ChannelId = ChannelVocabulary.Press,
                 Slug = slug,
-                Name = name.Length <= Outlet.MaxNameLength ? name : name[..Outlet.MaxNameLength].TrimEnd(),
+                Name = Truncate(name, Outlet.MaxNameLength),
                 ParentOutletId = wireRoom.Id,
                 PairedPersonaId = persona.Id,
                 LogoMediaId = persona.AvatarMediaId is { } avatar && imageLogos.Contains(avatar) ? avatar : null,
@@ -318,6 +321,18 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
         var timeZone = facts?.TimeZone is { } zone && !string.IsNullOrWhiteSpace(zone) ? zone : FallbackTimeZone;
         return new OutletEventTime(now, scenario, timeZone);
+    }
+
+    /// <summary>Cuts to <paramref name="maxLength"/> UTF-16 units (the column bound) without splitting a surrogate pair.</summary>
+    private static string Truncate(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var cut = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return value[..cut].TrimEnd();
     }
 
     private bool HasResolvedScope(out Guid exerciseId)

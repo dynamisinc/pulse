@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MOCK_EMBARGOED_RELEASE_AUTHOR,
-  MOCK_FULTON_ORG,
+  MOCK_KESTREL_ORG,
   MOCK_HARBOR_ORG,
   MOCK_PENDING_RELEASE_AUTHOR,
   MOCK_PUBLISHED_PARTICIPANT_PAYLOAD,
@@ -42,7 +42,7 @@ describe('press guards: accept every fixture', () => {
     expect(isReleaseContentDto(MOCK_PUBLISHED_RELEASE_CONTENT)).toBe(true)
   })
 
-  it.each([MOCK_FULTON_ORG, MOCK_HARBOR_ORG])('org $name and its letterhead', org => {
+  it.each([MOCK_KESTREL_ORG, MOCK_HARBOR_ORG])('org $name and its letterhead', org => {
     expect(isReleaseOrgDto(org)).toBe(true)
     expect(isReleaseLetterheadDto(org.letterhead)).toBe(true)
   })
@@ -59,7 +59,7 @@ describe('press guards: accept every fixture', () => {
 
   it('the return note, the lists', () => {
     expect(isReleaseReturnNoteDto(MOCK_RETURNED_RELEASE_AUTHOR.returnNote)).toBe(true)
-    expect(isReleaseOrgList([MOCK_FULTON_ORG, MOCK_HARBOR_ORG])).toBe(true)
+    expect(isReleaseOrgList([MOCK_KESTREL_ORG, MOCK_HARBOR_ORG])).toBe(true)
     expect(isReleaseAuthorList([MOCK_PUBLISHED_RELEASE_AUTHOR])).toBe(true)
     expect(isReleaseOrgList([{}])).toBe(false)
   })
@@ -112,10 +112,10 @@ describe('press guards: fail closed on missing or wrong-typed fields', () => {
   })
 
   it('rejects an org missing its letterhead or with a non-boolean approvalRequired', () => {
-    const noLetterhead = clone(MOCK_FULTON_ORG)
+    const noLetterhead = clone(MOCK_KESTREL_ORG)
     delete noLetterhead.letterhead
     expect(isReleaseOrgDto(noLetterhead)).toBe(false)
-    expect(isReleaseOrgDto({ ...clone(MOCK_FULTON_ORG), approvalRequired: 'no' })).toBe(false)
+    expect(isReleaseOrgDto({ ...clone(MOCK_KESTREL_ORG), approvalRequired: 'no' })).toBe(false)
   })
 
   it('rejects an author DTO with a bad state', () => {

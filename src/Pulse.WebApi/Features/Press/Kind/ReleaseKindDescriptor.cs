@@ -28,6 +28,22 @@ using Pulse.WebApi.Features.Press.Contracts;
 /// <b>Projection</b> emits exactly <c>org</c>, <c>contact</c>, <c>dateline</c> and <c>document</c>: never
 /// <c>crossPost</c>, <c>approval</c>, <c>inputPath</c> or <c>boilerplate</c> (XC-002).
 /// </para>
+/// <para>
+/// <b>Not an authorization check.</b> The descriptor proves only that the persona and media belong to the exercise. WHO
+/// may release as which org is decided by the calling endpoint: story 04 through <see cref="IReleaseOrgResolver"/> for a
+/// participant, the staff role for a controller (who may release as any org, PRS-020).
+/// </para>
+/// <para>
+/// <b>Server-owned fields.</b> <c>approval</c> is never taken from the write: an edit keeps the stored value, a create
+/// stores none (story 06 owns approval routing). <c>org</c> is a SNAPSHOT taken at write time, as a printed letterhead
+/// is: a newsroom renamed later shows its new name on releases written after the rename. The org ref is the press
+/// newsroom paired with the persona that is ENABLED and a child of The Wire Room.
+/// </para>
+/// <para>
+/// <b>R-P1 handoff.</b> The summary's <c>outlet.name</c> comes from <c>ContentItem.OutletId</c>, which this seam cannot
+/// see. The writers (story 04's author service, story 13's console editor) must file a release under its org newsroom
+/// (<c>payload.org.outletId</c>), never under The Wire Room; story 15 asserts it.
+/// </para>
 /// </remarks>
 public sealed class ReleaseKindDescriptor : IContentKindDescriptor
 {
@@ -78,8 +94,11 @@ public sealed class ReleaseKindDescriptor : IContentKindDescriptor
             : await context.Db.Outlets
                 .AsNoTracking()
                 .Where(o => o.ChannelId == ChannelVocabulary.Press
+                    && o.Enabled
                     && o.PairedPersonaId == release.OrgPersonaId
-                    && o.ParentOutletId != null)
+                    && context.Db.Outlets.Any(w => w.Id == o.ParentOutletId
+                        && w.ChannelId == ChannelVocabulary.Press
+                        && w.Slug == PressVocabulary.WireRoomSlug))
                 .OrderBy(o => o.SortOrder)
                 .ThenBy(o => o.Id)
                 .Select(o => new { o.Id, o.Name })
@@ -115,6 +134,7 @@ public sealed class ReleaseKindDescriptor : IContentKindDescriptor
 
         release = release with
         {
+            ApprovalRequired = await StoredApprovalAsync(context, cancellationToken),
             OrgName = newsroom?.Name ?? persona!.DisplayName,
             OrgOutletId = newsroom?.Id,
         };
@@ -133,6 +153,22 @@ public sealed class ReleaseKindDescriptor : IContentKindDescriptor
 
         var release = ReleasePayloadReader.Read(payload, fromStore: true, []);
         return release is null ? [] : ReleasePayloadReader.ToParticipant(release);
+    }
+
+    /// <summary>The <c>approval.required</c> the edited item already stores, or null on a create.</summary>
+    private async Task<bool?> StoredApprovalAsync(PayloadValidationContext context, CancellationToken cancellationToken)
+    {
+        if (context.ContentItemId is not { } id)
+        {
+            return null;
+        }
+
+        var stored = await context.Db.ContentItems
+            .AsNoTracking()
+            .Where(item => item.Id == id && item.Kind == Kind)
+            .Select(item => item.PayloadJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        return ReleasePayloadReader.StoredApproval(ReleasePayloadReader.TryParseObject(stored));
     }
 
     /// <summary>Replaces <paramref name="payload"/>'s content with <paramref name="normalized"/>'s, in place.</summary>

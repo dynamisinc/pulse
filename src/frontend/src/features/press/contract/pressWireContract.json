@@ -20,7 +20,7 @@
     "letterheadAddressMaxLength": 300
   },
   "participantPayloadKeys": ["org", "contact", "dateline", "document"],
-  "staffOnlyPayloadKeys": ["crossPost", "approval", "inputPath"],
+  "staffOnlyPayloadKeys": ["crossPost", "approval", "inputPath", "boilerplate", "orgPersonaId"],
   "telemetry": [
     {
       "eventType": "press_release",

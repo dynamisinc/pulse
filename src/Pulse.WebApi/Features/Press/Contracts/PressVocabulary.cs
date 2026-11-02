@@ -51,10 +51,11 @@ public static class PressVocabulary
     public const string WireRoomSlug = "wire-room";
 
     /// <summary>
-    /// The PC-1 payload keys that are staff/author-only and NEVER leave <c>ProjectPayload</c> (XC-002). The TS guards
-    /// reject a participant payload that carries any of them.
+    /// The PC-1 payload keys that are staff-set or author-only and NEVER leave <c>ProjectPayload</c> (XC-002). The TS
+    /// guards reject a participant payload that carries any of them.
     /// </summary>
-    public static IReadOnlyList<string> StaffOnlyPayloadKeys { get; } = ["crossPost", "approval", "inputPath"];
+    public static IReadOnlyList<string> StaffOnlyPayloadKeys { get; } =
+        ["crossPost", "approval", "inputPath", "boilerplate", "orgPersonaId"];
 
     /// <summary>The exact key set of the participant-safe projection, in order.</summary>
     public static IReadOnlyList<string> ParticipantPayloadKeys { get; } = ["org", "contact", "dateline", "document"];

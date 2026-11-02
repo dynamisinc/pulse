@@ -61,8 +61,17 @@ export const PRESS_LIMITS = {
 /** The keys of the participant-safe release payload (and nothing else). */
 export const PARTICIPANT_PAYLOAD_KEYS = ['org', 'contact', 'dateline', 'document'] as const
 
-/** Payload keys that must never appear on a participant read (XC-002). */
-export const STAFF_ONLY_PAYLOAD_KEYS = ['crossPost', 'approval', 'inputPath'] as const
+/**
+ * Payload keys that must never appear on a participant read (XC-002): the
+ * staff-set and author-only PC-1 fields.
+ */
+export const STAFF_ONLY_PAYLOAD_KEYS = [
+  'crossPost',
+  'approval',
+  'inputPath',
+  'boilerplate',
+  'orgPersonaId',
+] as const
 
 export function isReleaseState(value: unknown): value is ReleaseState {
   return typeof value === 'string' && (RELEASE_STATES as readonly string[]).includes(value)

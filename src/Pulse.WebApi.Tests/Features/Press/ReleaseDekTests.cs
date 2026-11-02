@@ -76,6 +76,31 @@ public sealed class ReleaseDekTests
     }
 
     [Fact]
+    public void Abbreviations_DoNotEndTheSentence()
+    {
+        ReleaseDek.Derive(Headline, "<p>Dr. Lee said the U.S. Route 9 shelters are open. Bring ID.</p>", Org)
+            .Should().Be("Dr. Lee said the U.S. Route 9 shelters are open.");
+        ReleaseDek.Derive(Headline, "<p>U.S. officials opened shelters at noon today. More soon.</p>", Org)
+            .Should().Be("U.S. officials opened shelters at noon today.");
+    }
+
+    [Fact]
+    public void EncodedMarkup_NeverBecomesMarkupInTheDek()
+    {
+        ReleaseDek.Derive(Headline, "<p>&lt;script&gt;alert(1)&lt;/script&gt;Shelters are now open at noon.</p>", Org)
+            .Should().NotContain("<").And.Contain("Shelters are now open");
+    }
+
+    [Fact]
+    public void ACut_NeverSplitsASurrogatePair()
+    {
+        var dek = ReleaseDek.Derive(Headline, new string('x', 158) + "😀😀😀", Org);
+
+        dek.Length.Should().BeLessThanOrEqualTo(PressVocabulary.DekMaxLength);
+        char.IsHighSurrogate(dek[^2]).Should().BeFalse();
+    }
+
+    [Fact]
     public void ScriptContent_IsNeverTheDek()
     {
         ReleaseDek.Derive(Headline, "<script>alert(1)</script><p>Shelters opened.</p>", Org).Should().Be("Shelters opened.");

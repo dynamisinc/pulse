@@ -12,7 +12,7 @@
  * - pending      — author DTO, state `pending_approval` (an approval-required org).
  * - retracted    — the FC-3 `ChannelContentTombstoneDto` (XC-010).
  *
- * Two fictional orgs: "Fulton County EM" (a full letterhead: logo, address,
+ * Two fictional orgs: "Kestrel County EM" (a full letterhead: logo, address,
  * default contact) and "Harbor Point Fire Rescue" (NEUTRAL: logo, address and
  * default contact all null, never a platform-branded letterhead). Both are
  * invented for the fixtures; no real agency is named.
@@ -42,15 +42,15 @@ type PressOutletRef = OutletRefDto & { readonly channelId: 'press' }
 
 // --- orgs -----------------------------------------------------------------------
 
-const FULTON_PERSONA_ID = '2f6b1d90-3a4c-4e5f-8a7b-9c0d1e2f3a01'
+const KESTREL_PERSONA_ID = '2f6b1d90-3a4c-4e5f-8a7b-9c0d1e2f3a01'
 const HARBOR_PERSONA_ID = '2f6b1d90-3a4c-4e5f-8a7b-9c0d1e2f3a02'
 
-export const FULTON_OUTLET: PressOutletRef = {
+export const KESTREL_OUTLET: PressOutletRef = {
   id: '4b7e2a10-6c3d-4f8e-9a1b-2c3d4e5f6a01',
   channelId: 'press',
-  slug: 'fulton-county-em',
-  name: 'Fulton County EM',
-  skinKey: 'org-newsroom',
+  slug: 'kestrel-county-em',
+  name: 'Kestrel County EM',
+  skinKey: 'wire-room',
 }
 
 export const HARBOR_OUTLET: PressOutletRef = {
@@ -58,10 +58,10 @@ export const HARBOR_OUTLET: PressOutletRef = {
   channelId: 'press',
   slug: 'harbor-point-fire-rescue',
   name: 'Harbor Point Fire Rescue',
-  skinKey: 'org-newsroom',
+  skinKey: 'wire-room',
 }
 
-export const FULTON_LOGO: ContentMediaDto = {
+export const KESTREL_LOGO: ContentMediaDto = {
   id: '6d9f3b20-8e5a-4a7c-b1d2-3e4f5a6b7c01',
   kind: 'image',
   role: 'hero',
@@ -71,7 +71,7 @@ export const FULTON_LOGO: ContentMediaDto = {
   width: 320,
   height: 96,
   durationSec: null,
-  alt: 'Fulton County Emergency Management',
+  alt: 'Kestrel County Emergency Management',
   caption: null,
 }
 
@@ -90,20 +90,23 @@ export const MOCK_RELEASE_DOCUMENT_MEDIA: ContentMediaDto = {
 }
 
 /** An org with a full letterhead: logo, address and a default press contact. */
-export const MOCK_FULTON_ORG: ReleaseOrgDto = {
-  personaId: FULTON_PERSONA_ID,
-  outletId: FULTON_OUTLET.id,
-  name: FULTON_OUTLET.name,
-  handle: '@FultonCountyEM',
-  pairedHandle: '@FultonCountyEM',
+export const MOCK_KESTREL_ORG: ReleaseOrgDto = {
+  personaId: KESTREL_PERSONA_ID,
+  outletId: KESTREL_OUTLET.id,
+  name: KESTREL_OUTLET.name,
+  handle: '@KestrelCountyEM',
+  pairedHandle: '@KestrelCountyEM',
   letterhead: {
-    logo: FULTON_LOGO,
-    address: '141 Pryor Street, Fairhaven, GA 30303',
+    logo: KESTREL_LOGO,
+    address: '2200 Harbor Road, Fairhaven',
     defaultContact: {
       name: 'Dana Whitfield',
       title: 'Public Information Officer',
       phone: '404-555-0142',
-      email: 'pio@fultonem.example',
+      // Null on purpose: F03 refuses '@' in ext.press values today, so the server
+      // cannot store a letterhead email until the F03 text-rules follow-up lands
+      // (press 01, #738).
+      email: null,
     },
   },
   approvalRequired: false,
@@ -130,7 +133,7 @@ const PUBLISHED_CONTACT = {
   name: 'Dana Whitfield',
   title: 'Public Information Officer',
   phone: '404-555-0142',
-  email: 'pio@fultonem.example',
+  email: 'pio@kestrelem.example',
 } as const
 
 const PUBLISHED_DOCUMENT = {
@@ -140,12 +143,12 @@ const PUBLISHED_DOCUMENT = {
 } as const
 
 const PUBLISHED_BODY_HTML =
-  '<p>Fulton County Emergency Management has opened two shelters for residents displaced by ' +
+  '<p>Kestrel County Emergency Management has opened two shelters for residents displaced by ' +
   'tonight\'s storm. Residents should bring medications and identification.</p>'
 
 /** The participant-safe payload of the published release: exactly the four participant keys. */
 export const MOCK_PUBLISHED_PARTICIPANT_PAYLOAD: ReleaseParticipantPayloadDto = {
-  org: { name: FULTON_OUTLET.name, outletId: FULTON_OUTLET.id },
+  org: { name: KESTREL_OUTLET.name, outletId: KESTREL_OUTLET.id },
   contact: PUBLISHED_CONTACT,
   dateline: 'FAIRHAVEN, Ga.',
   document: PUBLISHED_DOCUMENT,
@@ -156,9 +159,9 @@ export const MOCK_PUBLISHED_RELEASE_CONTENT: ChannelContentDto = {
   id: PUBLISHED_ID,
   channelId: 'press',
   kind: 'release',
-  outlet: FULTON_OUTLET,
+  outlet: KESTREL_OUTLET,
   slug: PUBLISHED_SLUG,
-  permalink: contentPermalink('press', FULTON_OUTLET.slug, PUBLISHED_SLUG),
+  permalink: contentPermalink('press', KESTREL_OUTLET.slug, PUBLISHED_SLUG),
   state: 'published',
   headline: 'County opens two emergency shelters',
   dek: 'Shelters at Riverside High and the Eastside Recreation Center are open now.',
@@ -181,17 +184,17 @@ export const MOCK_PUBLISHED_RELEASE_CONTENT: ChannelContentDto = {
 /** The author view of the same published release. */
 export const MOCK_PUBLISHED_RELEASE_AUTHOR: ReleaseAuthorDto = {
   id: PUBLISHED_ID,
-  orgPersonaId: FULTON_PERSONA_ID,
+  orgPersonaId: KESTREL_PERSONA_ID,
   state: 'published',
   headline: MOCK_PUBLISHED_RELEASE_CONTENT.headline,
   bodyHtml: PUBLISHED_BODY_HTML,
   payload: {
-    orgPersonaId: FULTON_PERSONA_ID,
+    orgPersonaId: KESTREL_PERSONA_ID,
     inputPath: 'both',
     contact: PUBLISHED_CONTACT,
     dateline: 'FAIRHAVEN, Ga.',
     document: PUBLISHED_DOCUMENT,
-    boilerplate: 'About Fulton County EM: the county agency that plans for and responds to emergencies.',
+    boilerplate: 'About Kestrel County EM: the county agency that plans for and responds to emergencies.',
     crossPost: { text: null },
   },
   media: [MOCK_RELEASE_DOCUMENT_MEDIA],
@@ -207,25 +210,25 @@ export const MOCK_PUBLISHED_RELEASE_AUTHOR: ReleaseAuthorDto = {
 /** Embargoed: `scheduled` for a later scenario time. */
 export const MOCK_EMBARGOED_RELEASE_AUTHOR: ReleaseAuthorDto = {
   id: '9a1c4e30-2b5d-4c6e-8f7a-0b1c2d3e4f02',
-  orgPersonaId: FULTON_PERSONA_ID,
+  orgPersonaId: KESTREL_PERSONA_ID,
   state: 'scheduled',
   headline: 'Boil-water advisory to lift Wednesday morning',
   bodyHtml: '<p>The advisory for the Eastside service area will be lifted once testing is complete.</p>',
   payload: {
-    orgPersonaId: FULTON_PERSONA_ID,
+    orgPersonaId: KESTREL_PERSONA_ID,
     inputPath: 'rich',
     contact: PUBLISHED_CONTACT,
     dateline: 'FAIRHAVEN, Ga.',
     document: null,
     boilerplate: null,
-    crossPost: { text: 'Boil-water advisory update from Fulton County EM.' },
+    crossPost: { text: 'Boil-water advisory update from Kestrel County EM.' },
   },
   media: [],
   scheduledScenarioTime: '2026-12-03T06:00:00-06:00',
   updatedScenarioTime: '2026-12-02T16:10:00-06:00',
   lastEditedBy: { displayName: 'Dana Whitfield' },
   returnNote: null,
-  permalink: '/press/fulton-county-em/boil-water-advisory-lifts',
+  permalink: '/press/kestrel-county-em/boil-water-advisory-lifts',
   version: 2,
   revisions: [],
 }
@@ -291,9 +294,9 @@ export const MOCK_RETRACTED_RELEASE_TOMBSTONE: ChannelContentTombstoneDto = {
   id: '9a1c4e30-2b5d-4c6e-8f7a-0b1c2d3e4f05',
   channelId: 'press',
   kind: 'release',
-  outlet: FULTON_OUTLET,
+  outlet: KESTREL_OUTLET,
   slug: 'road-closure-route-9',
-  permalink: contentPermalink('press', FULTON_OUTLET.slug, 'road-closure-route-9'),
+  permalink: contentPermalink('press', KESTREL_OUTLET.slug, 'road-closure-route-9'),
   state: 'retracted',
   retractedScenarioTime: '2026-12-02T17:30:00-06:00',
 }
@@ -316,7 +319,7 @@ export interface PressScenario {
 export const PRESS_SCENARIOS: Readonly<Record<PressScenarioKey, PressScenario>> = {
   activeNewsrooms: {
     key: 'activeNewsrooms',
-    orgs: [MOCK_FULTON_ORG, MOCK_HARBOR_ORG],
+    orgs: [MOCK_KESTREL_ORG, MOCK_HARBOR_ORG],
     releases: [
       MOCK_PENDING_RELEASE_AUTHOR,
       MOCK_EMBARGOED_RELEASE_AUTHOR,
