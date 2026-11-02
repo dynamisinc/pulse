@@ -206,6 +206,12 @@ public sealed partial class PortalResourceService : IPortalResourceService
             return NotFound<IReadOnlyList<PortalResourceStaffDto>>();
         }
 
+        // System.Text.Json assigns an explicit `"orderedIds": null` over the contract's [] default.
+        if (request.OrderedIds is null)
+        {
+            return Invalid<IReadOnlyList<PortalResourceStaffDto>>(["orderedIds is required."]);
+        }
+
         var orderedIds = new List<Guid>(request.OrderedIds.Count);
         foreach (var raw in request.OrderedIds)
         {

@@ -126,14 +126,14 @@ public static class PortalResourceEndpoints
         [FromServices] IPortalResourceService service,
         CancellationToken cancellationToken)
     {
-        if (await ReadWriteRequestAsync(httpContext, cancellationToken) is not { } request)
+        if (await ReadBodyAsync<PortalResourceWriteRequest>(httpContext, cancellationToken) is not { } request)
         {
             return MissingBody();
         }
 
         var result = await service.CreateAsync(request, await CallerAsync(httpContext), cancellationToken);
         return result is { Outcome: PortalWriteOutcome.Ok, Value: { } created }
-            ? Results.Json(created, statusCode: StatusCodes.Status201Created)
+            ? Results.Created($"{Route}/{created.Id}", created)
             : ToResult(result);
     }
 
@@ -143,7 +143,7 @@ public static class PortalResourceEndpoints
         [FromServices] IPortalResourceService service,
         CancellationToken cancellationToken)
     {
-        if (await ReadWriteRequestAsync(httpContext, cancellationToken) is not { } request)
+        if (await ReadBodyAsync<PortalResourceWriteRequest>(httpContext, cancellationToken) is not { } request)
         {
             return MissingBody();
         }
@@ -162,12 +162,12 @@ public static class PortalResourceEndpoints
     }
 
     private static async Task<IResult> ReorderAsync(
-        PortalResourceReorderRequest? request,
         HttpContext httpContext,
         [FromServices] IPortalResourceService service,
         CancellationToken cancellationToken)
     {
-        if (request is null)
+        var request = await ReadBodyAsync<PortalResourceReorderRequest>(httpContext, cancellationToken);
+        if (request is not { OrderedIds: not null })
         {
             return MissingBody();
         }
@@ -176,12 +176,12 @@ public static class PortalResourceEndpoints
     }
 
     /// <summary>
-    /// Reads the write body INSIDE the handler, after the staff and role filters: the contract's <c>required</c> members
-    /// would otherwise fail parameter binding first and answer a refused caller with <c>400</c> instead of
-    /// <c>401</c>/<c>403</c>. A missing or malformed body is <c>null</c>.
+    /// Reads a write body INSIDE the handler, after the staff and role filters: parameter binding runs before endpoint
+    /// filters, so a bound body (the contract's <c>required</c> members, a malformed or non-JSON body) would answer a
+    /// refused caller with <c>400</c>/<c>415</c> instead of <c>401</c>/<c>403</c>. A missing or malformed body is <c>null</c>.
     /// </summary>
-    private static async Task<PortalResourceWriteRequest?> ReadWriteRequestAsync(
-        HttpContext httpContext, CancellationToken cancellationToken)
+    private static async Task<T?> ReadBodyAsync<T>(HttpContext httpContext, CancellationToken cancellationToken)
+        where T : class
     {
         if (!httpContext.Request.HasJsonContentType())
         {
@@ -190,7 +190,7 @@ public static class PortalResourceEndpoints
 
         try
         {
-            return await httpContext.Request.ReadFromJsonAsync<PortalResourceWriteRequest>(cancellationToken);
+            return await httpContext.Request.ReadFromJsonAsync<T>(cancellationToken);
         }
         catch (JsonException)
         {

@@ -48,6 +48,7 @@ public sealed class PortalResourceEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var created = (await response.Content.ReadFromJsonAsync<WireStaffResource>())!;
+        response.Headers.Location!.OriginalString.Should().Be($"{Route}/{created.Id}");
         created.Title.Should().Be("Ground rules", "the title is trimmed");
         created.Summary.Should().Be("How the exercise works.");
         created.BodyHtml.Should().Be("<p>Read this first.</p>");
@@ -206,6 +207,7 @@ public sealed class PortalResourceEndpointsTests
     [InlineData("duplicate")]
     [InlineData("unknown")]
     [InlineData("not-a-guid")]
+    [InlineData("null")]
     public async Task Reorder_ThatDoesNotNameEveryResourceExactlyOnce_Is400(string shape)
     {
         await using var host = await StartAsync();
@@ -214,8 +216,9 @@ public sealed class PortalResourceEndpointsTests
         var second = await host.AddResourceAsync(exerciseId, "Second", sortOrder: 2);
         host.ActAs(exerciseId, staff);
 
-        string[] ids = shape switch
+        string[]? ids = shape switch
         {
+            "null" => null,
             "missing" => [first.Id.ToString()],
             "duplicate" => [first.Id.ToString(), first.Id.ToString()],
             "unknown" => [first.Id.ToString(), Guid.NewGuid().ToString()],
