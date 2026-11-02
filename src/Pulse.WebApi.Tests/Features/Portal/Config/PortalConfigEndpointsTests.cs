@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -215,6 +216,7 @@ public sealed class PortalConfigEndpointsTests
             ("duplicate module", PortalConfigTestHost.Body(modules: new[] { new { id = "weather", enabled = true }, new { id = "weather", enabled = false } })),
             ("city that would overflow the masthead", PortalConfigTestHost.Body(cityName: new string('c', 55))),
             ("empty module list (would blank the portal)", PortalConfigTestHost.Body(modules: Array.Empty<object>())),
+            ("modules omitted", WithoutModules()),
         };
 
         foreach (var (why, body) in cases)
@@ -426,6 +428,34 @@ public sealed class PortalConfigEndpointsTests
         masthead.GetProperty("name").GetString().Should().Be("Fairhaven Today");
     }
 
+    [RequiresDockerFact]
+    public async Task ALogoDeletedBetweenTheCheckAndTheSave_IsTheSameNotUsable400()
+    {
+        var deleter = new LogoDeleter();
+        await using var host = await PortalConfigTestHost.StartAsync(
+            _fixture.ConnectionString!,
+            services => services.AddSingleton<IInterceptor>(deleter));
+        var seeded = await host.SeedExerciseAsync();
+        var logo = await host.AddMediaAssetAsync(seeded.ExerciseId);
+        deleter.Arm(host.ConnectionString, logo);
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+
+        var response = await host.PutConfigAsync(PortalConfigTestHost.Body(logoMediaId: logo.ToString()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString()
+            .Should().Be(PortalConfigWriteValidator.LogoNotUsableMessage);
+        (await host.ConfigRowsAsync(seeded.ExerciseId)).Should().BeEmpty();
+        (await host.ConfigEventsAsync(seeded.ExerciseId)).Should().BeEmpty();
+    }
+
+    private static Dictionary<string, object?> WithoutModules()
+    {
+        var body = PortalConfigTestHost.Body();
+        body.Remove("modules");
+        return body;
+    }
+
     private static async Task<JsonElement> ReadPortalAsync(PortalConfigTestHost host)
     {
         var response = await host.GetAsync("/api/portal");
@@ -478,4 +508,41 @@ internal sealed class ThrowingSigner : IMediaUrlSigner
 
     public Task<IReadOnlyDictionary<Guid, string>> GetReadUrlsAsync(IReadOnlyCollection<MediaAsset> assets, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("storage unavailable");
+}
+
+/// <summary>
+/// Plays a concurrent delete of the logo: when a save is about to write a <see cref="PortalConfig"/>, it first hard-deletes
+/// the armed media asset through an independent connection, so the save meets the logo foreign key. Fires once.
+/// </summary>
+internal sealed class LogoDeleter : SaveChangesInterceptor
+{
+    private string? _connectionString;
+    private Guid _assetId;
+    private int _fired;
+
+    public void Arm(string connectionString, Guid assetId)
+    {
+        _connectionString = connectionString;
+        _assetId = assetId;
+    }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        var writesConfig = eventData.Context?.ChangeTracker.Entries<PortalConfig>()
+            .Any(e => e.State is EntityState.Added or EntityState.Modified) ?? false;
+        if (writesConfig && _connectionString is not null && Interlocked.Exchange(ref _fired, 1) == 0)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM MediaAssets WHERE Id = @id";
+            command.Parameters.AddWithValue("@id", _assetId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
 }

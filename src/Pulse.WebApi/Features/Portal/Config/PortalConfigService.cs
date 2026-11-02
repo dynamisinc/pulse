@@ -234,7 +234,7 @@ public sealed partial class PortalConfigService : IPortalConfigService
             LogLostRace("create");
             return Conflict();
         }
-        catch (DbUpdateException ex) when (draft.LogoMediaId is not null && IsForeignKeyViolation(ex))
+        catch (DbUpdateException ex) when (draft.LogoMediaId is not null && IsLogoForeignKeyViolation(ex))
         {
             // The logo was removed between the check above and the save: the composite (ExerciseId, LogoMediaId) key
             // refuses it, and the caller gets the same "not usable" 400 as any other unusable logo.
@@ -389,9 +389,13 @@ public sealed partial class PortalConfigService : IPortalConfigService
     private static bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException { Number: 2601 or 2627 };
 
-    /// <summary>Whether a save failed on a foreign key (SQL Server 547).</summary>
-    private static bool IsForeignKeyViolation(DbUpdateException exception) =>
-        exception.InnerException is SqlException { Number: 547 };
+    /// <summary>The F01 M1 composite key from a portal config's logo to its media asset.</summary>
+    private const string LogoForeignKeyName = "FK_PortalConfigs_MediaAssets_ExerciseId_LogoMediaId";
+
+    /// <summary>Whether a save failed on the LOGO foreign key (SQL Server 547 naming that constraint), and no other.</summary>
+    private static bool IsLogoForeignKeyViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 547 } sql
+        && sql.Message.Contains(LogoForeignKeyName, StringComparison.Ordinal);
 
     [LoggerMessage(
         EventId = 1,
