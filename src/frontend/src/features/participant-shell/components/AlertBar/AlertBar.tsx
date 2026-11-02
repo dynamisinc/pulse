@@ -48,7 +48,9 @@
  *
  * "Details →" goes straight to the shown alert's host-relative `href` (its
  * source item) when it has one, else to the alerts history (`AlertDetailsLink`).
- * The message is rendered verbatim (WX-011) — never rewritten or truncated.
+ * The message is rendered verbatim (WX-011) — never rewritten. (Only the
+ * scrolled, collapsed ticker clamps it to two lines; its tap target's
+ * `aria-label` carries the full text, and a tap re-expands it.)
  *
  * ## Collapse-on-scroll (ticker only)
  * SHELL-CONTRACT.md §2 is explicit that "the ticker is already one-line and
@@ -369,19 +371,27 @@ function useArrivalAnnouncement(alerts: readonly Alert[]): Announcement {
   // Alternates a trailing no-break space, so an arrival worded exactly like the
   // previous announcement still changes the region's text and is read.
   const alternateRef = useRef(false)
+  // The announce keys of what the region currently says.
+  const announcedRef = useRef<readonly string[]>([])
 
   // `useAlerts()` keeps the same array while the set is unchanged (structural sharing),
   // and a fresh-but-equal array finds no arrival below, so neither announces.
   useEffect(() => {
     const keys = alerts.map(announceKey)
     const seen = seenRef.current
-    seenRef.current = new Set(keys)
-    if (alerts.length === 0) {
-      setAnnouncement(SILENT)
+    const current = new Set(keys)
+    seenRef.current = current
+    const arrived = alerts.filter((_, index) => !seen.has(keys[index] ?? ''))
+    if (arrived.length === 0) {
+      // Never leave a cleared alert (say an emergency) readable in the region: once
+      // nothing it announced is still active, it falls silent. Removing text is not announced.
+      if (!announcedRef.current.some(key => current.has(key))) {
+        announcedRef.current = []
+        setAnnouncement(SILENT)
+      }
       return
     }
-    const arrived = alerts.filter((_, index) => !seen.has(keys[index] ?? ''))
-    if (arrived.length === 0) return
+    announcedRef.current = arrived.map(announceKey)
     alternateRef.current = !alternateRef.current
     setAnnouncement({
       text: `${arrived.map(announceText).join(' ')}${alternateRef.current ? '' : '\u00a0'}`,

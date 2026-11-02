@@ -275,6 +275,19 @@ describe('AlertBar (live) — announcements', () => {
     expect(live().textContent).not.toContain('Cooling centers open.')
   })
 
+  it('falls silent once the alert it announced clears, never leaving a stale emergency readable', async () => {
+    const info = wireAlert({ id: 'info', severity: 'info', message: 'Cooling centers open.' })
+    await renderLiveBar([info])
+    await push([info, WARNING])
+    expect(live()).toHaveTextContent(WARNING.message)
+
+    await push([info])
+
+    expect(live()).toHaveTextContent('')
+    expect(live().textContent).not.toContain(WARNING.message)
+    expect(live()).toHaveAttribute('aria-live', 'polite')
+  })
+
   it('announces nothing for a push that changes nothing', async () => {
     await renderLiveBar([WATCH])
     const before = live().textContent
