@@ -1,161 +1,151 @@
 /**
  * features/participant-shell/components/AlertBar/useAlerts.ts
  * ---------------------------------------------------------------------------
- * The alert-bar CONTENT mock seam (feature: participant-shell, story 02;
- * PRT-010/011/012; see docs/features/participant-shell/02-alert-bar-host.md
- * and docs/design/D7-application-shells/SHELL-CONTRACT.md §2).
+ * The alert bar's LIVE active set (participant-shell story 02; channels-
+ * foundation story 11, #707; PRT-010/011/012, FC-4/FC-5, weather FU-5).
  *
- * Mirrors `../../shellState.ts` / `../../chromeConfig.ts`'s "mock behind the
- * shared axios client" pattern: every request routes through `api` so the
- * request shape (method, URL, base URL, headers) matches the future
- * `/alerts` endpoint, with mock data swapped at exactly ONE env-guarded flip
- * point (WAVE0-REVIEW precedent 15) rather than per call — a forgotten
- * `adapter:` can't silently fail *open* to mock data in production; a
- * production build without a backend fails closed (the query errors rather
- * than serving a canned value).
+ * READ. `GET /alerts` once per exercise (React Query, keyed by `exerciseId`
+ * for caching only — see `alertsSource.ts`). An out-of-shape body fails
+ * closed: the query errors and this hook returns `[]`, so the bar stays in
+ * its `none` state. Loading and error also return `[]`: the EAS-analog
+ * surface never shows a fabricated alert.
  *
- * DIFFERENT safe-default direction from `chromeConfig`/`shellState`: those
- * seams fall back to a VISIBLE, safe-erring default (chrome ON, variant
- * `'full'`) because absence-of-signal there is itself a legitimate steady
- * state. An alert is not — fabricating a plausible "info"/"advisory"/
- * "emergency" alert while a fetch is merely loading/erroring would be
- * actively misleading on the EAS-analog surface (PRT-010). So this seam's
- * fallback — while loading, on error, or absent — is an EMPTY alert list,
- * i.e. the `none` state: fail closed to "no active alert", never to "a
- * plausible one".
+ * PUSH. Subscribes to `AlertsChanged` on the SHARED `realtimeConnection` (the
+ * pattern of story 09's `useChannelStream`: no second hub, no second
+ * connection) and starts it if nothing has yet. Each frame carries the FULL
+ * active set, so it REPLACES the cached set — never merged — and a late or
+ * reconnecting client converges on the server's truth. An identical frame
+ * changes nothing (React Query's structural sharing keeps the same array), so
+ * the bar re-renders nothing and announces nothing. A malformed frame is
+ * dropped and the set is refetched. A frame that lands while the GET is in
+ * flight wins: the GET is cancelled first, so an older response can never
+ * overwrite a newer push. Every push also marks the `/alerts` history stale.
  *
- * The Wave-1 mock's canned response is likewise an empty list: an ordinary
- * exercise starts with no injects fired, so `none` (zero-height) is the
- * correct out-of-the-box state a developer sees running `npm run dev`.
- * `AlertBar.tsx`'s other states are exercised via this hook mocked at the
- * module boundary (mirrors `ComplianceChrome.test.tsx` mocking
- * `useChromeConfig`) — swap this constant + `mockAdapter` for a live
- * `/alerts` call (plus a SignalR push) when the backend and the
- * controller-driven publish path (world-steering CTL-020/021, Phase 3) land.
+ * RESYNC. When the hub comes back after a gap (or connects for the first
+ * time after mount), pushes may have been missed: the set is refetched. A
+ * DELIBERATE stop (`'stopped'`: the session's identity changed) restarts the
+ * shared connection when a token is stored, as `useChannelStream` does.
  *
- * Exercise-scoped (XC-001): the React Query key includes the resolved
- * exercise's `exerciseId`, read from `useExerciseContext()` for KEYING only
- * (WAVE0-REVIEW precedent 13) — it is never sent to the server as a
- * client-supplied scoping parameter (the mock ignores it entirely; a real
- * endpoint scopes by the authenticated session, server-side).
+ * ORDER. The returned set is sorted severity-then-recency
+ * (`sortAlertsBySeverityThenRecency`) whatever order the server or a push
+ * used, so the ticker rotation and the emergency band's stack are stable.
  *
- * Uses React Query — this is cacheable shell-content, exactly like
- * `shellState.ts` / `chromeConfig.ts` (contrast `core/exerciseContext`'s
- * deliberately hand-rolled fail-closed gate, WAVE0-REVIEW precedent 16).
+ * MOCK. With `USE_MOCK_DATA` on, the read is served by the canned adapter and
+ * NO hub connection is opened (the social feed's rule), so the shell and its
+ * tests need no backend.
+ *
+ * Signature unchanged from story 02: `useAlerts(): readonly Alert[]`.
  *
  * World: participant. No COBRA, no UI — a pure data hook.
  */
 
-import { useQuery } from '@tanstack/react-query'
-import type { AxiosAdapter } from 'axios'
-import { api } from '@/core/services/api'
+import { useEffect, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { USE_MOCK_DATA } from '@/core/config/mockData'
-import type { Alert, AlertSeverity } from './alertTypes'
+import { getAccessToken } from '@/core/auth/tokenStore'
+import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
+import type { Alert } from './alertTypes'
+import {
+  USE_MOCK_ALERTS,
+  alertsHistoryQueryKey,
+  alertsQueryKey,
+  fetchAlerts,
+  isAlertsBody,
+} from './alertsSource'
+import { sortAlertsBySeverityThenRecency } from './sortAlerts'
 
-/**
- * All valid alert severities. The runtime guard checks membership here so it
- * matches the wire contract — this seam swaps to a live endpoint with no
- * consumer change, so an out-of-enum `severity` must fail closed (the whole
- * alert is dropped as invalid), not be cast blindly to `AlertSeverity`.
- */
-const VALID_ALERT_SEVERITIES: readonly AlertSeverity[] = ['info', 'advisory', 'emergency']
+/** The FC-5 frame carrying the full active set (`CHANNEL_REALTIME_EVENTS`). */
+export const ALERTS_CHANGED_EVENT = 'AlertsChanged'
 
-function isAlertSeverity(value: unknown): value is AlertSeverity {
-  return typeof value === 'string' && (VALID_ALERT_SEVERITIES as readonly string[]).includes(value)
-}
+/** Shared empty result, so an empty bar never sees a fresh array per render. */
+const NO_ALERTS: readonly Alert[] = []
 
-/** `scenarioTime` must be a non-empty, `Date.parse`-able ISO instant string. */
-function isScenarioTimeString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && !Number.isNaN(Date.parse(value))
-}
-
-function isAlert(value: unknown): value is Alert {
-  if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Record<string, unknown>
-  return (
-    typeof candidate.id === 'string' && candidate.id.length > 0 &&
-    isAlertSeverity(candidate.severity) &&
-    typeof candidate.message === 'string' && candidate.message.length > 0 &&
-    isScenarioTimeString(candidate.scenarioTime)
-  )
-}
-
-/** Wire shape of the (future) `/alerts` response body. */
-interface AlertsResponseBody {
-  readonly alerts: readonly Alert[]
+/** Module-level so React Query memoizes the sorted result per cached array. */
+function selectSorted(alerts: readonly Alert[]): readonly Alert[] {
+  return alerts.length === 0 ? NO_ALERTS : sortAlertsBySeverityThenRecency(alerts)
 }
 
 /**
- * Runtime guard so this seam swaps to a live endpoint with no consumer
- * change: an out-of-shape response (missing array, or any entry failing
- * {@link isAlert}) must fail closed, not be cast blindly to `Alert[]`.
- */
-function isAlertsResponseBody(
-  body: AlertsResponseBody | null | undefined,
-): body is AlertsResponseBody {
-  return !!body && Array.isArray(body.alerts) && body.alerts.every(isAlert)
-}
-
-/**
- * The Wave-1 mock's fixed canned response (dev/test only — see
- * `USE_MOCK_ALERTS`): no active alerts. See the module header for why this
- * seam's safe default is EMPTY rather than a fabricated alert.
- */
-const MOCK_ALERTS: readonly Alert[] = []
-
-/**
- * Short-circuits the network layer with a canned response so resolution is
- * instant in the current no-backend scaffold, while still exercising the
- * shared axios client's request pipeline (base URL, headers, interceptors)
- * exactly as a live endpoint call would.
- */
-const mockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: { alerts: MOCK_ALERTS } satisfies AlertsResponseBody,
-  status: 200,
-  statusText: 'OK',
-  headers: {},
-  config,
-})
-
-/**
- * The SINGLE mock/live flip point (WAVE0-REVIEW precedent 15) — mirrors
- * `shellState.ts`'s `USE_MOCK_SHELL_STATE` / `chromeConfig.ts`'s
- * `USE_MOCK_CHROME_CONFIG`. Mock in dev/test; a production build without a
- * backend fails closed (the query errors rather than serving canned alerts).
- */
-const USE_MOCK_ALERTS = USE_MOCK_DATA
-
-async function fetchAlerts(): Promise<readonly Alert[]> {
-  const response = await api.get<AlertsResponseBody>(
-    '/alerts',
-    USE_MOCK_ALERTS ? { adapter: mockAdapter } : undefined,
-  )
-
-  if (!isAlertsResponseBody(response.data)) {
-    throw new Error(
-      'fetchAlerts: mock resolution returned a missing or invalid alerts array',
-    )
-  }
-
-  return response.data.alerts
-}
-
-/**
- * Resolves the current exercise's active alerts.
- *
- * Exercise-scoped via the React Query key (see module header). Falls back to
- * an EMPTY array whenever the query has no resolved data yet — while
- * loading, on error, or absent — so `<AlertBar>` always renders the safe
- * `none` state rather than a fabricated alert.
+ * Resolves the current exercise's active alerts, live. See the module header.
  */
 export function useAlerts(): readonly Alert[] {
   const { exerciseId } = useExerciseContext()
+  const queryClient = useQueryClient()
+  const queryKey = useMemo(() => alertsQueryKey(exerciseId), [exerciseId])
 
   const { data } = useQuery({
-    queryKey: ['participant-shell', 'alert-bar', 'alerts', exerciseId],
+    queryKey,
     queryFn: fetchAlerts,
+    select: selectSorted,
   })
 
-  return data ?? []
+  useEffect(() => {
+    if (USE_MOCK_ALERTS) return undefined
+
+    const connection = realtimeConnection
+    const historyKey = alertsHistoryQueryKey(exerciseId)
+    let disposed = false
+    // Mounting before the hub is Connected is a gap too: a frame sent between the GET and the
+    // connection coming up is missed, so the first Connected refetches.
+    let hadGap = connection.state !== HubConnectionState.Connected
+    // Frames are applied strictly in arrival order, each after the in-flight GET is cancelled.
+    let applying: Promise<void> = Promise.resolve()
+
+    const refetch = (): void => {
+      void queryClient.invalidateQueries({ queryKey, exact: true })
+      void queryClient.invalidateQueries({ queryKey: historyKey, exact: true })
+    }
+
+    const offChanged = connection.subscribe(ALERTS_CHANGED_EVENT, payload => {
+      if (disposed) return
+      if (!isAlertsBody(payload)) {
+        // Fail closed on the frame, but the push still says "the set changed": read it again.
+        refetch()
+        return
+      }
+      applying = applying
+        .then(() => queryClient.cancelQueries({ queryKey, exact: true }))
+        .then(() => {
+          if (disposed) return
+          queryClient.setQueryData<readonly Alert[]>(queryKey, payload.alerts)
+          void queryClient.invalidateQueries({ queryKey: historyKey, exact: true })
+        })
+        .catch(() => {
+          // A cancel never rejects in practice; if it did, converge by reading again.
+          if (!disposed) refetch()
+        })
+    })
+
+    const offState = connection.onStateChange((state, reason) => {
+      if (disposed) return
+      if (state !== HubConnectionState.Connected) {
+        // A deliberate stop is the session reset's doing, not a missed-push window.
+        if (reason !== 'stopped') {
+          hadGap = true
+        } else if (getAccessToken() !== null) {
+          hadGap = true
+          connection.start().catch(() => {
+            hadGap = true
+          })
+        }
+        return
+      }
+      if (!hadGap) return
+      hadGap = false
+      refetch()
+    })
+
+    connection.start().catch(() => {
+      // Hub unreachable: the GET stands; a later Connected refetches.
+      hadGap = true
+    })
+
+    return () => {
+      disposed = true
+      offChanged()
+      offState()
+    }
+  }, [exerciseId, queryClient, queryKey])
+
+  return data ?? NO_ALERTS
 }
