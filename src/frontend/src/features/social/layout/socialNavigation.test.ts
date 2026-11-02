@@ -7,6 +7,7 @@
  * focus rule must ignore -- so its answers are pinned over a battery of paths,
  * including the COR-004 cases (a participant typing a staff path).
  */
+import { CHANNEL_IDS } from '@/features/channels/contract'
 import { describe, expect, it } from 'vitest'
 import {
   SOCIAL_RESERVED_SEGMENTS,
@@ -37,6 +38,19 @@ describe('socialPaths', () => {
   it('encodes path-significant characters instead of splicing them in', () => {
     expect(socialPaths.thread('a/b?c#d', 'x')).toBe('/x/status/a%2Fb%3Fc%23d')
     expect(socialPaths.hashtag('a b')).toBe('/hashtag/a%20b')
+  })
+})
+
+describe('channel prefixes are reserved (channels-foundation 12)', () => {
+  it('reserves every catalogued channel id except Social, plus the display route', () => {
+    for (const id of [...CHANNEL_IDS.filter(id => id !== 'social'), 'display']) {
+      expect(isReservedSegment(id), id).toBe(true)
+    }
+  })
+
+  it('a thread by a persona whose handle is a channel id links through the placeholder', () => {
+    expect(socialPaths.thread('p-1', 'weather')).toBe('/i/status/p-1')
+    expect(matchSocialRoute(socialPaths.thread('p-1', 'News'))).toBe('thread')
   })
 })
 

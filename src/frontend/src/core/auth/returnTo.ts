@@ -16,9 +16,9 @@
  * same tab (today's word, a pasted link) or by tapping their personal join link,
  * which a phone opens in a new tab; `sessionStorage` would lose the path there.
  * The entry expires after {@link RETURN_TO_TTL_MS}, and every client-session
- * reset forgets it (sign-out, and every sign-in, staff included, through
- * `resetClientSession`), so a stale link left on a shared device never carries
- * the next person to someone else's page. The participant pages take it before
+ * reset forgets it (sign-out, and every sign-in, staff included:
+ * `resetClientSession` calls `clearReturnTo`), so a stale link left on a shared
+ * device never carries the next person to someone else's page. The participant pages take it before
  * that reset runs (`completeSignIn`'s options are built first). Auth lifetime
  * is a real-time concern, so the timestamp is wall-clock through the one
  * documented seam (`wallClockNowIso`), never scenario time, and never shown.
@@ -37,7 +37,6 @@
  * World: participant (the only world with deep links into the fiction). No UI.
  */
 
-import { registerSessionReset } from './sessionReset'
 import { wallClockNowIso } from '@/core/time/wallClock'
 
 /** The storage key. */
@@ -130,5 +129,3 @@ export function clearReturnTo(): void {
     // Blocked storage holds nothing to clear.
   }
 }
-
-registerSessionReset(clearReturnTo, import.meta.hot)
