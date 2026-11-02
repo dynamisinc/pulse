@@ -98,6 +98,37 @@ describe('ProductStateBanner: from a parent snapshot', () => {
     expect(screen.getByRole('status')).toBe(region)
     expect(region).toHaveTextContent('EXPIRED')
   })
+
+  it('starts the region empty, so the first visit is read once (from the visible banner)', () => {
+    render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T13:00:00Z" />)
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('weather-product-state-banner')).toHaveTextContent('EFFECTIVE IN 30 MIN')
+  })
+
+  it('a countdown tick changes the visible banner but never the status region', () => {
+    const { rerender } = render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T12:00:00Z" />)
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T12:01:00Z" />)
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T12:02:00Z" />)
+    expect(screen.getByTestId('weather-product-state-banner')).toHaveTextContent('EFFECTIVE IN 1 HR 28 MIN')
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  })
+
+  it('announces each flip once: active, then expired', () => {
+    const { rerender } = render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T13:00:00Z" />)
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T13:30:00Z" />)
+    expect(screen.getByRole('status')).toHaveTextContent('IN EFFECT')
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T19:00:00Z" />)
+    expect(screen.getByRole('status')).toHaveTextContent('EXPIRED')
+  })
+
+  it('className styles the visible banner; an active product renders no banner box', () => {
+    const { rerender } = render(
+      <ProductStateBanner product={WATCH} scenarioNow="2026-12-02T19:30:00Z" className="spaced" />,
+    )
+    expect(screen.getByTestId('weather-product-state-banner')).toHaveClass('spaced')
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T15:00:00Z" className="spaced" />)
+    expect(document.querySelector('.spaced')).toBeNull()
+  })
 })
 
 describe('ProductStateBanner: follows the live scenario clock (no refetch)', () => {
