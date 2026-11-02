@@ -385,7 +385,7 @@ public sealed partial class WeatherZoneService
     /// zone, else null. The reads use it so a list names exactly one default even if storage holds zero or two.
     /// </summary>
     private static WeatherZone? EffectiveDefault(IReadOnlyList<WeatherZone> zones) =>
-        zones.FirstOrDefault(zone => zone.IsDefault) ?? zones.FirstOrDefault();
+        zones.FirstOrDefault(zone => zone.IsDefault) ?? (zones.Count > 0 ? zones[0] : null);
 
     /// <summary>Clears the default flag of every zone but <paramref name="keep"/>, bumping each one it changes.</summary>
     private static void ClearOtherDefaults(IEnumerable<WeatherZone> zones, WeatherZone keep)

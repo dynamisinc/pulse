@@ -81,7 +81,7 @@ public sealed class WeatherZoneCatalog : IWeatherZoneCatalog
 
     private static async Task<List<(string Slug, string Name)>> LookupAsync(
         IQueryable<WeatherZone> source,
-        IReadOnlySet<string> slugs,
+        HashSet<string> slugs,
         CancellationToken cancellationToken)
     {
         var candidates = slugs.ToList();
