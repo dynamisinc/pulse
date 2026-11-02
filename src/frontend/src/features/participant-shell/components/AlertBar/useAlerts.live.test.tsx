@@ -171,6 +171,28 @@ describe('useAlerts — live push (AlertsChanged)', () => {
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
   })
 
+  it('queues a refetch behind a frame still being applied, so its read starts after the set lands', async () => {
+    mockGet.mockResolvedValue(ok({ alerts: [] }))
+    const client = makeQueryClient()
+    renderHook(() => useAlerts(), { wrapper: makeWrapper(client) })
+    await waitFor(() => expect(client.getQueryState(KEY)?.status).toBe('success'))
+
+    const seenAtRead: unknown[] = []
+    mockGet.mockImplementation(() => {
+      seenAtRead.push(client.getQueryData(KEY))
+      return Promise.resolve(ok({ alerts: [] })) as ReturnType<typeof api.get>
+    })
+    const pushed = wireAlert({ id: 'pushed' })
+    // A valid frame, then (in the same tick) a malformed one that asks for a refetch.
+    act(() => {
+      connection().emit('AlertsChanged', { alerts: [pushed] })
+      connection().emit('AlertsChanged', { alerts: 'not-an-array' })
+    })
+
+    await waitFor(() => expect(seenAtRead).toHaveLength(1))
+    expect(seenAtRead[0]).toEqual([pushed])
+  })
+
   it('lets a frame beat a GET still in flight: the older response never overwrites the push', async () => {
     let resolveGet: (value: unknown) => void = () => {}
     const pending = new Promise(resolve => { resolveGet = resolve })

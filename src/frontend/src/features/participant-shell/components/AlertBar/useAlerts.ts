@@ -119,6 +119,7 @@ export function useAlerts(): readonly Alert[] {
           // A cancel never rejects in practice; if it did, converge by reading again.
           if (disposed) return
           void queryClient.invalidateQueries({ queryKey, exact: true })
+          void queryClient.invalidateQueries({ queryKey: historyKey, exact: true })
         })
     })
 

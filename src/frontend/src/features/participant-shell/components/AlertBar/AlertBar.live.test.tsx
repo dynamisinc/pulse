@@ -231,6 +231,21 @@ describe('AlertBar (live) — five active alerts rotate in severity-then-recency
     expect(shownMessage()).toBe(ORDER[1])
   })
 
+  it('resumes when a scroll collapse unmounts the focused Details link (no blur)', async () => {
+    fakeIntervals()
+    await renderLiveBar(FIVE)
+    const host = screen.getByTestId('pulse-alert-bar')
+    act(() => { screen.getByTestId('pulse-alert-bar-details').focus() })
+    expect(host).toHaveAttribute('data-rotation-paused', 'true')
+
+    Object.defineProperty(window, 'scrollY', { value: 400, configurable: true })
+    fireEvent.scroll(window)
+
+    expect(screen.queryByTestId('pulse-alert-bar-details')).toBeNull()
+    expect(host).not.toHaveAttribute('data-rotation-paused')
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+  })
+
   it('holds on the first alert under prefers-reduced-motion', async () => {
     stubReducedMotion(true)
     fakeIntervals()
@@ -286,6 +301,18 @@ describe('AlertBar (live) — announcements', () => {
     expect(live()).toHaveTextContent('')
     expect(live().textContent).not.toContain(WARNING.message)
     expect(live()).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('falls silent when one of several alerts announced together clears', async () => {
+    const info = wireAlert({ id: 'info', severity: 'info', message: 'Cooling centers open.' })
+    await renderLiveBar([info])
+    await push([info, WARNING, WATCH])
+    expect(live()).toHaveTextContent(WARNING.message)
+    expect(live()).toHaveTextContent(WATCH.message)
+
+    await push([info, WATCH])
+
+    expect(live()).toHaveTextContent('')
   })
 
   it('announces nothing for a push that changes nothing', async () => {

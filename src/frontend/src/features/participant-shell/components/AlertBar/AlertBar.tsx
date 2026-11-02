@@ -383,9 +383,10 @@ function useArrivalAnnouncement(alerts: readonly Alert[]): Announcement {
     seenRef.current = current
     const arrived = alerts.filter((_, index) => !seen.has(keys[index] ?? ''))
     if (arrived.length === 0) {
-      // Never leave a cleared alert (say an emergency) readable in the region: once
-      // nothing it announced is still active, it falls silent. Removing text is not announced.
-      if (!announcedRef.current.some(key => current.has(key))) {
+      // Never leave a cleared alert (say an emergency) readable in the region: as soon
+      // as ANY alert it announced is no longer active, it falls silent. Removing text is
+      // not announced, and the active set is always readable in the bar itself.
+      if (!announcedRef.current.every(key => current.has(key))) {
         announcedRef.current = []
         setAnnouncement(SILENT)
       }
@@ -514,15 +515,15 @@ export function AlertBar() {
     ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
     : ''
   const activeSeverity = activeAlert?.severity ?? null
-  // A focused control that unmounts (its alert cleared, the treatment swapped)
-  // fires no blur, so re-check where focus is whenever the shown alert changes:
-  // a pause must never outlive the focus that caused it.
+  // A focused control that unmounts (its alert cleared, the treatment swapped,
+  // the ticker collapsing or re-expanding) fires no blur, so re-check where focus
+  // is after each of those swaps: a pause must never outlive the focus that caused it.
   const activeAlertId = activeAlert?.id ?? null
   useEffect(() => {
     if (focusWithin && !(hostRef.current?.contains(document.activeElement) ?? false)) {
       setFocusWithin(false)
     }
-  }, [activeAlertId, treatment, focusWithin])
+  }, [focusWithin, activeAlertId, treatment, collapsed])
   useEffect(() => {
     alertPauseBridge.setAlert(activeSummary, activeSeverity)
     return () => alertPauseBridge.setAlert('', null)

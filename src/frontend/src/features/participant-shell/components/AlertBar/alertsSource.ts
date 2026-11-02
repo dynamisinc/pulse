@@ -64,15 +64,14 @@ function isOptional(value: unknown, check: (value: string) => boolean): boolean 
  */
 export function isAlert(value: unknown): value is Alert {
   if (!isRecord(value)) return false
-  const candidate = value
   return (
-    typeof candidate.id === 'string' && candidate.id.length > 0 &&
-    isAlertSeverity(candidate.severity) &&
-    typeof candidate.message === 'string' && candidate.message.length > 0 &&
-    isScenarioTimeString(candidate.scenarioTime) &&
-    isOptional(candidate.href, isHostRelativePath) &&
-    isOptional(candidate.sourceChannel, channel => channel.length > 0) &&
-    isOptional(candidate.contentId, id => id.length > 0)
+    typeof value.id === 'string' && value.id.length > 0 &&
+    isAlertSeverity(value.severity) &&
+    typeof value.message === 'string' && value.message.length > 0 &&
+    isScenarioTimeString(value.scenarioTime) &&
+    isOptional(value.href, isHostRelativePath) &&
+    isOptional(value.sourceChannel, channel => channel.length > 0) &&
+    isOptional(value.contentId, id => id.length > 0)
   )
 }
 
@@ -94,7 +93,7 @@ export interface AlertsHistoryPage {
 
 function isAlertsHistoryPage(body: unknown): body is AlertsHistoryPage {
   if (!isRecord(body) || !isAlertsBody(body)) return false
-  const { nextCursor } = body as Record<string, unknown>
+  const { nextCursor } = body
   return nextCursor === null || nextCursor === undefined || (typeof nextCursor === 'string' && nextCursor.length > 0)
 }
 
