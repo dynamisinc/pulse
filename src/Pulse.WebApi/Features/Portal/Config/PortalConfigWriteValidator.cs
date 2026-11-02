@@ -78,7 +78,9 @@ internal static class PortalConfigWriteValidator
         string? skinOverridesJson = null;
         if (request.SkinOverrides is { } overrides)
         {
-            skinOverridesJson = overrides.ToJsonString();
+            // F03's one serialization (compact, relaxed escaping): its 4 KB cap and the PortalLimits byte count below
+            // measure the same string, which is also what is stored (as the outlet registry stores it).
+            skinOverridesJson = SkinOverridesValidator.Serialize(overrides);
             var skin = skinValidator.Validate(PortalSkinKey, overrides);
             errors.AddRange(skin.Errors);
         }
@@ -146,8 +148,18 @@ internal static class PortalConfigWriteValidator
         return trimmed;
     }
 
+    /// <summary>
+    /// The PUT replaces the whole config, so an empty or omitted list would blank the portal body. Hiding every module
+    /// is still possible, explicitly: send each one with <c>enabled: false</c>.
+    /// </summary>
     private static void CheckModules(IReadOnlyList<PortalModuleSettingDto?> modules, List<string> errors)
     {
+        if (modules.Count == 0)
+        {
+            errors.Add("modules is required; to hide every module, send each one with enabled: false.");
+            return;
+        }
+
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var module in modules)
         {

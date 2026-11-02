@@ -234,6 +234,13 @@ public sealed partial class PortalConfigService : IPortalConfigService
             LogLostRace("create");
             return Conflict();
         }
+        catch (DbUpdateException ex) when (draft.LogoMediaId is not null && IsForeignKeyViolation(ex))
+        {
+            // The logo was removed between the check above and the save: the composite (ExerciseId, LogoMediaId) key
+            // refuses it, and the caller gets the same "not usable" 400 as any other unusable logo.
+            _dbContext.ChangeTracker.Clear();
+            return Invalid([PortalConfigWriteValidator.LogoNotUsableMessage]);
+        }
 
         return new PortalWriteResult<PortalConfigStaffDto>
         {
@@ -381,6 +388,10 @@ public sealed partial class PortalConfigService : IPortalConfigService
     /// <summary>Whether a save failed on a unique index (SQL Server 2601 duplicate key, 2627 unique constraint).</summary>
     private static bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException { Number: 2601 or 2627 };
+
+    /// <summary>Whether a save failed on a foreign key (SQL Server 547).</summary>
+    private static bool IsForeignKeyViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 547 };
 
     [LoggerMessage(
         EventId = 1,

@@ -6,9 +6,15 @@ using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Portal.Config;
 using Pulse.WebApi.Tests.Data;
 using Xunit;
@@ -135,14 +141,14 @@ public sealed class PortalConfigEndpointsTests
     }
 
     [RequiresDockerFact]
-    public async Task ParticipantRead_WithNoResolvedScope_Is401()
+    public async Task ParticipantRead_WithNoResolvedScope_IsTheGates404()
     {
         await using var host = await StartAsync();
         host.ActAs(exerciseId: null, staffUserId: null);
 
         var response = await host.GetAsync("/api/portal");
 
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "the channel gate fails closed on an unresolved scope, before the handler");
     }
 
     // ---- AC "Staff write" ------------------------------------------------------------------------------
@@ -183,8 +189,10 @@ public sealed class PortalConfigEndpointsTests
         (await host.GetAsync("/api/portal/config")).StatusCode.Should().Be(HttpStatusCode.OK, "any assigned staff may read");
 
         host.ActAs(seeded.ExerciseId, staffUserId: null);
-        (await host.PutConfigAsync(PortalConfigTestHost.Body())).StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
-        (await host.GetAsync("/api/portal/config")).StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+        // A participant has no staff session, so the shared staff gate answers 401 (the InjectEndpoints pattern the
+        // story prescribes), not the AC's literal 403; either way it is refused before any handler work.
+        (await host.PutConfigAsync(PortalConfigTestHost.Body())).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await host.GetAsync("/api/portal/config")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         (await host.ConfigRowsAsync(seeded.ExerciseId)).Should().BeEmpty();
         (await host.ConfigEventsAsync(seeded.ExerciseId)).Should().BeEmpty();
@@ -206,6 +214,7 @@ public sealed class PortalConfigEndpointsTests
             ("unknown module", PortalConfigTestHost.Body(modules: new[] { new { id = "ticker", enabled = true } })),
             ("duplicate module", PortalConfigTestHost.Body(modules: new[] { new { id = "weather", enabled = true }, new { id = "weather", enabled = false } })),
             ("city that would overflow the masthead", PortalConfigTestHost.Body(cityName: new string('c', 55))),
+            ("empty module list (would blank the portal)", PortalConfigTestHost.Body(modules: Array.Empty<object>())),
         };
 
         foreach (var (why, body) in cases)
@@ -379,6 +388,44 @@ public sealed class PortalConfigEndpointsTests
         modules.Skip(1).Should().OnlyContain(m => !m.GetProperty("enabled").GetBoolean(), "a module the row does not name is off");
     }
 
+    [RequiresDockerFact]
+    public async Task AnUpdateThatLosesTheRaceAtTheSave_Is409_AndEmitsNothing()
+    {
+        var bumper = new ConcurrentConfigBumper();
+        await using var host = await PortalConfigTestHost.StartAsync(
+            _fixture.ConnectionString!,
+            services => services.AddSingleton<IInterceptor>(bumper));
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        (await host.PutConfigAsync(PortalConfigTestHost.Body(version: 0))).EnsureSuccessStatusCode();
+        bumper.Arm(host.ConnectionString);
+
+        var response = await host.PutConfigAsync(PortalConfigTestHost.Body(version: 1, tagline: "Mine"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var row = (await host.ConfigRowsAsync(seeded.ExerciseId)).Single();
+        row.Tagline.Should().Be(ConcurrentConfigBumper.OtherTagline, "the other writer's change stands");
+        (await host.ConfigEventsAsync(seeded.ExerciseId)).Should().ContainSingle("only the first write's event committed");
+    }
+
+    [RequiresDockerFact]
+    public async Task ASignerFault_ServesTheMastheadWithoutALogo()
+    {
+        await using var host = await PortalConfigTestHost.StartAsync(
+            _fixture.ConnectionString!,
+            services => services.AddScoped<IMediaUrlSigner, ThrowingSigner>());
+        var seeded = await host.SeedExerciseAsync();
+        var logo = await host.AddMediaAssetAsync(seeded.ExerciseId);
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        (await host.PutConfigAsync(PortalConfigTestHost.Body(logoMediaId: logo.ToString()))).EnsureSuccessStatusCode();
+
+        host.ActAs(seeded.ExerciseId, staffUserId: null);
+        var masthead = (await ReadPortalAsync(host)).GetProperty("masthead");
+
+        masthead.GetProperty("logo").ValueKind.Should().Be(JsonValueKind.Null, "a storage fault degrades, never fails the read");
+        masthead.GetProperty("name").GetString().Should().Be("Fairhaven Today");
+    }
+
     private static async Task<JsonElement> ReadPortalAsync(PortalConfigTestHost host)
     {
         var response = await host.GetAsync("/api/portal");
@@ -387,4 +434,48 @@ public sealed class PortalConfigEndpointsTests
     }
 
     private Task<PortalConfigTestHost> StartAsync() => PortalConfigTestHost.StartAsync(_fixture.ConnectionString!);
+}
+
+/// <summary>
+/// Plays a concurrent writer that wins at the SAVE: when a save is about to modify a <see cref="PortalConfig"/>, it first
+/// bumps that row's version (and tagline) through an independent context, so the original UPDATE matches no row. Fires
+/// once, after <see cref="Arm"/>.
+/// </summary>
+internal sealed class ConcurrentConfigBumper : SaveChangesInterceptor
+{
+    public const string OtherTagline = "Changed by the other writer";
+
+    private string? _connectionString;
+    private int _fired;
+
+    public void Arm(string connectionString) => _connectionString = connectionString;
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        var target = eventData.Context?.ChangeTracker.Entries<PortalConfig>().FirstOrDefault(e => e.State == EntityState.Modified);
+        if (target is not null && _connectionString is not null && Interlocked.Exchange(ref _fired, 1) == 0)
+        {
+            var options = new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer(_connectionString).Options;
+            await using var other = new PulseDbContext(options, new ExerciseContext { CurrentExerciseId = target.Entity.ExerciseId });
+            var row = await other.PortalConfigs.SingleAsync(cancellationToken);
+            row.Tagline = OtherTagline;
+            row.Version++;
+            await other.SaveChangesAsync(cancellationToken);
+        }
+
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+}
+
+/// <summary>A media signer whose storage is down.</summary>
+internal sealed class ThrowingSigner : IMediaUrlSigner
+{
+    public Task<string> GetReadUrlAsync(MediaAsset asset, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("storage unavailable");
+
+    public Task<IReadOnlyDictionary<Guid, string>> GetReadUrlsAsync(IReadOnlyCollection<MediaAsset> assets, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("storage unavailable");
 }
