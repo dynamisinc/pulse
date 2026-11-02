@@ -148,10 +148,12 @@ public sealed class OrganizationScopeSweepTests
         // channels-foundation/10 (#706): +1 for AlertReader.ReadTimeAsync — the alert source's ONE read of the exercise
         // row (time zone, persisted scenario instant) by the server-resolved scope (the request's, or the expiry sweep's
         // own per-exercise scope).
+        // channels-foundation 08 (#704): +1 for ChannelEnablement.IsEnabledAsync — the enablement gate's read of the
+        // resolved exercise's EnabledChannels by the IExerciseContext id.
         // idle-db-autopause: +1 for WhiteNoisePacer's sweep — the noise level is checked (ids only) for exercises that
         // have pool rows, so the pacer can sleep while none is making noise; the same shape as the rehydrator's
         // existence check, each id then worked in its own resolved scope.
-        ["ResolvedScope"] = 34,
+        ["ResolvedScope"] = 35,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

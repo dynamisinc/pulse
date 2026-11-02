@@ -24,6 +24,7 @@ using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
+using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseResolution;
@@ -39,9 +40,10 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// Story 01 registered no service of its own (schema only); stories 03+ extend this file as they fill
-/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 03: the outlet registry; story 04: the publish funnel; story 10:
-/// the alert source and the <c>/api/alerts*</c> routes). Resolving services only needs the host to BUILD, so it is fed a
-/// dummy, never-connecting connection string; the anonymous probe is answered before any database work.
+/// <c>AddChannels()</c> / <c>MapChannels()</c> (story 03: the outlet registry; story 04: the publish funnel; story 08: the
+/// enablement gate; story 10: the alert source and the <c>/api/alerts*</c> routes). Resolving services only needs the host
+/// to BUILD, so it is fed a dummy, never-connecting connection string; the anonymous probe is answered before any database
+/// work.
 /// </remarks>
 public sealed class ChannelsCompositionRootWiringTests
 {
@@ -208,7 +210,6 @@ public sealed class ChannelsCompositionRootWiringTests
         using var scope = factory.Services.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<OutletService>().Should().NotBeNull();
-        scope.ServiceProvider.GetRequiredService<OutletChannelGate>().Should().NotBeNull();
         factory.Services.GetRequiredService<ISkinOverridesValidator>().Should().BeOfType<SkinOverridesValidator>();
         factory.Services.GetRequiredService<OutletDefaultsCatalog>().ForChannel("weather").Should().ContainSingle();
     }
@@ -232,6 +233,16 @@ public sealed class ChannelsCompositionRootWiringTests
             "{0} {1}: an anonymous caller is refused before any handler or database work (an unwired route would 404)",
             method,
             pattern);
+    }
+
+    [Fact]
+    public void ProgramCs_ResolvesTheChannelEnablementGate_ThroughAddChannels()
+    {
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IChannelEnablement>().Should().BeOfType<ChannelEnablement>(
+            "story 08 registers the gate RequireChannelEnabled resolves per request; a missing line 500s every gated route");
     }
 
     /// <summary>
