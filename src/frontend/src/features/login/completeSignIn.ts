@@ -32,7 +32,9 @@
  *     may mount a different one, and it must not keep the old identity's data either.
  *  4. `navigate('/', { replace: true })` - the role-aware entry decides the landing
  *     surface from the new session. `replace`, so Back never returns to a sign-in
- *     page that has just done its job.
+ *     page that has just done its job. A participant page passes `returnTo` (the
+ *     deep link a signed-out visitor opened, from `takeReturnTo()`, channels-foundation
+ *     12): the hand-off goes there instead, still with `replace`.
  *
  * ## Persistence
  * `persist: true` stores the pair in `localStorage` (a participant stays signed in
@@ -74,6 +76,12 @@ export interface CompleteSignInOptions {
    * one so a page mounted under a different provider forgets the old identity too.
    */
   readonly queryClient?: { clear: () => void }
+  /**
+   * Participant pages only: the remembered deep link to arrive at instead of `/`
+   * (`takeReturnTo()` from `participant-shell/channelRouter/returnTo`, already
+   * checked to be a safe participant path). `null`/omitted goes to `/`.
+   */
+  readonly returnTo?: string | null
 }
 
 /**
@@ -89,5 +97,5 @@ export function completeSignIn(pair: TokenPair, options: CompleteSignInOptions):
   }
   resetClientSession()
   options.queryClient?.clear()
-  options.navigate(SIGNED_IN_PATH, { replace: true })
+  options.navigate(options.returnTo ?? SIGNED_IN_PATH, { replace: true })
 }

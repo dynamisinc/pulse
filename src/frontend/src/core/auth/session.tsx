@@ -77,7 +77,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { endRefreshCooldown } from '../services/api'
 import { httpStatusOf, signInPathForPage } from './reconnect'
 import { ReconnectingState } from './ReconnectingState'
@@ -85,6 +85,7 @@ import { SessionExpiredError } from './sessionExpiredError'
 import { resolveSession, type Session } from './sessionResolver'
 import { getAccessToken } from './tokenStore'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
+import { rememberReturnTo } from '@/features/participant-shell/channelRouter/returnTo'
 
 type SessionState =
   | { readonly kind: 'loading' }
@@ -195,7 +196,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
   }, [attempt])
 
   if (state.kind === 'loading') return null
-  if (state.kind === 'error') return <Navigate to={LOGIN_PATH} replace />
+  if (state.kind === 'error') return <SignedOutRedirect />
   if (state.kind === 'reconnecting') {
     return (
       <ReconnectingState
@@ -208,6 +209,22 @@ export function SessionProvider({ children }: SessionProviderProps) {
   }
 
   return <SessionContext.Provider value={state.session}>{children}</SessionContext.Provider>
+}
+
+/**
+ * The signed-out redirect to the login entry. It first remembers the path the
+ * visitor asked for (channels-foundation 12, PRT-020), so a shared permalink
+ * opened while signed out is where they arrive after signing in;
+ * `rememberReturnTo` keeps only a safe participant path (never a sign-in, join
+ * or staff path, never another origin) and the sign-in pages take it once.
+ */
+function SignedOutRedirect() {
+  const { pathname, search, hash } = useLocation()
+  const target = `${pathname}${search}${hash}`
+  useEffect(() => {
+    rememberReturnTo(target)
+  }, [target])
+  return <Navigate to={LOGIN_PATH} replace />
 }
 
 /**

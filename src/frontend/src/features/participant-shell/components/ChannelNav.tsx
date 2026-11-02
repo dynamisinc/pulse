@@ -28,12 +28,14 @@
  * with that flag off by default, so the container is visible now (degenerate,
  * one link) and earns its keep as E4/E5/E6 land (Phase 3, out of scope here).
  *
- * **Switching is local, per-instance state** (AC3): clicking a channel
- * updates which channel is marked current and persists for the lifetime of
- * this component instance. Phase 1 has no cross-channel routing yet (only one
- * channel is ever actually mounted in the content region) — that plumbing is
- * Phase 3/backlog (STORY-UPDATES.md §D); this story delivers the switcher
- * mechanism and its visual/ARIA state, not multi-channel routing.
+ * **Switching routes** (channels-foundation 12, #708): the entries are the
+ * channels that are enabled AND registered with the channel router
+ * (`useNavigableChannels`, `../channelRouter`), the same rule `<ChannelRouter>`
+ * mounts by, so the nav and the routes agree. Clicking one navigates to its
+ * `navPath` (Social: `/home`), and the URL, not local state, decides which
+ * entry is current. Before any channel registers (this component tested on its
+ * own) it keeps the Phase-1 behaviour: every enabled channel, and a click only
+ * moves the local current marker (AC3).
  *
  * **A11y (NFR-001):** both forms are native `<button>`s (keyboard-operable by
  * default, with an explicit `:focus-visible` ring since default button chrome
@@ -58,6 +60,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
@@ -71,6 +74,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { isWallMirroringExerciseClock, useScenarioTime } from '@/core/clock'
 import { useChannelNav, type ChannelIconId } from '../channelNavConfig'
 import { TOUCH_TARGET_MIN_PX, touchTargetCss } from './touchTarget'
+import { useNavigableChannels, type NavigableChannel } from '../channelRouter/useNavigableChannels'
 
 /** Maps the closed wire icon identifier to a concrete FontAwesome icon (FA-only, D icons). */
 const CHANNEL_ICON_MAP: Record<ChannelIconId, IconDefinition> = {
@@ -214,11 +218,20 @@ export function ChannelNav() {
   const { timeZone } = useExerciseContext()
   const { now, format } = useScenarioTime(timeZone)
 
-  // Local, per-instance "current channel" state (AC3). Seeded from the
-  // resolved config's initial channel; a real cross-channel mount switch is
-  // Phase 3 (see module header) — for now this only drives the marked/current
-  // visual + aria-current state.
-  const [currentChannelId, setCurrentChannelId] = useState(config.initialChannelId)
+  // Local, per-instance "current channel" state (AC3), seeded from the resolved
+  // config's initial channel. It decides the marker only while no channel is
+  // registered; once the router is in play the URL does (see the module header).
+  const [localCurrentId, setLocalCurrentId] = useState(config.initialChannelId)
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const navigable = useNavigableChannels(config.channels, pathname)
+  const channels = navigable.channels
+  const currentChannelId = navigable.routed ? navigable.currentChannelId : localCurrentId
+
+  const selectChannel = (channel: NavigableChannel) => {
+    setLocalCurrentId(channel.id)
+    if (channel.navPath !== undefined && channel.navPath !== pathname) navigate(channel.navPath)
+  }
 
   // If the enabled-channel set changes under us (e.g. the mock resolves from
   // the loading-state default to live data, or a channel gets disabled) and
@@ -227,22 +240,22 @@ export function ChannelNav() {
   // channel that no longer exists (a dangling pointer would be its own
   // "dangling door").
   useEffect(() => {
-    if (!config.channels.some(channel => channel.id === currentChannelId)) {
-      setCurrentChannelId(config.initialChannelId)
+    if (!config.channels.some(channel => channel.id === localCurrentId)) {
+      setLocalCurrentId(config.initialChannelId)
     }
-  }, [config.channels, config.initialChannelId, currentChannelId])
+  }, [config.channels, config.initialChannelId, localCurrentId])
 
   // AC2 degenerate case: nothing to switch between, and config says hide it.
   // Also covers the (unspecified) all-disabled edge case — no channels means
   // no nav, never an empty shell.
-  if (config.channels.length === 0) return null
-  if (config.hideWhenSingleChannel && config.channels.length <= 1) return null
+  if (channels.length === 0) return null
+  if (config.hideWhenSingleChannel && channels.length <= 1) return null
 
   // COR-053 guard (mobile-tablet story 17): under the default wall-mirroring
   // clock "now" is the real date, not scenario time, so render no dateline at
   // all until a real exercise clock is installed (exercise-clock story 01).
   const dateline = isWallMirroringExerciseClock() ? null : format(now, { format: 'dateline' })
-  const mobileChannels = config.channels.slice(0, MAX_MOBILE_TABS)
+  const mobileChannels = channels.slice(0, MAX_MOBILE_TABS)
 
   return (
     <>
@@ -255,7 +268,7 @@ export function ChannelNav() {
         data-testid="pulse-channel-nav-strip"
       >
         <ul className="pulse-channel-nav-strip-list">
-          {config.channels.map(channel => {
+          {channels.map(channel => {
             const isCurrent = channel.id === currentChannelId
             return (
               <li key={channel.id}>
@@ -267,7 +280,7 @@ export function ChannelNav() {
                       : 'pulse-channel-nav-link'
                   }
                   aria-current={isCurrent ? 'page' : undefined}
-                  onClick={() => setCurrentChannelId(channel.id)}
+                  onClick={() => selectChannel(channel)}
                 >
                   {channel.label}
                 </button>
@@ -296,7 +309,7 @@ export function ChannelNav() {
                   : 'pulse-channel-nav-tab'
               }
               aria-current={isCurrent ? 'page' : undefined}
-              onClick={() => setCurrentChannelId(channel.id)}
+              onClick={() => selectChannel(channel)}
             >
               <FontAwesomeIcon icon={CHANNEL_ICON_MAP[channel.icon]} aria-hidden="true" />
               <span className="pulse-channel-nav-tab-label">{channel.label}</span>

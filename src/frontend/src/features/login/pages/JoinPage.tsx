@@ -127,6 +127,7 @@ import {
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { JOIN_PATH, LOGIN_PATH } from '@/features/app-shell/constants'
+import { takeReturnTo } from '@/features/participant-shell/channelRouter/returnTo'
 import { completeSignIn, SIGNED_IN_PATH } from '../completeSignIn'
 import {
   classifyJoinFailure,
@@ -268,7 +269,7 @@ export function JoinPage() {
     tokenRef.current = null
     completeSignIn(
       { token: envelope.token, refreshToken: envelope.refreshToken },
-      { persist: true, navigate, queryClient },
+      { persist: true, navigate, queryClient, returnTo: takeReturnTo() },
     )
   }, [navigate, queryClient])
 
