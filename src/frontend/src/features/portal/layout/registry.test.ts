@@ -43,14 +43,18 @@ describe('portal module registry', () => {
     const Next = () => null
     registry.register(registration({ Component: Next }))
     expect(registry.get('topStories')?.Component).toBe(Next)
+    // An edit to only the metadata of a hot-reloaded register.ts lands too.
+    registry.register(registration({ Component: Next, order: 77 }))
+    expect(registry.get('topStories')?.order).toBe(77)
   })
 
   it('the app registry throws on a second module for an id outside hot reload', async () => {
     const { portalModuleRegistry } = await import('./registry')
     const Other = () => null
-    portalModuleRegistry.register(registration({ id: 'pressLatest', channelId: 'press', Component }))
+    // `trending` is registered nowhere else in this suite.
+    portalModuleRegistry.register(registration({ id: 'trending', channelId: 'social', Component }))
     expect(() => portalModuleRegistry.register(
-      registration({ id: 'pressLatest', channelId: 'press', Component: Other }),
+      registration({ id: 'trending', channelId: 'social', Component: Other }),
     )).toThrow(/already registered/)
   })
 

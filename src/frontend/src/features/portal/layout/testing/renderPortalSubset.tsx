@@ -102,7 +102,7 @@ function stubRegistration(id: PortalModuleId, status: ModuleFrameStatus): Portal
         <ModuleLink
           moduleId={moduleId}
           to={`/news/fixture/${moduleId.toLowerCase()}-1`}
-          target={{ contentId: `${moduleId}-1` }}
+          clickTarget={{ contentId: `${moduleId}-1` }}
         >
           {`${STUB_MODULE_TITLES[moduleId]} item`}
         </ModuleLink>

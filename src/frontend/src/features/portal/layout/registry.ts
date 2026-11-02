@@ -61,7 +61,7 @@ export function createPortalModuleRegistry(
       const existing = entries.get(registration.id)
       if (existing) {
         // The very same component again (one module reached by two import paths) is a no-op.
-        if (existing.Component === registration.Component) return
+        if (existing.Component === registration.Component && !options.replaceDuplicates) return
         if (!options.replaceDuplicates) {
           throw new Error(`registerPortalModule: module '${registration.id}' is already registered`)
         }

@@ -4,9 +4,12 @@
  * Trending absent and present. The page must look complete: no empty frame,
  * no orphaned heading, no dead "See all" link, and an empty rail collapses.
  */
-import { screen, within } from '@testing-library/react'
+import { useState } from 'react'
+import { act, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { PortalModuleId } from '../contract'
+import { ModuleFrame } from './ModuleFrame'
+import type { PortalModuleProps } from './types'
 import { PORTAL_CHANNEL_HOME_PATHS } from './channelHome'
 import { PORTAL_LAYOUT_SUBSETS, STUB_MODULE_PLACEMENT, STUB_MODULE_TITLES, renderPortalSubset } from './testing'
 
@@ -111,6 +114,26 @@ describe('runtime hiding', () => {
     const { container } = renderPortalSubset(['topStories', 'socialStream'], {
       registrations: [{ id: 'socialStream', channelId: 'social', region: 'rail', order: 30, Component: Broken }],
     })
+    silence.mockRestore()
+    expect(sections(container).map(section => section.dataset.portalModule)).toEqual(['topStories'])
+    expect(mountedGrid().dataset.rail).toBe('empty')
+    expect(region(container, 'rail')?.hidden).toBe(true)
+  })
+
+  it('a module that throws after mounting hides too (frame cleanup, then the boundary)', () => {
+    const ctl: { break?: () => void } = {}
+    function Flaky({ moduleId }: PortalModuleProps) {
+      const [broken, setBroken] = useState(false)
+      ctl.break = () => setBroken(true)
+      if (broken) throw new Error('module bug')
+      return <ModuleFrame moduleId={moduleId} title="Latest from Pulse" status="ready" />
+    }
+    const { container } = renderPortalSubset(['topStories', 'socialStream'], {
+      registrations: [{ id: 'socialStream', channelId: 'social', region: 'rail', order: 30, Component: Flaky }],
+    })
+    expect(mountedGrid().dataset.rail).toBe('filled')
+    const silence = vi.spyOn(console, 'error').mockImplementation(() => {})
+    act(() => ctl.break?.())
     silence.mockRestore()
     expect(sections(container).map(section => section.dataset.portalModule)).toEqual(['topStories'])
     expect(mountedGrid().dataset.rail).toBe('empty')

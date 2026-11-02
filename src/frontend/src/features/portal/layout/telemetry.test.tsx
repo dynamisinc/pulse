@@ -38,7 +38,7 @@ const SCENARIO = '2026-12-05T14:30:00.000Z'
 function TopStories({ moduleId, trackClick }: PortalModuleProps) {
   return (
     <ModuleFrame moduleId={moduleId} title="Top Stories" status="ready">
-      <ModuleLink moduleId={moduleId} to="/news/daily/flood-1" target={{ contentId: 'content-1' }}>
+      <ModuleLink moduleId={moduleId} to="/news/daily/flood-1" clickTarget={{ contentId: 'content-1' }}>
         Flood closes Main Street
       </ModuleLink>
       <button type="button" onClick={() => trackClick()}>Play</button>

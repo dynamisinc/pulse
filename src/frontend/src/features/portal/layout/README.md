@@ -21,7 +21,7 @@ only (a new optional field), never by renaming or narrowing.
 
    ```tsx
    <ModuleFrame moduleId={moduleId} title="Top Stories" status={status} announce={{ arrivals }}>
-     <ModuleLink moduleId={moduleId} to={item.permalink} target={{ contentId: item.id }}>
+     <ModuleLink moduleId={moduleId} to={item.permalink} clickTarget={{ contentId: item.id }}>
        {item.headline}
      </ModuleLink>
    </ModuleFrame>
@@ -91,7 +91,8 @@ const { clicks } = renderPortalSubset(['topStories', 'weather'], {
 })
 ```
 
-The stored order follows each registration's `order` (yours for a real module). The harness uses an isolated registry and a fake environment that records every
+The stored order follows each registration's `order` (yours for a real module).
+The harness uses an isolated registry and a fake environment that records every
 `trackClick` in `clicks` (it emits no telemetry). `PORTAL_LAYOUT_SUBSETS` holds all 32
 subsets: 2^4 content modules, each with Trending absent and present. It is test-only, so
 never import `layout/testing` from app code.
