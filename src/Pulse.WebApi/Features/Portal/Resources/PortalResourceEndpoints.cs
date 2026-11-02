@@ -192,7 +192,7 @@ public static class PortalResourceEndpoints
         {
             return await httpContext.Request.ReadFromJsonAsync<T>(cancellationToken);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or BadHttpRequestException)
         {
             return null;
         }

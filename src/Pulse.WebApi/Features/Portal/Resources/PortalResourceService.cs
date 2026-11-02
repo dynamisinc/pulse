@@ -23,8 +23,14 @@ using Pulse.WebApi.Features.Portal.Data;
 /// </para>
 /// <para>
 /// <b>Cap and order.</b> Create, reorder and delete run in one transaction holding an exclusive per-exercise
-/// <c>sp_getapplock</c>, so two concurrent creates at 24 cannot both pass <see cref="PortalLimits.CheckResourceCount"/>
-/// and a reorder always sees the whole live set. Update needs no lock: <c>Version</c> is a concurrency token.
+/// application lock (<see cref="SqlApplicationLock"/>), so two concurrent creates at 24 cannot both pass <see cref="PortalLimits.CheckResourceCount"/>
+/// and a reorder always sees the whole live set. Update needs no lock: <c>Version</c> is a concurrency token. A lock
+/// not granted in time is a retryable <see cref="PortalWriteOutcome.Conflict"/>.
+/// </para>
+/// <para>
+/// <b>Reorder takes a set.</b> <c>orderedIds</c> must equal the live set exactly, so an id that is unknown, deleted or
+/// another exercise's makes the list wrong (<see cref="PortalWriteOutcome.Invalid"/>, 400), not a per-id 404; nothing
+/// about the foreign id is disclosed either way.
 /// </para>
 /// <para>
 /// <b>Body.</b> Sanitized once at write with <see cref="PortalResourceSanitizer"/> (NFR-004); stored sanitized, served
@@ -37,6 +43,8 @@ public sealed partial class PortalResourceService : IPortalResourceService
     public const int MaxBodyHtmlLength = 100_000;
 
     private const string StaleVersionMessage = "The resource was changed by someone else; reload it and try again.";
+    private const string BusyMessage = "The shelf is being changed by someone else; try again in a moment.";
+    private const int LockTimeoutMilliseconds = 5000;
     private const string MediaNotUsableMessage = "The media asset is not usable: it must be an image uploaded to this exercise.";
     private const string DocumentsDisabledMessage = "PDF attachments are not enabled for resources yet.";
 
@@ -124,7 +132,10 @@ public sealed partial class PortalResourceService : IPortalResourceService
         }
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await LockShelfAsync(exerciseId, cancellationToken);
+        if (!await TryLockShelfAsync(exerciseId, cancellationToken))
+        {
+            return Busy<PortalResourceStaffDto>();
+        }
 
         var limit = PortalLimits.CheckResourceCount(await _db.CountLivePortalResourcesAsync(cancellationToken));
         if (!limit.IsValid)
@@ -164,15 +175,16 @@ public sealed partial class PortalResourceService : IPortalResourceService
             return NotFound<PortalResourceStaffDto>();
         }
 
+        // A stale version is a 409 whatever else is wrong with the body: the editor must reload first.
+        if (request.Version != row.Version)
+        {
+            return Conflict<PortalResourceStaffDto>();
+        }
+
         var draft = await ParseAsync(request, cancellationToken);
         if (draft.Errors.Count > 0)
         {
             return Invalid<PortalResourceStaffDto>(draft.Errors);
-        }
-
-        if (request.Version != row.Version)
-        {
-            return Conflict<PortalResourceStaffDto>();
         }
 
         PortalWriteScope.EnsureInScope(_scope, row);
@@ -212,6 +224,12 @@ public sealed partial class PortalResourceService : IPortalResourceService
             return Invalid<IReadOnlyList<PortalResourceStaffDto>>(["orderedIds is required."]);
         }
 
+        if (request.OrderedIds.Count > PortalVocabulary.MaxResources)
+        {
+            return Invalid<IReadOnlyList<PortalResourceStaffDto>>(
+                [$"orderedIds names more than {PortalVocabulary.MaxResources} resources."]);
+        }
+
         var orderedIds = new List<Guid>(request.OrderedIds.Count);
         foreach (var raw in request.OrderedIds)
         {
@@ -224,7 +242,10 @@ public sealed partial class PortalResourceService : IPortalResourceService
         }
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await LockShelfAsync(exerciseId, cancellationToken);
+        if (!await TryLockShelfAsync(exerciseId, cancellationToken))
+        {
+            return Busy<IReadOnlyList<PortalResourceStaffDto>>();
+        }
 
         var rows = await _db.LivePortalResources().ToListAsync(cancellationToken);
         if (orderedIds.Count != rows.Count
@@ -276,7 +297,10 @@ public sealed partial class PortalResourceService : IPortalResourceService
         }
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await LockShelfAsync(exerciseId, cancellationToken);
+        if (!await TryLockShelfAsync(exerciseId, cancellationToken))
+        {
+            return Busy<PortalResourceStaffDto>();
+        }
 
         var row = await _db.PortalResources.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (row is null)
@@ -312,6 +336,9 @@ public sealed partial class PortalResourceService : IPortalResourceService
 
     private static PortalWriteResult<T> Conflict<T>()
         where T : class => new() { Outcome = PortalWriteOutcome.Conflict, Errors = [StaleVersionMessage] };
+
+    private static PortalWriteResult<T> Busy<T>()
+        where T : class => new() { Outcome = PortalWriteOutcome.Conflict, Errors = [BusyMessage] };
 
     private static PortalWriteResult<T> Invalid<T>(IReadOnlyList<string> errors)
         where T : class => new() { Outcome = PortalWriteOutcome.Invalid, Errors = errors };
@@ -366,17 +393,14 @@ public sealed partial class PortalResourceService : IPortalResourceService
     private Guid? CurrentExercise() =>
         _scope.CurrentExerciseId is { } id && id != Guid.Empty ? id : null;
 
-    /// <summary>Takes the exercise's shelf lock for the rest of the current transaction.</summary>
-    private async Task LockShelfAsync(Guid exerciseId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Takes the exercise's shelf lock for the rest of the current transaction. <c>false</c> when it was not granted
+    /// within <see cref="LockTimeoutMilliseconds"/> (the caller answers a retryable 409, never a 500).
+    /// </summary>
+    private async Task<bool> TryLockShelfAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var resource = string.Create(CultureInfo.InvariantCulture, $"pulse:portal-resources:{exerciseId:N}");
-        await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"""
-            DECLARE @result int;
-            EXEC @result = sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
-            IF @result < 0 THROW 50000, 'The portal resources lock was not granted.', 1;
-            """,
-            cancellationToken);
+        return await _db.Database.TryAcquireExclusiveAsync(resource, LockTimeoutMilliseconds, cancellationToken);
     }
 
     private async Task<ResourceDraft> ParseAsync(PortalResourceWriteRequest request, CancellationToken cancellationToken)

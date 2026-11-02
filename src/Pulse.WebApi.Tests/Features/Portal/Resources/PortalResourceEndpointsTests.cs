@@ -88,6 +88,19 @@ public sealed class PortalResourceEndpointsTests
     }
 
     [RequiresDockerFact]
+    public async Task Update_WithAStaleVersionAndAnInvalidField_Is409()
+    {
+        await using var host = await StartAsync();
+        var (exerciseId, staff) = await host.SeedExerciseAsync();
+        var row = await host.AddResourceAsync(exerciseId, "Original", sortOrder: 1);
+        host.ActAs(exerciseId, staff);
+
+        var response = await host.PutAsync(row.Id, PortalResourceTestHost.Body(title: "   ", version: 7));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, "a stale version wins over validation: reload first");
+    }
+
+    [RequiresDockerFact]
     public async Task Update_OfAnUnknownId_Is404()
     {
         await using var host = await StartAsync();
@@ -208,6 +221,7 @@ public sealed class PortalResourceEndpointsTests
     [InlineData("unknown")]
     [InlineData("not-a-guid")]
     [InlineData("null")]
+    [InlineData("oversized")]
     public async Task Reorder_ThatDoesNotNameEveryResourceExactlyOnce_Is400(string shape)
     {
         await using var host = await StartAsync();
@@ -219,6 +233,7 @@ public sealed class PortalResourceEndpointsTests
         string[]? ids = shape switch
         {
             "null" => null,
+            "oversized" => Enumerable.Range(0, PortalVocabulary.MaxResources + 1).Select(_ => Guid.NewGuid().ToString()).ToArray(),
             "missing" => [first.Id.ToString()],
             "duplicate" => [first.Id.ToString(), first.Id.ToString()],
             "unknown" => [first.Id.ToString(), Guid.NewGuid().ToString()],
