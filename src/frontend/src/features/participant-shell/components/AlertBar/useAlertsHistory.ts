@@ -16,7 +16,7 @@
  * World: participant. No COBRA, no UI — a pure data hook.
  */
 
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { Alert } from './alertTypes'
@@ -63,14 +63,15 @@ export function useAlertsHistory(): AlertsHistoryResult {
   }, [pages])
 
   const { fetchNextPage } = query
+  const loadMore = useCallback(() => {
+    void fetchNextPage()
+  }, [fetchNextPage])
   return {
     alerts,
     isLoading: query.isPending,
     isError: query.isError && pages === undefined,
     hasMore: query.hasNextPage,
     isLoadingMore: query.isFetchingNextPage,
-    loadMore: () => {
-      void fetchNextPage()
-    },
+    loadMore,
   }
 }

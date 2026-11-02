@@ -54,7 +54,7 @@ export const FULLSCREEN_EXIT_SEVERITIES: ReadonlySet<AlertSeverity> = new Set<Al
 /** Leaves fullscreen once for each alert that newly becomes active in a qualifying tier. */
 export function useExitFullscreenOnNewAlert(alerts: readonly Alert[]): void {
   // A stable string key of the qualifying ids, so the effect re-runs only when the SET
-  // changes (`useAlerts()` hands back a fresh array while empty).
+  // changes (a push or refetch can hand back an equal set in a new array).
   const qualifyingKey = useMemo(
     () =>
       alerts

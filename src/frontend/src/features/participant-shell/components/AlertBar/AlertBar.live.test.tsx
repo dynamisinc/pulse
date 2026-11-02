@@ -189,11 +189,11 @@ describe('AlertBar (live) — five active alerts rotate in severity-then-recency
     await renderLiveBar(FIVE)
     const host = screen.getByTestId('pulse-alert-bar')
 
-    fireEvent.mouseEnter(host)
+    fireEvent.pointerEnter(host, { pointerType: 'mouse' })
     expect(host).toHaveAttribute('data-rotation-paused', 'true')
     act(() => { vi.advanceTimersByTime(20000) })
     expect(shownMessage()).toBe(ORDER[0])
-    fireEvent.mouseLeave(host)
+    fireEvent.pointerLeave(host, { pointerType: 'mouse' })
     act(() => { vi.advanceTimersByTime(3500) })
     expect(shownMessage()).toBe(ORDER[1])
 
@@ -204,6 +204,31 @@ describe('AlertBar (live) — five active alerts rotate in severity-then-recency
     act(() => { screen.getByTestId('pulse-alert-bar-details').blur() })
     act(() => { vi.advanceTimersByTime(3500) })
     expect(shownMessage()).toBe(ORDER[2])
+  })
+
+  it('does not pause on a touch "hover" (a tap has no reliable leave)', async () => {
+    fakeIntervals()
+    await renderLiveBar(FIVE)
+    fireEvent.pointerEnter(screen.getByTestId('pulse-alert-bar'), { pointerType: 'touch' })
+    act(() => { vi.advanceTimersByTime(3500) })
+    expect(shownMessage()).toBe(ORDER[1])
+  })
+
+  it('resumes when the focused control unmounts without a blur (the alerts cleared)', async () => {
+    fakeIntervals()
+    await renderLiveBar(FIVE)
+    const host = screen.getByTestId('pulse-alert-bar')
+    act(() => { screen.getByTestId('pulse-alert-bar-details').focus() })
+    expect(host).toHaveAttribute('data-rotation-paused', 'true')
+
+    // Every alert clears: the focused link unmounts (no blur reaches the bar), and
+    // when alerts return the ticker must rotate again rather than stay paused.
+    await push([])
+    await push(FIVE)
+    expect(document.activeElement).toBe(document.body)
+    expect(host).not.toHaveAttribute('data-rotation-paused')
+    act(() => { vi.advanceTimersByTime(3500) })
+    expect(shownMessage()).toBe(ORDER[1])
   })
 
   it('holds on the first alert under prefers-reduced-motion', async () => {

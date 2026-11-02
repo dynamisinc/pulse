@@ -504,6 +504,15 @@ export function AlertBar() {
     ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
     : ''
   const activeSeverity = activeAlert?.severity ?? null
+  // A focused control that unmounts (its alert cleared, the treatment swapped)
+  // fires no blur, so re-check where focus is whenever the shown alert changes:
+  // a pause must never outlive the focus that caused it.
+  const activeAlertId = activeAlert?.id ?? null
+  useEffect(() => {
+    if (focusWithin && !(hostRef.current?.contains(document.activeElement) ?? false)) {
+      setFocusWithin(false)
+    }
+  }, [activeAlertId, treatment, focusWithin])
   useEffect(() => {
     alertPauseBridge.setAlert(activeSummary, activeSeverity)
     return () => alertPauseBridge.setAlert('', null)
@@ -533,8 +542,11 @@ export function AlertBar() {
         data-alert-treatment={dataTreatment}
         data-rotation-paused={rotationPaused ? 'true' : undefined}
         style={hostStyle}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        // A touch "hover" has no reliable leave, so only a real pointer pauses on hover.
+        onPointerEnter={event => {
+          if (event.pointerType !== 'touch') setHovered(true)
+        }}
+        onPointerLeave={() => setHovered(false)}
         onFocus={() => setFocusWithin(true)}
         onBlur={event => {
           if (!event.currentTarget.contains(event.relatedTarget)) setFocusWithin(false)

@@ -91,9 +91,14 @@ export function useAlerts(): readonly Alert[] {
     // Frames are applied strictly in arrival order, each after the in-flight GET is cancelled.
     let applying: Promise<void> = Promise.resolve()
 
+    // Queued behind any frame still being applied, so a read it starts can never be
+    // overtaken by (and then overwrite) an earlier frame's set.
     const refetch = (): void => {
-      void queryClient.invalidateQueries({ queryKey, exact: true })
-      void queryClient.invalidateQueries({ queryKey: historyKey, exact: true })
+      applying = applying.then(() => {
+        if (disposed) return
+        void queryClient.invalidateQueries({ queryKey, exact: true })
+        void queryClient.invalidateQueries({ queryKey: historyKey, exact: true })
+      })
     }
 
     const offChanged = connection.subscribe(ALERTS_CHANGED_EVENT, payload => {
@@ -112,7 +117,8 @@ export function useAlerts(): readonly Alert[] {
         })
         .catch(() => {
           // A cancel never rejects in practice; if it did, converge by reading again.
-          if (!disposed) refetch()
+          if (disposed) return
+          void queryClient.invalidateQueries({ queryKey, exact: true })
         })
     })
 

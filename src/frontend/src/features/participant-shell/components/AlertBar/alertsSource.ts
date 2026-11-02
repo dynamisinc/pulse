@@ -47,6 +47,10 @@ function isScenarioTimeString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && !Number.isNaN(Date.parse(value))
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 /** An optional additive key: absent, null, or a string passing `check`. */
 function isOptional(value: unknown, check: (value: string) => boolean): boolean {
   return value === undefined || value === null || (typeof value === 'string' && check(value))
@@ -59,8 +63,8 @@ function isOptional(value: unknown, check: (value: string) => boolean): boolean 
  * target would send a participant off the exercise host, so it fails closed.
  */
 export function isAlert(value: unknown): value is Alert {
-  if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const candidate = value
   return (
     typeof candidate.id === 'string' && candidate.id.length > 0 &&
     isAlertSeverity(candidate.severity) &&
@@ -79,9 +83,7 @@ export interface AlertsBody {
 
 /** Guards a `GET /alerts` body or an `AlertsChanged` payload (same shape, FC-5). */
 export function isAlertsBody(body: unknown): body is AlertsBody {
-  if (typeof body !== 'object' || body === null) return false
-  const alerts = (body as Record<string, unknown>).alerts
-  return Array.isArray(alerts) && alerts.every(isAlert)
+  return isRecord(body) && Array.isArray(body.alerts) && body.alerts.every(isAlert)
 }
 
 /** Wire shape of one `GET /alerts/history` page: newest first, with an opaque cursor. */
@@ -91,8 +93,8 @@ export interface AlertsHistoryPage {
 }
 
 function isAlertsHistoryPage(body: unknown): body is AlertsHistoryPage {
-  if (!isAlertsBody(body)) return false
-  const nextCursor = (body as unknown as Record<string, unknown>).nextCursor
+  if (!isRecord(body) || !isAlertsBody(body)) return false
+  const { nextCursor } = body as Record<string, unknown>
   return nextCursor === null || nextCursor === undefined || (typeof nextCursor === 'string' && nextCursor.length > 0)
 }
 
