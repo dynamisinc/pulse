@@ -265,6 +265,19 @@ public sealed class RoleMatrixTests
         Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
         Probe("POST /api/outlets/reorder", ControllerOnly);
         Probe("POST /api/outlets/defaults", ControllerOnly);
+
+        // channels-foundation 07 (#703): the staff content API's writes are controller-only (story AC "Staff-only").
+        Probe("POST /api/content-items", ControllerOnly);
+        Probe("PUT /api/content-items/{id:guid}", ControllerOnly);
+        Probe("DELETE /api/content-items/{id:guid}", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/publish", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/schedule", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/unschedule", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/retract", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/restore", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/revise", ControllerOnly);
+        Probe("POST /api/content-items/{id:guid}/feature", ControllerOnly);
+        Probe("POST /api/content-items/feature/reorder", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
