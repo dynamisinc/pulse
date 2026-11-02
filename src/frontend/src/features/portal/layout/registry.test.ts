@@ -1,0 +1,57 @@
+/**
+ * Story 07 (#772) AC "Registry": a registered module mounts with no layout
+ * change, and a duplicate id throws at registration.
+ */
+import { describe, expect, it } from 'vitest'
+import { createPortalModuleRegistry } from './registry'
+import type { PortalModuleRegistration } from './types'
+
+const Component = () => null
+
+function registration(overrides: Partial<PortalModuleRegistration> = {}): PortalModuleRegistration {
+  return { id: 'topStories', channelId: 'news', region: 'lead', order: 10, Component, ...overrides } as PortalModuleRegistration
+}
+
+describe('portal module registry', () => {
+  it('registers and returns a module', () => {
+    const registry = createPortalModuleRegistry()
+    const entry = registration()
+    registry.register(entry)
+    expect(registry.get('topStories')).toBe(entry)
+    expect(registry.get('weather')).toBeUndefined()
+  })
+
+  it('throws when the same id registers twice', () => {
+    const registry = createPortalModuleRegistry()
+    registry.register(registration())
+    expect(() => registry.register(registration({ order: 99 }))).toThrow(/already registered/)
+    expect(registry.list()).toHaveLength(1)
+  })
+
+  it('rejects a channel that is not the module\'s PC-1 source channel', () => {
+    const registry = createPortalModuleRegistry()
+    expect(() => registry.register(registration({ channelId: 'social' } as never))).toThrow(/must use channel 'news'/)
+  })
+
+  it('rejects an unknown id, region or a non-finite order', () => {
+    const registry = createPortalModuleRegistry()
+    expect(() => registry.register(registration({ id: 'ticker' } as never))).toThrow(/not a portal module id/)
+    expect(() => registry.register(registration({ region: 'footer' } as never))).toThrow(/unknown region/)
+    expect(() => registry.register(registration({ order: Number.NaN }))).toThrow(/finite order/)
+  })
+
+  it('lists by order, ties by id', () => {
+    const registry = createPortalModuleRegistry()
+    registry.register(registration({ id: 'weather', channelId: 'weather', region: 'rail', order: 5 } as never))
+    registry.register(registration({ id: 'trending', channelId: 'social', region: 'rail', order: 5 } as never))
+    registry.register(registration({ order: 1 }))
+    expect(registry.list().map(entry => entry.id)).toEqual(['topStories', 'trending', 'weather'])
+  })
+
+  it('isolated registries do not share entries', () => {
+    const a = createPortalModuleRegistry()
+    const b = createPortalModuleRegistry()
+    a.register(registration())
+    expect(b.get('topStories')).toBeUndefined()
+  })
+})
