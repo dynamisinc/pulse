@@ -82,6 +82,8 @@ public sealed class ReleaseDekTests
             .Should().Be("Dr. Lee said the U.S. Route 9 shelters are open.");
         ReleaseDek.Derive(Headline, "<p>U.S. officials opened shelters at noon today. More soon.</p>", Org)
             .Should().Be("U.S. officials opened shelters at noon today.");
+        ReleaseDek.Derive(Headline, "<p>Evacuate north via State Route 9. Shelters open at noon.</p>", Org)
+            .Should().Be("Evacuate north via State Route 9.", "a number before the period is not an initial");
     }
 
     [Fact]

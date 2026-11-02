@@ -105,7 +105,9 @@ public static partial class ReleaseDek
 
         var start = block.LastIndexOf(' ', index) + 1;
         var token = block[start..index];
-        return token.Length == 1 || token.Contains('.', StringComparison.Ordinal) || Abbreviations.Contains(token);
+        return (token.Length == 1 && char.IsLetter(token[0]))
+            || token.Contains('.', StringComparison.Ordinal)
+            || Abbreviations.Contains(token);
     }
 
     /// <summary>Removes every match, innermost first, until none is left (nested lists/tables).</summary>

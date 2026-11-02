@@ -8,8 +8,9 @@
  * CLOSED (the guard returns false), never a blind cast. EXTRA keys are
  * tolerated so the contract can evolve additively, with ONE deliberate
  * exception: `isReleaseParticipantPayload` REJECTS a payload carrying any
- * `STAFF_ONLY_PAYLOAD_KEYS` key (crossPost, approval, inputPath), so a server
- * leak is caught at the client boundary too (XC-002).
+ * `STAFF_ONLY_PAYLOAD_KEYS` key (crossPost, approval, inputPath, boilerplate,
+ * orgPersonaId), so a server leak is caught at the client boundary too
+ * (XC-002).
  *
  * `isReleaseContentDto` is the participant permalink read: an FC-3
  * `ChannelContentDto` of kind `release` with a participant-safe payload.
