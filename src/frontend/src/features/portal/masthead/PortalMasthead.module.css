@@ -1,0 +1,134 @@
+/*
+ * features/portal/masthead/PortalMasthead.module.css
+ * The portal masthead, broadcast direction (story 06, D2-001). Mobile-first; reads only
+ * the portal skin's CSS variables (F13 `SKIN_CSS_VARS`), so an exercise brand re-skins it
+ * and no default MUI look reaches it. Band text uses F13's derived `--pulse-skin-on-accent`
+ * (always >= 4.5:1 on the accent fill); the gold "Today" comes from `mastheadTone.ts`.
+ */
+
+.masthead {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background-color: var(--pulse-skin-bg);
+}
+
+.band {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  background-color: var(--pulse-skin-accent);
+  color: var(--pulse-skin-on-accent);
+  /* The red accent rule (D2-001); F13 keeps `breaking` >= 3:1 on the page bg. */
+  border-bottom: 4px solid var(--pulse-skin-breaking);
+}
+
+/* One line: brand on the left, the alerts entry on the right. */
+.nameLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.logo {
+  display: block;
+  flex: none;
+  height: 32px;
+  width: auto;
+  max-width: 96px;
+  object-fit: contain;
+}
+
+.name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--pulse-skin-font-masthead);
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--pulse-skin-on-accent);
+}
+
+.today {
+  color: var(--portal-masthead-today, var(--pulse-skin-on-accent));
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.alertsEntry {
+  flex: none;
+  color: var(--pulse-skin-on-accent);
+}
+
+.metaLine {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Phones: the band is the name line plus the dateline; the tagline drops. */
+.tagline {
+  display: none;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--pulse-skin-font-dek);
+  font-size: 0.9375rem;
+  color: var(--pulse-skin-on-accent);
+}
+
+.dateline {
+  flex: none;
+  margin-left: auto;
+  color: var(--pulse-skin-on-accent);
+  font-family: var(--pulse-skin-font-kicker);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* The hero area: a positioned box so the EXERCISE watermark slot sits on it (NFR-008). */
+.hero {
+  position: relative;
+  min-width: 0;
+}
+
+@media (min-width: 480px) {
+  .tagline {
+    display: block;
+  }
+}
+
+@media (min-width: 768px) {
+  .band {
+    padding: 14px 24px;
+  }
+
+  .logo {
+    height: 44px;
+    max-width: 140px;
+  }
+
+  .name {
+    font-size: 2.25rem;
+  }
+}
