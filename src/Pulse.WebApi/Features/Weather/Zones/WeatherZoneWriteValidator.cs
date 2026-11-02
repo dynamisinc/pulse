@@ -21,6 +21,9 @@ public static class WeatherZoneWriteValidator
     public const string SlugImmutableMessage =
         "slug cannot be changed after the zone is created (products and forecasts reference it).";
 
+    /// <summary>The highest <c>sortOrder</c> a zone may take (so "last" can always be one more without overflowing).</summary>
+    public const int MaxSortOrder = 100_000;
+
     /// <summary>Parses and validates a write body.</summary>
     /// <param name="request">The untrusted body, or null.</param>
     /// <param name="existing">The zone being edited (a PUT), or null for a create.</param>
@@ -71,9 +74,9 @@ public static class WeatherZoneWriteValidator
             CheckText("description", description, WeatherZone.MaxDescriptionLength, errors);
         }
 
-        if (request.SortOrder is < 0)
+        if (request.SortOrder is < 0 or > MaxSortOrder)
         {
-            errors.Add("sortOrder must not be negative.");
+            errors.Add($"sortOrder must be between 0 and {MaxSortOrder}.");
         }
 
         if (existing is not null && request.Version is null)

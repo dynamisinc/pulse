@@ -107,7 +107,7 @@ public sealed class WeatherZoneIsolationTests
         }
 
         host.ActAs(exerciseId: null, staffUserId: a.StaffUserId);
-        (await host.GetAsync("/api/weather/zones")).StatusCode.Should().NotBe(HttpStatusCode.OK, "no scope, no zones");
+        (await host.GetAsync("/api/weather/zones")).StatusCode.Should().Be(HttpStatusCode.NotFound, "no scope: the channel gate fails closed");
         (await host.PostAsync("/api/weather/zones", WeatherZoneTestHost.Body(slug: "x"))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

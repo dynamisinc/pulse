@@ -263,6 +263,8 @@ public sealed partial class WeatherZoneService
             return WeatherZoneResult.Invalid<WeatherZoneStaffDto>(parse.Error!);
         }
 
+        // The EFFECTIVE default, as every list shows it: after a lost race storage may flag none, and the zone the API calls
+        // the default still cannot be un-defaulted.
         var wasDefault = EffectiveDefault(live) == zone;
         if (request!.Version != zone.Version)
         {
@@ -285,6 +287,7 @@ public sealed partial class WeatherZoneService
             ClearOtherDefaults(live, zone);
         }
 
+        var readVersion = zone.Version;
         zone.Version++;
         var defaultZone = EffectiveDefault(SortForDisplay(live));
         _dbContext.TelemetryEvents.Add(WeatherZoneTelemetry.ForZone(
@@ -298,7 +301,7 @@ public sealed partial class WeatherZoneService
         {
             _dbContext.ChangeTracker.Clear();
             LogLostRace(ex, WeatherZoneTelemetry.ActionEdit);
-            return await ConflictWithCurrentAsync(zoneId, cancellationToken);
+            return await ConflictWithCurrentAsync(zoneId, readVersion, cancellationToken);
         }
 
         return WeatherZoneResult.Ok(ToStaffDto(zone, defaultZone == zone));
@@ -346,14 +349,16 @@ public sealed partial class WeatherZoneService
         var remaining = live.Where(row => row != zone).ToList();
         if (wasDefault && remaining.Count > 0)
         {
-            // Promote the first remaining zone (display order); bump it so a concurrent edit of it is a 409, not a lost flag.
-            var promoted = remaining[0];
+            // Promote the remaining zone the lists already treat as the default (a flagged one left by a lost race, else the
+            // first in display order); bump it so a concurrent edit of it is a 409, not a lost flag.
+            var promoted = EffectiveDefault(remaining)!;
             promoted.IsDefault = true;
             promoted.Version++;
             ClearOtherDefaults(remaining, promoted);
         }
 
         var time = await TimeForAsync(caller.ExerciseId, cancellationToken);
+        var readVersion = zone.Version;
         zone.IsDefault = false;
         zone.Version++;
 
@@ -372,7 +377,7 @@ public sealed partial class WeatherZoneService
         {
             _dbContext.ChangeTracker.Clear();
             LogLostRace(ex, WeatherZoneTelemetry.ActionDelete);
-            return await ConflictWithCurrentAsync(zoneId, cancellationToken);
+            return await ConflictWithCurrentAsync(zoneId, readVersion, cancellationToken);
         }
 
         return WeatherZoneResult.Deleted<WeatherZoneStaffDto>();
@@ -452,13 +457,24 @@ public sealed partial class WeatherZoneService
             : $"slug '{slug}' belongs to a deleted weather zone and stays reserved (historic products still name it).";
     }
 
-    private async Task<WeatherZoneResult<WeatherZoneStaffDto>> ConflictWithCurrentAsync(Guid zoneId, CancellationToken cancellationToken)
+    /// <summary>
+    /// The 409 after a save lost a race. When the target zone itself still has the version the caller read, the row that
+    /// moved was a side-effect one (the old or the promoted default), so the message says the zones changed, not this zone.
+    /// </summary>
+    private async Task<WeatherZoneResult<WeatherZoneStaffDto>> ConflictWithCurrentAsync(
+        Guid zoneId,
+        int readVersion,
+        CancellationToken cancellationToken)
     {
         var live = await ReadLiveAsync(tracked: false, cancellationToken);
         var current = live.FirstOrDefault(row => row.Id == zoneId);
-        return current is null
-            ? WeatherZoneResult.Conflict<WeatherZoneStaffDto>(DeletedMessage, null)
-            : WeatherZoneResult.Conflict<WeatherZoneStaffDto>(StaleVersionMessage, ToStaffDto(current, EffectiveDefault(live) == current));
+        if (current is null)
+        {
+            return WeatherZoneResult.Conflict<WeatherZoneStaffDto>(DeletedMessage, null);
+        }
+
+        var message = current.Version == readVersion ? ZonesChangedMessage : StaleVersionMessage;
+        return WeatherZoneResult.Conflict<WeatherZoneStaffDto>(message, ToStaffDto(current, EffectiveDefault(live) == current));
     }
 
     /// <summary>

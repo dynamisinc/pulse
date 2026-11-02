@@ -197,6 +197,49 @@ public sealed class WeatherZoneEndpointsTests
     }
 
     [RequiresDockerFact]
+    public async Task ADeleteOfTheDefault_WhosePromotedZoneMovesAtTheSave_Is409_AndDeletesNothing()
+    {
+        var bumper = new ConcurrentZoneVersionBumper();
+        await using var host = await WeatherZoneTestHost.StartAsync(
+            _fixture.ConnectionString!, services => services.AddSingleton<IInterceptor>(bumper));
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        var north = await host.CreateOkAsync(WeatherZoneTestHost.Body());
+        var harbor = await host.CreateOkAsync(WeatherZoneTestHost.Body(slug: "harbor-point", name: "Harbor Point"));
+        bumper.Arm(harbor.Guid, host.ConnectionString); // the zone the delete would promote
+
+        var problem = await WeatherZoneTestHost.ProblemAsync(await host.DeleteAsync(north.Guid, version: 1));
+
+        problem.Status.Should().Be(409);
+        problem.Detail.Should().Be(WeatherZoneService.ZonesChangedMessage, "north itself did not change; the promoted zone did");
+        problem.Item!.Version.Should().Be(1);
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.WeatherZones.SingleAsync(z => z.Id == north.Guid)).Should().Match<WeatherZone>(z => z.IsDefault && z.DeletedAt == null);
+        (await host.ZoneEventsAsync(seeded.ExerciseId)).Should().HaveCount(2, "only the two creates");
+    }
+
+    [RequiresDockerFact]
+    public async Task ACreateThatMovesTheDefault_WhoseOldDefaultMovesAtTheSave_Is409_AndCreatesNothing()
+    {
+        var bumper = new ConcurrentZoneVersionBumper();
+        await using var host = await WeatherZoneTestHost.StartAsync(
+            _fixture.ConnectionString!, services => services.AddSingleton<IInterceptor>(bumper));
+        var seeded = await host.SeedExerciseAsync();
+        host.ActAs(seeded.ExerciseId, seeded.StaffUserId);
+        var north = await host.CreateOkAsync(WeatherZoneTestHost.Body());
+        bumper.Arm(north.Guid, host.ConnectionString); // the old default the create would clear
+
+        var problem = await WeatherZoneTestHost.ProblemAsync(
+            await host.PostAsync("/api/weather/zones", WeatherZoneTestHost.Body(slug: "harbor-point", name: "Harbor Point", isDefault: true)));
+
+        problem.Status.Should().Be(409);
+        problem.Detail.Should().Be(WeatherZoneService.ZonesChangedMessage);
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.IncludingSoftDeleted<WeatherZone>().CountAsync()).Should().Be(1, "the losing create rolled back");
+        (await host.ZoneEventsAsync(seeded.ExerciseId)).Should().ContainSingle();
+    }
+
+    [RequiresDockerFact]
     public async Task AddingTheDefaultWeatherOutlet_CreatesNoZone()
     {
         await using var host = await WeatherZoneTestHost.StartAsync(_fixture.ConnectionString!);

@@ -115,6 +115,9 @@ public sealed class WeatherZoneServiceTests : IDisposable
         undefault.Outcome.Should().Be(WeatherZoneOutcome.Invalid);
         undefault.Message.Should().Be(WeatherZoneService.DefaultRequiredMessage);
 
+        var badOrder = await _harness.Service(exercise, staff).UpdateAsync(id, WeatherZoneHarness.Body(sortOrder: int.MaxValue, version: 1));
+        badOrder.Outcome.Should().Be(WeatherZoneOutcome.Invalid);
+
         var missingVersion = await _harness.Service(exercise, staff).UpdateAsync(id, WeatherZoneHarness.Body());
         missingVersion.Outcome.Should().Be(WeatherZoneOutcome.Invalid);
 
@@ -296,13 +299,14 @@ public sealed class WeatherZoneServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ASecondWriterOnTheSameReadVersion_GetsA409WithTheCurrentZone()
+    public async Task AWriterHoldingAStaleVersion_GetsA409WithTheCurrentZone()
     {
         var (exercise, staff) = _harness.NewExercise();
         var created = (await _harness.Service(exercise, staff).CreateAsync(WeatherZoneHarness.Body())).Value!;
         var id = Guid.Parse(created.Id);
 
-        // Both writers read version 1; the second one's write is refused with the first one's result attached.
+        // Both callers last saw version 1; the second one's write is refused with the first one's result attached. (The
+        // race lost AT the save, on SQL Server, is WeatherZoneEndpointsTests.)
         var slow = _harness.Service(exercise, staff);
         var fast = _harness.Service(exercise, staff);
         (await fast.UpdateAsync(id, WeatherZoneHarness.Body(name: "Fast", version: 1))).Outcome.Should().Be(WeatherZoneOutcome.Ok);
