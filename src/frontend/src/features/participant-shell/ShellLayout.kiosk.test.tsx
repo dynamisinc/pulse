@@ -335,6 +335,7 @@ describe('ShellLayout kiosk — accessibility (AC6, NFR-001)', () => {
     const focusable = within(container).getByTestId('pulse-shell-root').querySelectorAll(
       'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
     )
+    expect(focusable.length).toBeGreaterThan(0)
     for (const element of focusable) expect(bar.contains(element)).toBe(true)
   })
 })
