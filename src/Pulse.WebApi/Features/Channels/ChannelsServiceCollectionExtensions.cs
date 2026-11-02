@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Channels;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
@@ -41,6 +42,9 @@ public static class ChannelsServiceCollectionExtensions
 
         // Story 04: the content publish funnel (IContentPublishService), its sanitizer profiles and startup check.
         services.AddContentPublishFunnel();
+
+        // Story 05: the scheduled-publish runner (hosted service) over the funnel.
+        services.AddContentScheduling();
 
         // Story 03, the outlet registry.
         services.TryAddSingleton(TimeProvider.System);

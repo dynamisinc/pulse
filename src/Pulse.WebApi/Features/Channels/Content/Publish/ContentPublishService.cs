@@ -291,6 +291,13 @@ public sealed partial class ContentPublishService : IContentPublishService
 
         var (item, descriptor, exerciseId) = (load.Item!, load.Descriptor!, load.ExerciseId);
 
+        // Story 05: an item drafted or scheduled earlier is re-checked as it goes live, so a scheduled publish whose outlet
+        // was deleted, or whose payload no longer validates, is refused (and the runner returns it to draft).
+        if (await WhyNotPublishableAsync(item, descriptor, exerciseId, cancellationToken) is { Count: > 0 } unpublishable)
+        {
+            return Invalid([.. unpublishable]);
+        }
+
         var gate = await EvaluateGatesAsync(item, PublishContext.Publish, caller, cancellationToken);
         if (gate.Held is { } held)
         {
@@ -304,8 +311,17 @@ public sealed partial class ContentPublishService : IContentPublishService
         var (resolved, _) = PublishOptionsResolver.Resolve(callOptions, item, descriptor);
 
         var time = await ClockAsync(exerciseId, cancellationToken);
+
+        // Story 05 (COR-051): a scheduled item that is already due goes live AT its own scheduled scenario time, so a
+        // runner tick after a forward jump (or a restart) never stamps the jump target and the timeline stays honest.
+        // An early publish-now of a not-yet-due item stamps now.
+        var publishedAt = item.Status == ChannelVocabulary.StatusScheduled
+            && item.ScheduledScenarioTime is { } due
+            && due < time.ScenarioTime
+                ? due
+                : time.ScenarioTime;
         item.Status = ChannelVocabulary.StatusPublished;
-        item.PublishedScenarioTime = time.ScenarioTime;
+        item.PublishedScenarioTime = publishedAt;
         item.PublishedWallClock = time.WallClock;
         item.LastError = null;
         if (caller.InjectId is { } injectId)

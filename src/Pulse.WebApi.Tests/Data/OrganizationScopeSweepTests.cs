@@ -150,7 +150,9 @@ public sealed class OrganizationScopeSweepTests
         // own per-exercise scope).
         // channels-foundation 08 (#704): +1 for ChannelEnablement.IsEnabledAsync — the enablement gate's read of the
         // resolved exercise's EnabledChannels by the IExerciseContext id.
-        ["ResolvedScope"] = 34,
+        // channels-foundation 05 (#701): +1 for ContentScheduleRunner.RunTickAsync — the scheduler's read of the exercises
+        // its own trusted discovery read found (each one's tenant and persisted scenario time for its per-item scope).
+        ["ResolvedScope"] = 35,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

@@ -195,6 +195,8 @@ export interface ChannelContentStaffDto extends Omit<ChannelContentDto, 'state' 
   readonly origin: ContentOrigin
   readonly actingHumanId: string
   readonly scheduledScenarioTime: string | null
+  /** Why the last scheduled publish was refused (the item went back to draft), else null. Staff-only. */
+  readonly lastError: string | null
   /** Wall clock: staff-only, never shown in-fiction. */
   readonly publishedWallClock: string | null
   readonly background: boolean
@@ -208,7 +210,7 @@ export interface ChannelContentStaffDto extends Omit<ChannelContentDto, 'state' 
 }
 export const CHANNEL_CONTENT_STAFF_KEYS = wireKeys<ChannelContentStaffDto>()([
   ...CHANNEL_CONTENT_KEYS,
-  'status', 'origin', 'actingHumanId', 'scheduledScenarioTime', 'publishedWallClock', 'background',
+  'status', 'origin', 'actingHumanId', 'scheduledScenarioTime', 'lastError', 'publishedWallClock', 'background',
   'featuredRank', 'injectId', 'externalSource', 'externalRef', 'revisionCount', 'revisionLog', 'version',
 ])
 

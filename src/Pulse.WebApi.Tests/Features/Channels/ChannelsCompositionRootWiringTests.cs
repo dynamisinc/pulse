@@ -23,10 +23,12 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
 using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Xunit;
 
@@ -249,6 +251,24 @@ public sealed class ChannelsCompositionRootWiringTests
     /// Boots the real <c>Program</c> host with a dummy, never-connecting connection string. When asked, every request
     /// resolves to a fixed exercise (a scope from the bare Host header, and still no session). Overrides nothing else.
     /// </summary>
+    [Fact]
+    public void ProgramCs_RegistersTheContentScheduleRunner_ThroughAddChannels()
+    {
+        // Story 05: the runner is a hosted service on the REAL host, woken by clock changes; no Program.cs edit.
+        using var factory = new WiringProbeFactory();
+        factory.Services.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle();
+        factory.Services.GetServices<IExerciseClockChangeObserver>().OfType<ContentScheduleClockObserver>().Should().ContainSingle();
+
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+        scope.ServiceProvider.GetRequiredService<IContentScheduleFailureRecorder>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<ScheduledByReader>().Should().NotBeNull();
+
+        var twice = new ServiceCollection().AddChannels().AddChannels();
+        twice.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ContentScheduleRunner))
+            .Should().Be(1, "the runner runs once per host however often AddChannels() is called");
+    }
+
     private sealed class WiringProbeFactory : WebApplicationFactory<Program>
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
