@@ -5,7 +5,7 @@
  *
  * A module story registers itself once (`registerPortalModule` from its
  * `modules/<id>/register.ts`) and `PortalLayout` mounts it with no change to
- * layout code. Registering the same id twice throws: two modules fighting over
+ * layout code. Registering a second module for an id throws: two modules fighting over
  * one slot is a wiring bug, never a runtime choice. So does a `channelId`
  * that is not the module's PC-1 source channel, because enablement (F08)
  * hides a module by that channel.
@@ -43,13 +43,28 @@ function assertValid(registration: PortalModuleRegistration): void {
   }
 }
 
-export function createPortalModuleRegistry(): PortalModuleRegistry {
+export interface PortalModuleRegistryOptions {
+  /**
+   * Replace an existing id instead of throwing. Only for the dev server's hot
+   * reload, which re-runs a `register.ts` with a fresh component.
+   */
+  readonly replaceDuplicates?: boolean
+}
+
+export function createPortalModuleRegistry(
+  options: PortalModuleRegistryOptions = {},
+): PortalModuleRegistry {
   const entries = new Map<PortalModuleId, PortalModuleRegistration>()
   return {
     register: registration => {
       assertValid(registration)
-      if (entries.has(registration.id)) {
-        throw new Error(`registerPortalModule: module '${registration.id}' is already registered`)
+      const existing = entries.get(registration.id)
+      if (existing) {
+        // The very same component again (one module reached by two import paths) is a no-op.
+        if (existing.Component === registration.Component) return
+        if (!options.replaceDuplicates) {
+          throw new Error(`registerPortalModule: module '${registration.id}' is already registered`)
+        }
       }
       entries.set(registration.id, registration)
     },
@@ -58,8 +73,14 @@ export function createPortalModuleRegistry(): PortalModuleRegistry {
   }
 }
 
-/** The app's registry, the one `PortalLayout` uses unless given another. */
-export const portalModuleRegistry: PortalModuleRegistry = createPortalModuleRegistry()
+/**
+ * The app's registry, the one `PortalLayout` uses unless given another. Under
+ * the dev server's hot reload a re-run `register.ts` replaces its entry;
+ * everywhere else (build, tests) a second module for one id throws.
+ */
+export const portalModuleRegistry: PortalModuleRegistry = createPortalModuleRegistry({
+  replaceDuplicates: import.meta.hot !== undefined && import.meta.env.MODE !== 'test',
+})
 
 /** Registers a module in the app registry (PC-5). Throws on a duplicate id. */
 export function registerPortalModule(registration: PortalModuleRegistration): void {

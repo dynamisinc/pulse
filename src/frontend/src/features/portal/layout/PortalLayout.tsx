@@ -11,9 +11,12 @@
  *
  * Clean hiding (D2-005), "the page must look complete with any subset":
  *  - an id with no registered module is skipped, never framed;
- *  - once the enabled set is known, a module whose channel is off is dropped
- *    (a live toggle never leaves a stale module);
- *  - a module that reports `empty` / `error` hides itself (`ModuleFrame`);
+ *  - `modules` is already filtered server-side to enabled + available
+ *    (PC-3), so while the enabled set loads the list is trusted; once it is
+ *    known, a module whose channel is off is dropped (a live toggle never
+ *    leaves a stale module);
+ *  - a module that reports `empty` / `error`, or throws while rendering
+ *    (`ModuleErrorBoundary`), hides itself;
  *  - a region with nothing visible collapses entirely, and the other region
  *    takes the full width;
  *  - with nothing at all, no grid is rendered (no empty frame).
@@ -30,11 +33,12 @@ import { useOptionalPortalFrameEnvironment, usePortalFrameEnvironment } from './
 import { PortalLayoutSlotContext, type PortalLayoutSlot } from './layoutSlot'
 import { placePortalModules, type PlacedPortalModule } from './placeModules'
 import { portalModuleRegistry, type PortalModuleRegistry } from './registry'
-import type { PortalRegion } from './types'
+import { ModuleErrorBoundary } from './ModuleErrorBoundary'
+import type { PortalModuleClickTarget, PortalRegion } from './types'
 import styles from './PortalLayout.module.css'
 
 export interface PortalLayoutProps {
-  /** `PortalDto.layoutKey`. Only `anchor` exists in December (D2-003). */
+  /** `PortalDto.layoutKey`. Only `anchor` exists in December (D2-003), the only grid rendered. */
   readonly layoutKey: PortalLayoutKey
   /** `PortalDto.modules`: the enabled, available modules in stored order. */
   readonly modules: readonly PortalModuleDto[]
@@ -46,14 +50,35 @@ export interface PortalLayoutProps {
   readonly registry?: PortalModuleRegistry
 }
 
-function Region(
-  { region, items, hiddenIds }: {
+/** One mounted module: a stable bound `trackClick` and its own error boundary. */
+function MountedModule(
+  { registration, region, onHidden }: {
+    readonly registration: PlacedPortalModule['registration']
     readonly region: PortalRegion
-    readonly items: readonly PlacedPortalModule[]
-    readonly hiddenIds: ReadonlySet<PortalModuleId>
+    readonly onHidden: PortalLayoutSlot['setModuleHidden']
   },
 ) {
   const { trackClick } = usePortalFrameEnvironment()
+  const { Component, id } = registration
+  const boundTrackClick = useCallback(
+    (target?: PortalModuleClickTarget) => trackClick(id, target),
+    [trackClick, id],
+  )
+  return (
+    <ModuleErrorBoundary moduleId={id} onHidden={onHidden}>
+      <Component moduleId={id} region={region} trackClick={boundTrackClick} />
+    </ModuleErrorBoundary>
+  )
+}
+
+function Region(
+  { region, items, hiddenIds, onHidden }: {
+    readonly region: PortalRegion
+    readonly items: readonly PlacedPortalModule[]
+    readonly hiddenIds: ReadonlySet<PortalModuleId>
+    readonly onHidden: PortalLayoutSlot['setModuleHidden']
+  },
+) {
   if (items.length === 0) return null
   const collapsed = items.every(item => hiddenIds.has(item.registration.id))
   return (
@@ -62,17 +87,14 @@ function Region(
       data-portal-region={region}
       hidden={collapsed || undefined}
     >
-      {items.map(({ registration }) => {
-        const { Component, id } = registration
-        return (
-          <Component
-            key={id}
-            moduleId={id}
-            region={region}
-            trackClick={target => trackClick(id, target)}
-          />
-        )
-      })}
+      {items.map(({ registration }) => (
+        <MountedModule
+          key={registration.id}
+          registration={registration}
+          region={region}
+          onHidden={onHidden}
+        />
+      ))}
     </div>
   )
 }
@@ -116,8 +138,8 @@ function LayoutGrid(props: PortalLayoutProps) {
             hidden={(!leadFilled && !railFilled) || undefined}
             data-testid="portal-layout-grid"
           >
-            <Region region="lead" items={placed.lead} hiddenIds={hiddenIds} />
-            <Region region="rail" items={placed.rail} hiddenIds={hiddenIds} />
+            <Region region="lead" items={placed.lead} hiddenIds={hiddenIds} onHidden={setModuleHidden} />
+            <Region region="rail" items={placed.rail} hiddenIds={hiddenIds} onHidden={setModuleHidden} />
           </div>
         </PortalLayoutSlotContext.Provider>
       )}

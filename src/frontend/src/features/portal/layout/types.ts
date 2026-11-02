@@ -56,7 +56,11 @@ export type PortalModuleRegistration = {
      * stored order in `PortalDto.modules` always wins.
      */
     readonly order: number
-    /** Renders the module. It must render through `ModuleFrame`. */
+    /**
+     * Renders the module through exactly ONE `ModuleFrame` (hidden state is
+     * keyed by module id). Returning `null` directly would leave an empty
+     * region uncollapsed: hand `ModuleFrame` `status="empty"` instead.
+     */
     readonly Component: ComponentType<PortalModuleProps>
     /** Optional kiosk slide rendering (the slides player is Deferred, Q-35). */
     readonly DisplaySlide?: ComponentType<PortalModuleProps>

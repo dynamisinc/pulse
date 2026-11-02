@@ -26,7 +26,6 @@ export { LivePortalFrameEnvironment, PortalFrameEnvironmentProvider } from './fr
 export type { PortalFrameEnvironmentProviderProps } from './frameEnvironment'
 export { usePortalFrameEnvironment } from './frameEnvironmentContext'
 export type { PortalFrameEnvironment } from './frameEnvironmentContext'
-export { usePortalModuleClickTelemetry } from './moduleClickTelemetry'
 export { PORTAL_CHANNEL_HOME_PATHS, channelHomePath } from './channelHome'
 export { MODULE_FRAME_STATUSES, PORTAL_REGIONS } from './types'
 export type {

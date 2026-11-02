@@ -49,7 +49,7 @@ export const PORTAL_LAYOUT_SUBSETS: readonly (readonly PortalModuleId[])[] = Arr
   .flatMap(content => [content as readonly PortalModuleId[], [...content, 'trending'] as const])
   .sort((a, b) => a.length - b.length)
 
-/** The D2 homepage placement the stubs use: lead = stories + press, rail = social, weather, trending. */
+/** The D2 placement the stubs use: lead = stories + press; rail = social, weather, trending. */
 type StubPlacement = { readonly region: PortalRegion; readonly order: number }
 
 export const STUB_MODULE_PLACEMENT: Readonly<Record<PortalModuleId, StubPlacement>> = {
@@ -130,10 +130,11 @@ export function renderPortalSubset(
     registry.register(real.get(id) ?? stubRegistration(id, fixtures.statuses?.[id] ?? 'ready'))
   }
 
-  // Stored order = the PC-1 default order, filtered to the subset.
+  // Stored order = each registration's `order` (a real module's own), filtered to the subset.
+  const orderOf = (id: PortalModuleId) => registry.get(id)?.order ?? STUB_MODULE_PLACEMENT[id].order
   const modules = PORTAL_MODULE_IDS
     .filter(id => subset.includes(id))
-    .sort((a, b) => STUB_MODULE_PLACEMENT[a].order - STUB_MODULE_PLACEMENT[b].order)
+    .sort((a, b) => orderOf(a) - orderOf(b))
     .map(id => ({ id, channelId: PORTAL_MODULE_CHANNELS[id] }) as PortalModuleDto)
 
   const enabled = new Set<string>(

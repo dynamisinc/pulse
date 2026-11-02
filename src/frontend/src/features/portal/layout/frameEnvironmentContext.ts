@@ -15,19 +15,20 @@
  */
 
 import { createContext, useContext } from 'react'
-import type { PortalModuleId } from '../contract'
+import type { PortalModuleChannelId, PortalModuleId } from '../contract'
 import type { PortalModuleClickTarget } from './types'
 
 export interface PortalFrameEnvironment {
   /** Whether `channelId` is enabled now. `false` while unknown (fail closed). */
-  readonly isChannelEnabled: (channelId: string) => boolean
+  readonly isChannelEnabled: (channelId: PortalModuleChannelId) => boolean
   /** `true` once the enabled set is known (before that, trust the server's module list). */
   readonly channelsKnown: boolean
   /** `ModuleFrame.trackClick(moduleId, target)`: one PC-6 event per call. */
   readonly trackClick: (moduleId: PortalModuleId, target?: PortalModuleClickTarget) => void
 }
 
-export const PortalFrameEnvironmentContext = createContext<PortalFrameEnvironment | undefined>(undefined)
+export const PortalFrameEnvironmentContext =
+  createContext<PortalFrameEnvironment | undefined>(undefined)
 
 const CLOSED_ENVIRONMENT: PortalFrameEnvironment = {
   isChannelEnabled: () => false,

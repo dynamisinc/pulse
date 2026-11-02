@@ -45,9 +45,12 @@ only (a new optional field), never by renaming or narrowing.
    wins. `DisplaySlide` is optional (kiosk slides are Deferred, Q-35). Importing the
    `register.ts` files is orchestrator-owned (`features/portal/modules/index.ts`, story 17).
 
-Modules never call the telemetry emitter. Never render a heading above `h2` (the masthead
-owns the `h1`). Give in-module links and controls a 44 px target under `(pointer: coarse)`
-and a visible `:focus-visible` style.
+Modules never call the telemetry emitter. Every in-module link is a `ModuleLink`: it takes
+every router `Link` prop (`aria-label`, `ref`, `state`, `data-*`, ...), and a bare `Link`
+inside a module is a telemetry gap. `ModuleLink` carries a base class with a 44 px target
+under `(pointer: coarse)` and a visible `:focus-visible` ring; your `className` merges on top.
+Give any non-link control the same. Never render a heading above `h2` (the masthead owns
+the `h1`). Pass `moduleId` from your props to `ModuleFrame` / `ModuleLink` unchanged.
 
 ## `PortalLayout`
 
@@ -88,7 +91,7 @@ const { clicks } = renderPortalSubset(['topStories', 'weather'], {
 })
 ```
 
-The harness uses an isolated registry and a fake environment that records every
+The stored order follows each registration's `order` (yours for a real module). The harness uses an isolated registry and a fake environment that records every
 `trackClick` in `clicks` (it emits no telemetry). `PORTAL_LAYOUT_SUBSETS` holds all 32
 subsets: 2^4 content modules, each with Trending absent and present. It is test-only, so
 never import `layout/testing` from app code.

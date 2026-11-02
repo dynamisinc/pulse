@@ -24,8 +24,34 @@ describe('portal module registry', () => {
   it('throws when the same id registers twice', () => {
     const registry = createPortalModuleRegistry()
     registry.register(registration())
-    expect(() => registry.register(registration({ order: 99 }))).toThrow(/already registered/)
+    const Other = () => null
+    expect(() => registry.register(registration({ Component: Other })))
+      .toThrow(/already registered/)
     expect(registry.list()).toHaveLength(1)
+  })
+
+  it('treats re-registering the same component as a no-op (two import paths)', () => {
+    const registry = createPortalModuleRegistry()
+    registry.register(registration())
+    expect(() => registry.register(registration({ order: 99 }))).not.toThrow()
+    expect(registry.get('topStories')?.order).toBe(10)
+  })
+
+  it('replaces instead of throwing only when asked (dev hot reload)', () => {
+    const registry = createPortalModuleRegistry({ replaceDuplicates: true })
+    registry.register(registration())
+    const Next = () => null
+    registry.register(registration({ Component: Next }))
+    expect(registry.get('topStories')?.Component).toBe(Next)
+  })
+
+  it('the app registry throws on a second module for an id outside hot reload', async () => {
+    const { portalModuleRegistry } = await import('./registry')
+    const Other = () => null
+    portalModuleRegistry.register(registration({ id: 'pressLatest', channelId: 'press', Component }))
+    expect(() => portalModuleRegistry.register(
+      registration({ id: 'pressLatest', channelId: 'press', Component: Other }),
+    )).toThrow(/already registered/)
   })
 
   it('rejects a channel that is not the module\'s PC-1 source channel', () => {

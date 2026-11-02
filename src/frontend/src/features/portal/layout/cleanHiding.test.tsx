@@ -5,7 +5,7 @@
  * no orphaned heading, no dead "See all" link, and an empty rail collapses.
  */
 import { screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PortalModuleId } from '../contract'
 import { PORTAL_CHANNEL_HOME_PATHS } from './channelHome'
 import { PORTAL_LAYOUT_SUBSETS, STUB_MODULE_PLACEMENT, STUB_MODULE_TITLES, renderPortalSubset } from './testing'
@@ -50,7 +50,7 @@ describe.each(PORTAL_LAYOUT_SUBSETS.map(subset => [label(subset), subset] as con
         const heading = within(section).getByRole('heading', { level: 2 })
         expect(heading.textContent).toBe(STUB_MODULE_TITLES[id])
         expect(section.getAttribute('aria-labelledby')).toBe(heading.id)
-        // Each "See all" goes to an enabled channel's home (the subset's channels are the enabled set).
+        // Each "See all" goes to an enabled channel's home (the subset's channels are enabled).
         const seeAll = within(section).getByTestId('module-see-all')
         expect(Object.values(PORTAL_CHANNEL_HOME_PATHS)).toContain(seeAll.getAttribute('href'))
       }
@@ -91,6 +91,29 @@ describe('runtime hiding', () => {
     })
     expect(mountedGrid().dataset.rail).toBe('empty')
     expect(mountedGrid().dataset.lead).toBe('filled')
+    expect(region(container, 'rail')?.hidden).toBe(true)
+  })
+
+  it('a lead whose modules all go empty collapses and the rail takes the width', () => {
+    const { container } = renderPortalSubset(['topStories', 'pressLatest', 'weather'], {
+      statuses: { topStories: 'error', pressLatest: 'empty' },
+    })
+    expect(mountedGrid().dataset.lead).toBe('empty')
+    expect(mountedGrid().dataset.rail).toBe('filled')
+    expect(region(container, 'lead')?.hidden).toBe(true)
+  })
+
+  it('a module that throws while rendering hides itself; the rest of the page stays', () => {
+    const silence = vi.spyOn(console, 'error').mockImplementation(() => {})
+    function Broken(): never {
+      throw new Error('module bug')
+    }
+    const { container } = renderPortalSubset(['topStories', 'socialStream'], {
+      registrations: [{ id: 'socialStream', channelId: 'social', region: 'rail', order: 30, Component: Broken }],
+    })
+    silence.mockRestore()
+    expect(sections(container).map(section => section.dataset.portalModule)).toEqual(['topStories'])
+    expect(mountedGrid().dataset.rail).toBe('empty')
     expect(region(container, 'rail')?.hidden).toBe(true)
   })
 

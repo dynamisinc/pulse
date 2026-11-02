@@ -18,9 +18,13 @@ export interface PortalFrameEnvironmentProviderProps {
 }
 
 /** Provides an explicit environment (the subset harness, tests). */
-export function PortalFrameEnvironmentProvider({ value, children }: PortalFrameEnvironmentProviderProps) {
+export function PortalFrameEnvironmentProvider(
+  { value, children }: PortalFrameEnvironmentProviderProps,
+) {
   return (
-    <PortalFrameEnvironmentContext.Provider value={value}>{children}</PortalFrameEnvironmentContext.Provider>
+    <PortalFrameEnvironmentContext.Provider value={value}>
+      {children}
+    </PortalFrameEnvironmentContext.Provider>
   )
 }
 

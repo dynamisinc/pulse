@@ -21,6 +21,7 @@ const SOURCES = import.meta.glob(['./**/*.{ts,tsx}', '!./**/*.test.{ts,tsx}'], {
 
 const GRID_CSS = readSrcFile('features/portal/layout/PortalLayout.module.css')
 const FRAME_CSS = readSrcFile('features/portal/layout/ModuleFrame.module.css')
+const LINK_CSS = readSrcFile('features/portal/layout/ModuleLink.module.css')
 
 function code(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1')
@@ -70,6 +71,8 @@ describe('layout: anchor grid', () => {
     expect(base).toMatch(/grid-template-areas:\s*'lead'\s*'rail'/)
   })
 
+  // A coarse guard: it catches 3-digit px lengths only (vw, 2-digit px and lengths on a
+  // max-width line slip through); the grid's own `minmax(0, 1fr)` is the real protection.
   it('has no fixed width outside the wide breakpoint (320 px never scrolls sideways)', () => {
     const narrow = GRID_CSS.replace(/@media \(min-width: 1024px\)\s*\{[\s\S]*?\n\}/, '') + FRAME_CSS
     // A max-width only caps; any other 3-digit px length could overflow 320 px.
@@ -82,6 +85,12 @@ describe('layout: touch and focus', () => {
   it('"See all" is at least 44 px on coarse pointers', () => {
     const coarse = FRAME_CSS.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
     expect(coarse).toMatch(/\.seeAll\s*\{[^}]*min-height:\s*44px/)
+  })
+
+  it('every ModuleLink gets a 44 px coarse target and a visible focus style', () => {
+    const coarse = LINK_CSS.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    expect(coarse).toMatch(/\.link\s*\{[^}]*min-height:\s*44px/)
+    expect(LINK_CSS).toMatch(/\.link:focus-visible\s*\{[^}]*outline:\s*3px solid/)
   })
 
   it('"See all" has a visible focus style', () => {

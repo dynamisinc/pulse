@@ -8,6 +8,7 @@
  */
 
 import type { PortalModuleDto, PortalModuleId } from '../contract'
+import type { PortalFrameEnvironment } from './frameEnvironmentContext'
 import type { PortalModuleRegistry } from './registry'
 import type { PortalModuleRegistration, PortalRegion } from './types'
 
@@ -23,7 +24,7 @@ export interface PlacedPortalModule {
 export function placePortalModules(
   modules: readonly PortalModuleDto[],
   registry: PortalModuleRegistry,
-  isChannelEnabled: ((channelId: string) => boolean) | null,
+  isChannelEnabled: PortalFrameEnvironment['isChannelEnabled'] | null,
 ): Readonly<Record<PortalRegion, readonly PlacedPortalModule[]>> {
   const placed: Record<PortalRegion, PlacedPortalModule[]> = { lead: [], rail: [] }
   const seen = new Set<PortalModuleId>()

@@ -18,7 +18,6 @@
  */
 
 import { useId, useLayoutEffect, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { LiveRegionAnnouncer } from '@/features/channels/primitives'
@@ -26,6 +25,7 @@ import { PORTAL_MODULE_CHANNELS, type PortalModuleId } from '../contract'
 import { channelHomePath } from './channelHome'
 import { usePortalFrameEnvironment } from './frameEnvironmentContext'
 import { usePortalLayoutSlot } from './layoutSlot'
+import { ModuleLink } from './ModuleLink'
 import type { ModuleFrameStatus } from './types'
 import styles from './ModuleFrame.module.css'
 
@@ -77,17 +77,17 @@ export function ModuleFrame(props: ModuleFrameProps) {
       <div className={styles.header}>
         <h2 id={headingId} className={styles.heading}>{title}</h2>
         {showSeeAll && (
-          <Link
+          <ModuleLink
+            moduleId={moduleId}
             to={channelHomePath(channelId)}
             className={styles.seeAll}
-            onClick={() => environment.trackClick(moduleId)}
             // Distinct names per module; starts with the visible text (WCAG 2.5.3 label in name).
             aria-label={`${seeAllLabel} ${title}`}
             data-testid="module-see-all"
           >
             {seeAllLabel}
             <FontAwesomeIcon icon={faArrowRight} aria-hidden="true" className={styles.seeAllIcon} />
-          </Link>
+          </ModuleLink>
         )}
       </div>
       {announce && <LiveRegionAnnouncer arrivals={announce.arrivals} noun={announce.noun} />}

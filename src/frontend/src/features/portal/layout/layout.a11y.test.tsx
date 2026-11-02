@@ -27,6 +27,7 @@ describe('layout accessibility', () => {
   it('tabs through links in reading order (each module heading link, then its content)', async () => {
     const { container } = renderPortalSubset(FULL, { before: MASTHEAD })
     const domOrder = Array.from(container.querySelectorAll('a'))
+    expect(domOrder.length).toBe(10)
     const user = userEvent.setup()
     const reached: Element[] = []
     for (let i = 0; i < domOrder.length; i += 1) {
@@ -36,9 +37,12 @@ describe('layout accessibility', () => {
     expect(reached).toEqual(domOrder)
   })
 
-  it.each([FULL, ...PORTAL_LAYOUT_SUBSETS.filter(subset => subset.length <= 1)])(
+  const AXE_CASES = [FULL, ...PORTAL_LAYOUT_SUBSETS.filter(subset => subset.length <= 1)]
+    .map(subset => [subset.length ? subset.join('+') : '(none)', subset] as const)
+
+  it.each(AXE_CASES)(
     'axe reports no serious or critical violation (%s)',
-    async (...subset) => {
+    async (_name, subset) => {
       const { container } = renderPortalSubset(subset, { before: MASTHEAD })
       expect(await seriousAxeViolations(container)).toEqual([])
     },

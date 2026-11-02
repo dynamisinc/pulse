@@ -3,6 +3,7 @@
  * stock-MUI look. No fixed widths, so a frame fits a 320 px column. */
 
 .frame {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--pulse-skin-space, 8px);
@@ -41,7 +42,8 @@
   font-size: 0.9375rem;
   text-decoration: underline;
   text-underline-offset: 0.2em;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .seeAll:focus-visible {
