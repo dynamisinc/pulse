@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -85,6 +86,7 @@ public sealed class StaffContentServiceTests
         _ = draft;
         _ = published;
 
+        (await t.ListAsync(channel: "", status: "", outlet: " ", kind: "")).Should().HaveCount(5, "an empty filter is no filter");
         (await t.RunAsync(s => s.ListAsync(null, "live", null, null, null))).Outcome.Should().Be(StaffContentOutcome.Invalid);
         (await t.RunAsync(s => s.ListAsync(null, null, "not-a-guid", null, null))).Outcome.Should().Be(StaffContentOutcome.Invalid);
         (await t.RunAsync(s => s.ListAsync(null, null, null, null, 0))).Outcome.Should().Be(StaffContentOutcome.Invalid);
@@ -209,6 +211,16 @@ public sealed class StaffContentServiceTests
         }));
         payloadOnly.UpdatedScenarioTime.Should().Be(updated.UpdatedScenarioTime);
 
+        // The featured rank belongs to feature / reorder: a revise whose fields omit (or change) it keeps the stored one.
+        var featured = await t.OkAsync(s => s.FeatureAsync(id, new ContentFeatureRequest { Rank = 3 }));
+        var revisedAgain = await t.OkAsync(s => s.ReviseAsync(id, new ContentReviseRequest
+        {
+            Kind = "correction",
+            Note = "Corrected the lane count",
+            Fields = t.F.Request("Bridge reopened") with { Version = featured.Version, FeaturedRank = null },
+        }));
+        revisedAgain.FeaturedRank.Should().Be(3);
+
         (await t.RunAsync(s => s.ReviseAsync(id, new ContentReviseRequest { Kind = "update" })))
             .Outcome.Should().Be(StaffContentOutcome.Invalid, "fields are required");
         (await t.RunAsync(s => s.ReviseAsync(id, new ContentReviseRequest
@@ -253,6 +265,12 @@ public sealed class StaffContentServiceTests
         {
             json.TryGetProperty(staffOnly, out _).Should().BeFalse("{0} is staff-only (XC-002)", staffOnly);
         }
+
+        // The payload is the KIND's participant projection, never the raw stored payload (XC-002).
+        t.F.Article.Project = payload => new JsonObject { ["public"] = payload["breaking"]?.DeepClone() };
+        var projected = (ChannelContentDto)(await t.RunAsync(s => s.PreviewAsync(draft))).Value!;
+        projected.Payload.Should().ContainKey("public").And.NotContainKey("breaking");
+        t.F.Article.Project = null;
 
         var scheduled = await t.CreateAsync("Later");
         var at = t.Future();
@@ -309,6 +327,9 @@ public sealed class StaffContentServiceTests
         var c = Guid.Parse((await t.CreatePublishedAsync("C")).Id);
         await t.OkAsync(s => s.FeatureAsync(c, new ContentFeatureRequest { Rank = 1 }));
         var draft = await t.CreateAsync("Not live");
+        var gone = Guid.Parse((await t.CreatePublishedAsync("Gone")).Id);
+        await t.OkAsync(s => s.FeatureAsync(gone, new ContentFeatureRequest { Rank = 2 }));
+        await t.OkAsync(s => s.RetractAsync(gone));
 
         var result = await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [b, a] }));
 
@@ -316,6 +337,8 @@ public sealed class StaffContentServiceTests
         var items = result.Value.Should().BeAssignableTo<IReadOnlyList<ChannelContentStaffDto>>().Subject;
         items.Select(i => (i.Headline, i.FeaturedRank)).Should().Equal(("B", 1), ("A", 2));
         (await t.F.ItemAsync(c.ToString())).FeaturedRank.Should().BeNull("an item left off the list leaves the featured slot");
+        (await t.F.ItemAsync(gone.ToString())).FeaturedRank.Should().BeNull("a retracted item must not come back on restore at a given-away rank");
+        (await t.F.ItemAsync(a.ToString())).Version.Should().Be(items[1].Version, "every listed item's version moves with the order");
 
         // A stale (not published) or unknown id refuses the WHOLE reorder; nothing is applied.
         var stale = await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [a, draft] }));

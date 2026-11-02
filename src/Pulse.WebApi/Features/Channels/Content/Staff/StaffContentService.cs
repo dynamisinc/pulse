@@ -27,8 +27,11 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// </remarks>
 public sealed class StaffContentService
 {
-    /// <summary>The list's default page size.</summary>
-    public const int DefaultListLimit = 100;
+    /// <summary>
+    /// The list's default page size. Each row is the funnel's full staff projection (outlet, media and revisions: a few
+    /// small indexed reads per row), so the console polls a modest page and filters by channel/status.
+    /// </summary>
+    public const int DefaultListLimit = 50;
 
     /// <summary>The list's largest page size.</summary>
     public const int MaxListLimit = 200;
@@ -47,6 +50,7 @@ public sealed class StaffContentService
     private readonly ExerciseFactsReader _exerciseFacts;
     private readonly TimeProvider _time;
     private readonly IExerciseClock? _clock;
+    private readonly IReadOnlyList<IContentKindDescriptor> _descriptors;
 
     /// <summary>Creates the service.</summary>
     /// <param name="db">The exercise-scoped persistence context (reads only; writes go through the funnel).</param>
@@ -58,6 +62,7 @@ public sealed class StaffContentService
     /// <param name="exerciseFacts">The exercise-row read (the stored scenario instant).</param>
     /// <param name="time">The wall clock.</param>
     /// <param name="clock">The native exercise clock (COR-053).</param>
+    /// <param name="descriptors">The registered content kinds (the preview's participant payload projection).</param>
     public StaffContentService(
         PulseDbContext db,
         IExerciseContext exerciseContext,
@@ -67,7 +72,8 @@ public sealed class StaffContentService
         ContentProjector projector,
         ExerciseFactsReader exerciseFacts,
         TimeProvider time,
-        IExerciseClock? clock = null)
+        IExerciseClock? clock = null,
+        IEnumerable<IContentKindDescriptor>? descriptors = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -87,6 +93,7 @@ public sealed class StaffContentService
         _exerciseFacts = exerciseFacts;
         _time = time;
         _clock = clock;
+        _descriptors = descriptors?.ToList() ?? [];
     }
 
     /// <summary>
@@ -107,6 +114,12 @@ public sealed class StaffContentService
         {
             return StaffContentResult.Unauthorized;
         }
+
+        // An empty filter (?status=) means "no filter", the same for every parameter.
+        channel = string.IsNullOrWhiteSpace(channel) ? null : channel;
+        status = string.IsNullOrWhiteSpace(status) ? null : status;
+        outlet = string.IsNullOrWhiteSpace(outlet) ? null : outlet;
+        kind = string.IsNullOrWhiteSpace(kind) ? null : kind;
 
         if (status is not null && !ChannelVocabulary.ContentStatuses.Contains(status, StringComparer.Ordinal))
         {
@@ -131,7 +144,7 @@ public sealed class StaffContentService
 
         var exerciseId = caller.ExerciseId;
         var query = _db.ContentItems.AsNoTracking().Where(item => item.ExerciseId == exerciseId);
-        if (!string.IsNullOrEmpty(channel))
+        if (channel is not null)
         {
             query = query.Where(item => item.ChannelId == channel);
         }
@@ -146,7 +159,7 @@ public sealed class StaffContentService
             query = query.Where(item => item.OutletId == outletFilter);
         }
 
-        if (!string.IsNullOrEmpty(kind))
+        if (kind is not null)
         {
             query = query.Where(item => item.Kind == kind);
         }
@@ -207,7 +220,8 @@ public sealed class StaffContentService
 
         var staff = await _projector.ToStaffAsync(item, cancellationToken);
         var now = await ScenarioNowAsync(caller.ExerciseId, cancellationToken);
-        return StaffContentResult.Ok(ContentPreviewMapper.ToParticipant(item, staff, now));
+        var descriptor = _descriptors.FirstOrDefault(candidate => string.Equals(candidate.Kind, item.Kind, StringComparison.Ordinal));
+        return StaffContentResult.Ok(ContentPreviewMapper.ToParticipant(item, staff, now, descriptor));
     }
 
     /// <summary><c>POST /api/content-items</c>: creates a draft.</summary>
@@ -222,7 +236,11 @@ public sealed class StaffContentService
                 created: true,
                 cancellationToken);
 
-    /// <summary><c>PUT /api/content-items/{id}</c>: edits a draft or scheduled item (stale <c>version</c> → 409).</summary>
+    /// <summary>
+    /// <c>PUT /api/content-items/{id}</c>: edits a draft or scheduled item (stale <c>version</c> → 409). Fields are
+    /// PUT-replace (the funnel's rule), including <c>featuredRank</c>, which on an unpublished item is a preset for when it
+    /// goes live; once published, the rank changes only through feature / reorder.
+    /// </summary>
     /// <param name="id">The content item id.</param>
     /// <param name="request">The fields, with the version being edited.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -332,14 +350,26 @@ public sealed class StaffContentService
             return Task.FromResult(StaffContentResult.Invalid("kind and fields are required."));
         }
 
-        var options = new ReviseOptions
-        {
-            Kind = request.Kind,
-            Note = request.Note,
-            Fields = request.Fields,
-            TouchUpdatedStamp = request.TouchUpdatedStamp ?? true,
-        };
-        return RunAsync(caller => _funnel.ReviseAsync(id, options, caller.Content, cancellationToken), cancellationToken: cancellationToken);
+        return RunAsync(
+            async caller =>
+            {
+                // A published item's featured rank belongs to feature / feature/reorder (one event each, PRT-004): the
+                // revise keeps the stored rank whatever `fields.featuredRank` says, so an editor form that does not
+                // round-trip it can never silently unfeature the item.
+                var storedRank = await _db.ContentItems.AsNoTracking()
+                    .Where(item => item.Id == id && item.ExerciseId == caller.ExerciseId)
+                    .Select(item => item.FeaturedRank)
+                    .FirstOrDefaultAsync(cancellationToken);
+                var options = new ReviseOptions
+                {
+                    Kind = request.Kind,
+                    Note = request.Note,
+                    Fields = request.Fields with { FeaturedRank = storedRank },
+                    TouchUpdatedStamp = request.TouchUpdatedStamp ?? true,
+                };
+                return await _funnel.ReviseAsync(id, options, caller.Content, cancellationToken);
+            },
+            cancellationToken: cancellationToken);
     }
 
     /// <summary><c>POST /api/content-items/{id}/feature</c>: <c>{ rank }</c> features, <c>{ rank: null }</c> unfeatures.</summary>

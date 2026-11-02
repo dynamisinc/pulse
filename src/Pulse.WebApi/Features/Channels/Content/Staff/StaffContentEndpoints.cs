@@ -58,7 +58,10 @@ public static class StaffContentEndpoints
         }
 
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddScoped<IContentFeaturing, ContentPublishService>();
+        // The SAME funnel instance as IContentPublishService when that is the shipped funnel (one per scope).
+        services.TryAddScoped<IContentFeaturing>(provider =>
+            provider.GetRequiredService<IContentPublishService>() as ContentPublishService
+            ?? ActivatorUtilities.CreateInstance<ContentPublishService>(provider));
         services.TryAddScoped<StaffContentService>();
 
         // AddRateLimiter is additive across slices; enforcement is the single app.UseRateLimiter() in Program.cs.

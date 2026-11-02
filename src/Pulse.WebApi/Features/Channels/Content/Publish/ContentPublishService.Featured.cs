@@ -17,7 +17,11 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// </remarks>
 public interface IContentFeaturing
 {
-    /// <summary>Sets (<paramref name="rank"/> ≥ 1) or clears (null) a published item's featured rank.</summary>
+    /// <summary>
+    /// Sets (<paramref name="rank"/> ≥ 1) or clears (null) ONE published item's featured rank. Other items are not
+    /// renumbered, so two items may share a rank (the participant read breaks the tie by recency); the ordered, gap-free
+    /// path is <see cref="ReorderFeaturedAsync"/>.
+    /// </summary>
     /// <param name="id">The content item id.</param>
     /// <param name="rank">The featured rank, or null to unfeature.</param>
     /// <param name="caller">The authenticated caller.</param>
@@ -28,7 +32,7 @@ public interface IContentFeaturing
 
     /// <summary>
     /// Sets one channel's featured order atomically: <paramref name="ids"/> get ranks 1..n in order and every other
-    /// featured published item of that channel is unfeatured, in one save. Nothing is applied unless every id is a
+    /// featured published or retracted item of that channel is unfeatured, in one save. Nothing is applied unless every id is a
     /// published item of the channel in the exercise (unknown → not found, not published → conflict).
     /// </summary>
     /// <param name="ids">The new featured order (empty clears the channel's featured slot).</param>
@@ -67,6 +71,9 @@ public sealed partial class ContentPublishService : IContentFeaturing
 
     /// <summary>The refusal for a non-staff caller.</summary>
     public const string FeatureNeedsStaffMessage = "Only staff can change the featured slot.";
+
+    /// <summary>The 409 when a reorder lost a race with another change to the channel's items.</summary>
+    public const string ReorderRaceMessage = "The featured items changed while saving. Reload and try again.";
 
     /// <summary>The 404 when a reorder names an id that is not an item in this exercise.</summary>
     public const string ReorderNotFoundMessage = "One or more content items were not found.";
@@ -181,11 +188,13 @@ public sealed partial class ContentPublishService : IContentFeaturing
             };
         }
 
-        // Every OTHER featured, published item of the channel leaves the slot: the list is the whole featured order.
+        // Every OTHER featured item of the channel leaves the slot: the list is the whole featured order. That includes a
+        // retracted one, which would otherwise come back on restore at a rank this order has since given away. (A draft's
+        // preset rank is left alone: it is a decision about a publish that has not happened.)
         var unlisted = await _db.ContentItems
             .Where(candidate => candidate.ExerciseId == exerciseId
                 && candidate.ChannelId == channel
-                && candidate.Status == ChannelVocabulary.StatusPublished
+                && (candidate.Status == ChannelVocabulary.StatusPublished || candidate.Status == ChannelVocabulary.StatusRetracted)
                 && candidate.FeaturedRank != null
                 && !idSet.Contains(candidate.Id))
             .ToListAsync(cancellationToken);
@@ -212,19 +221,21 @@ public sealed partial class ContentPublishService : IContentFeaturing
             var time = await ClockAsync(exerciseId, cancellationToken);
             foreach (var item in changed)
             {
-                item.Version++;
                 _db.TelemetryEvents.Add(ContentTelemetry.Build(FeatureAction, item, caller, time));
             }
 
-            // One SaveChanges: every rank, version and event commits together or not at all.
-            if (await TrySaveAsync(changed[0].Id, cancellationToken) is { } conflict)
+            // EVERY listed item's version moves, not only the re-ranked ones, so the "all published" check above holds at
+            // commit: a listed item retracted or revised concurrently fails this save on its token. One SaveChanges: every
+            // rank, version and event commits together or not at all. (Not covered: an item featured concurrently that
+            // was neither listed nor featured when read keeps its rank until the next reorder.)
+            foreach (var item in listed.Union(changed))
             {
-                return new ContentFeatureReorderResult
-                {
-                    Outcome = conflict.Outcome,
-                    ConflictItem = conflict.Item,
-                    Errors = conflict.Errors,
-                };
+                item.Version++;
+            }
+
+            if (await TrySaveAsync(changed[0].Id, cancellationToken) is not null)
+            {
+                return ReorderRefused(ContentPublishOutcome.Conflict, ReorderRaceMessage);
             }
         }
 

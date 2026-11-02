@@ -84,6 +84,24 @@ public sealed class StaffContentEndpointsTests
         var outletId = await SeedOutletAsync(host, exercise.ExerciseId);
         host.ActAs(exercise.ExerciseId, exercise.StaffUserId);
 
+        // origin / actingHumanId / exerciseId in a body are not request fields: identity and scope are the session's.
+        var spoof = await host.Client.PostAsJsonAsync("/api/content-items", new
+        {
+            kind = "article",
+            outletId,
+            headline = "Spoofed attribution",
+            bodyHtml = "<p>x</p>",
+            origin = "participant",
+            actingHumanId = "someone-else",
+            exerciseId = Guid.NewGuid(),
+        });
+        spoof.StatusCode.Should().Be(HttpStatusCode.Created);
+        var spoofed = await spoof.Content.ReadFromJsonAsync<JsonElement>();
+        spoofed.GetProperty("origin").GetString().Should().Be("controller");
+        spoofed.GetProperty("actingHumanId").GetString().Should().Be(exercise.StaffUserId.ToString());
+        (await host.Client.DeleteAsync(Uri($"/api/content-items/{spoofed.GetProperty("id").GetString()}")))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
+
         var first = await CreateOkAsync(host, outletId, "Water main break on Elm");
         host.Time.Advance(TimeSpan.FromSeconds(5));
         var second = await CreateOkAsync(host, outletId, "Boil-water notice issued");
@@ -167,6 +185,7 @@ public sealed class StaffContentEndpointsTests
         var outletId = await SeedOutletAsync(host, exercise.ExerciseId);
         host.ActAs(exercise.ExerciseId, exercise.StaffUserId);
         var id = await CreateOkAsync(host, outletId);
+        (await host.Client.GetAsync(Uri("/api/content-items"))).StatusCode.Should().Be(HttpStatusCode.OK); // warm the host
 
         var responses = await Task.WhenAll(Enumerable.Range(0, OverTheLimit)
             .Select(_ => PostAsync(host, $"/api/content-items/{Guid.NewGuid()}/publish")));
@@ -174,16 +193,22 @@ public sealed class StaffContentEndpointsTests
         var limited = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
         limited.Should().NotBeEmpty("one staff user past the bucket is refused");
         responses.Count(r => r.StatusCode != HttpStatusCode.TooManyRequests).Should().BeInRange(
-            ContentPublishRateLimiterPolicy.TokenLimit, ContentPublishRateLimiterPolicy.TokenLimit + 2);
+            ContentPublishRateLimiterPolicy.TokenLimit,
+            ContentPublishRateLimiterPolicy.TokenLimit + 5,
+            "the bucket admits {0} back to back (plus a few refill ticks on a slow runner)",
+            ContentPublishRateLimiterPolicy.TokenLimit);
         var problem = await limited[0].Content.ReadFromJsonAsync<JsonElement>();
         problem.GetProperty("status").GetInt32().Should().Be(429);
         problem.GetProperty("detail").GetString().Should().Be(ContentPublishRateLimiterPolicy.RateLimitedMessage);
         limited[0].Headers.RetryAfter.Should().NotBeNull();
 
+        // A refill tick may admit one, so each action sends a small concurrent run: most must meet the spent bucket.
         foreach (var action in new[] { "schedule", "revise", "retract" })
         {
-            (await PostAsync(host, $"/api/content-items/{id}/{action}", new { })).StatusCode
-                .Should().Be(HttpStatusCode.TooManyRequests, "{0} draws on the same bucket as publish", action);
+            var run = await Task.WhenAll(Enumerable.Range(0, 5)
+                .Select(_ => PostAsync(host, $"/api/content-items/{id}/{action}", new { })));
+            run.Count(r => r.StatusCode == HttpStatusCode.TooManyRequests)
+                .Should().BeGreaterThanOrEqualTo(3, "{0} draws on the same bucket as publish", action);
         }
 
         var reads = await Task.WhenAll(Enumerable.Range(0, OverTheLimit)

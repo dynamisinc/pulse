@@ -7,7 +7,8 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// <summary>
 /// Preview-as-participant (COR-041): maps an item in ANY status onto the participant wire shape, so the console renders
 /// exactly what a participant would see. Pure; the input is the funnel's own staff projection, so the participant fields
-/// are the same values the participant read serves, and the output types carry no staff field (XC-002, sealed DTOs).
+/// are the same values the participant read serves, the payload goes through the kind's own participant projection, and
+/// the output types carry no staff field (XC-002, sealed DTOs).
 /// </summary>
 /// <remarks>
 /// A retracted item previews as the tombstone participants read. Every other status previews as the published article;
@@ -19,8 +20,11 @@ public static class ContentPreviewMapper
     /// <param name="item">The stored item (for the retraction instant).</param>
     /// <param name="staff">The funnel's staff projection of <paramref name="item"/>.</param>
     /// <param name="scenarioNow">The exercise's current scenario time (COR-053).</param>
+    /// <param name="descriptor">The item's kind; its <c>ProjectPayload</c> drops staff-only payload keys (XC-002). An
+    /// unregistered kind previews an EMPTY payload (fail closed), never the raw stored one.</param>
     /// <returns>The participant view.</returns>
-    public static object ToParticipant(ContentItem item, ChannelContentStaffDto staff, DateTimeOffset scenarioNow)
+    public static object ToParticipant(
+        ContentItem item, ChannelContentStaffDto staff, DateTimeOffset scenarioNow, IContentKindDescriptor? descriptor)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(staff);
@@ -63,7 +67,8 @@ public static class ContentPreviewMapper
             Revisions = staff.Revisions, // already the participant-visible subset (update / correction)
             PairedPostId = staff.PairedPostId,
             AlertId = staff.AlertId,
-            Payload = staff.Payload,
+            // A private copy: a projection may hand back (part of) its input, and the staff DTO keeps its own.
+            Payload = descriptor?.ProjectPayload(staff.Payload.DeepClone().AsObject()) ?? [],
         };
     }
 }
