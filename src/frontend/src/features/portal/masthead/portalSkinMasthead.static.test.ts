@@ -93,6 +93,9 @@ describe('portal skin + masthead: static rules', () => {
     expect(rule('metaLine')).toMatch(/flex-wrap:\s*wrap/)
     expect(rule('dateline')).toMatch(/min-width:\s*0/)
     expect(rule('dateline')).not.toMatch(/white-space:\s*nowrap/)
+    // Wide hero content cannot widen the page (the header itself no longer clips).
+    expect(rule('hero')).toMatch(/max-width:\s*100%/)
+    expect(rule('hero')).toMatch(/overflow-x:\s*clip/)
     // Nothing clips the alerts entry's focus ring (story 14).
     expect(rule('masthead')).not.toMatch(/overflow:\s*hidden/)
     // Only the skin's variables colour the masthead (no raw colour literals).
