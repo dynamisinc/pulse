@@ -149,12 +149,14 @@ describe('PortalMasthead: dateline (AC4, COR-053)', () => {
     expect(dateline.querySelector('time')).toHaveAttribute('dateTime', '2026-10-29T18:32:00.000Z')
   })
 
-  it('advances with the shell\'s scenarioNow, without a refetch', () => {
+  it('advances from the shell\'s scenarioNow alone, with no request (fetch or XHR/axios)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const xhrSpy = vi.spyOn(XMLHttpRequest.prototype, 'open')
     const view = mount()
     view.rerenderAt('2026-10-29T19:05:00Z')
     expect(screen.getByTestId('scenario-dateline')).toHaveTextContent('3:05 PM')
     expect(fetchSpy).not.toHaveBeenCalled()
+    expect(xhrSpy).not.toHaveBeenCalled()
   })
 
   it('is never labelled "scenario time"', () => {
@@ -168,6 +170,11 @@ describe('PortalMasthead: slots (AC5)', () => {
     mount({ alertsEntry: <button type="button">Alerts 2</button> })
     const slot = screen.getByTestId('portal-masthead-alerts-entry')
     expect(within(slot).getByRole('button', { name: 'Alerts 2' })).toBeInTheDocument()
+  })
+
+  it('renders no empty alerts box for a false slot value', () => {
+    mount({ alertsEntry: false })
+    expect(screen.queryByTestId('portal-masthead-alerts-entry')).toBeNull()
   })
 
   it('renders no alerts slot when none is given, and never an alert bar of its own', () => {

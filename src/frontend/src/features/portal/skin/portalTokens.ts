@@ -81,5 +81,6 @@ const portalFonts: SkinFontFace[] = [
   { family: 'Libre Franklin Variable', src: libreFranklinUrl, weight: '100 900' },
 ]
 
+// The `ext` NAMESPACE (F13's fixed list); it shares the skin key's name by design.
 registerSkinExtension('portal', PORTAL_SKIN_EXTENSION)
 registerSkinTokens(PORTAL_SKIN_KEY, portalTokens, { fonts: portalFonts })

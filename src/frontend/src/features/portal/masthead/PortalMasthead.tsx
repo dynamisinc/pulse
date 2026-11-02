@@ -86,7 +86,7 @@ export function PortalMasthead({ masthead, alertsEntry, hero }: PortalMastheadPr
               {today !== '' && <span className={styles.today}>{today}</span>}
             </h1>
           </div>
-          {alertsEntry !== undefined && alertsEntry !== null && (
+          {alertsEntry != null && alertsEntry !== false && (
             <div className={styles.alertsEntry} data-testid="portal-masthead-alerts-entry">
               {alertsEntry}
             </div>
@@ -103,7 +103,7 @@ export function PortalMasthead({ masthead, alertsEntry, hero }: PortalMastheadPr
           />
         </div>
       </div>
-      {hero !== undefined && hero !== null && (
+      {hero != null && hero !== false && (
         <div className={styles.hero} data-testid="portal-masthead-hero">
           {hero}
           <WatermarkSlot />

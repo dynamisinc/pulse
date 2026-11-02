@@ -14,6 +14,9 @@
 import { AA_BODY, contrastRatio, onColor, type OutletSkinTokens } from '@/features/channels'
 import { PORTAL_TODAY_GOLD } from '../skin/portalTokens'
 
+/** Pairs already reported in dev (once each). */
+const warned = new Set<string>()
+
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 /** The colour the "Today" word renders in, on the accent band. */
@@ -22,6 +25,12 @@ export function mastheadTodayColor(tokens: OutletSkinTokens): string {
   const raw = tokens.ext?.portal?.todayColor
   const candidate = typeof raw === 'string' && HEX.test(raw) ? raw : PORTAL_TODAY_GOLD
   if (contrastRatio(candidate, band) >= AA_BODY) return candidate
+  if (import.meta.env.DEV && !warned.has(`${candidate}|${band}`)) {
+    warned.add(`${candidate}|${band}`)
+    // Tells a brand author (story 16's preview) why their gold did not apply.
+    console.warn(`portal masthead: todayColor ${candidate} is below ${AA_BODY}:1 on the band ${band}; ` +
+      'using the on-accent colour')
+  }
   return onColor(band)
 }
 
