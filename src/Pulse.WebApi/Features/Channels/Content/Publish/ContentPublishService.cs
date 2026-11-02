@@ -299,7 +299,6 @@ public sealed partial class ContentPublishService : IContentPublishService
         }
 
         var (item, descriptor, exerciseId) = (load.Item!, load.Descriptor!, load.ExerciseId);
-        var time = await ClockAsync(exerciseId, cancellationToken);
 
         // Story 05: a staff unschedule, edit or reschedule that landed after the runner found the item wins; the runner
         // never publishes a draft or an item that is no longer due.
@@ -307,7 +306,7 @@ public sealed partial class ContentPublishService : IContentPublishService
             && (item.Version != claim.ExpectedVersion
                 || item.Status != ChannelVocabulary.StatusScheduled
                 || item.ScheduledScenarioTime is not { } due
-                || due > time.ScenarioTime))
+                || due > (await ClockAsync(exerciseId, cancellationToken)).ScenarioTime))
         {
             return await ConflictAsync(item, ScheduledClaimLostMessage);
         }
@@ -332,6 +331,8 @@ public sealed partial class ContentPublishService : IContentPublishService
         var callOptions = caller.Origin == ChannelVocabulary.OriginParticipant ? null : options;
         var (resolved, _) = PublishOptionsResolver.Resolve(callOptions, item, descriptor);
 
+        // Read after the gates, so the stamp is the moment the item goes live (a slow gate never back-dates it).
+        var time = await ClockAsync(exerciseId, cancellationToken);
         var publishedAt = claim is null ? time.ScenarioTime : ScheduledPublishTime(item, claim, time);
         item.Status = ChannelVocabulary.StatusPublished;
         item.PublishedScenarioTime = publishedAt;
