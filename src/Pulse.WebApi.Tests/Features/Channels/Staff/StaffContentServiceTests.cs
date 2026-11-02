@@ -331,6 +331,8 @@ public sealed class StaffContentServiceTests
         await t.OkAsync(s => s.FeatureAsync(gone, new ContentFeatureRequest { Rank = 2 }));
         await t.OkAsync(s => s.RetractAsync(gone));
 
+        var aBefore = (await t.F.ItemAsync(a.ToString())).Version;
+
         var result = await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [b, a] }));
 
         result.Outcome.Should().Be(StaffContentOutcome.Ok);
@@ -338,7 +340,7 @@ public sealed class StaffContentServiceTests
         items.Select(i => (i.Headline, i.FeaturedRank)).Should().Equal(("B", 1), ("A", 2));
         (await t.F.ItemAsync(c.ToString())).FeaturedRank.Should().BeNull("an item left off the list leaves the featured slot");
         (await t.F.ItemAsync(gone.ToString())).FeaturedRank.Should().BeNull("a retracted item must not come back on restore at a given-away rank");
-        (await t.F.ItemAsync(a.ToString())).Version.Should().Be(items[1].Version, "every listed item's version moves with the order");
+        (await t.F.ItemAsync(a.ToString())).Version.Should().Be(aBefore + 1);
 
         // A stale (not published) or unknown id refuses the WHOLE reorder; nothing is applied.
         var stale = await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [a, draft] }));
@@ -356,6 +358,15 @@ public sealed class StaffContentServiceTests
         (await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [a], Channel = "press" })))
             .Outcome.Should().Be(StaffContentOutcome.Invalid, "the ids must be items of the named channel");
         (await t.RunAsync(s => s.ReorderFeaturedAsync(null))).Outcome.Should().Be(StaffContentOutcome.Invalid);
+
+        // A listed item whose rank does not change still moves its version when anything else in the call changes, so
+        // a concurrent retract of it would fail the save (the "all listed are published" check holds at commit).
+        var bBefore = (await t.F.ItemAsync(b.ToString())).Version;
+        (await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [b] })))
+            .Outcome.Should().Be(StaffContentOutcome.Ok);
+        (await t.F.ItemAsync(b.ToString())).FeaturedRank.Should().Be(1);
+        (await t.F.ItemAsync(b.ToString())).Version.Should().Be(bBefore + 1, "b stayed at rank 1 but a left the slot");
+        (await t.F.ItemAsync(a.ToString())).FeaturedRank.Should().BeNull();
 
         (await t.RunAsync(s => s.ReorderFeaturedAsync(new ContentFeatureReorderRequest { Ids = [], Channel = "news" })))
             .Outcome.Should().Be(StaffContentOutcome.Ok);
