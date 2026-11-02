@@ -76,7 +76,7 @@ describe('weather product components: accessibility', () => {
     expect(await seriousAxeViolations(container)).toEqual([])
   })
 
-  it('adds no interactive control of its own (targets belong to ContentMedia, already 44 px on coarse)', () => {
+  it('adds no interactive control of its own (its only targets come from ContentMedia, sized by F14)', () => {
     const { container } = render(
       <>
         <SeverityChip productType="warning" />
@@ -94,7 +94,7 @@ describe('weather product components: accessibility', () => {
     'ProductText.module.css',
     'ProductTimes.module.css',
     'ProductStateBanner.module.css',
-  ])('%s has no animation or transition (reduced motion)', file => {
+  ])('%s has no animation or transition, so reduced motion has nothing to stop', file => {
     const css = readSrcFile(`features/weather/components/product/${file}`)
     expect(css).not.toMatch(/\b(animation|transition)\s*:/)
   })

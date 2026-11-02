@@ -85,9 +85,18 @@ describe('ProductStateBanner: from a parent snapshot', () => {
       .toHaveAttribute('data-icon', 'ban')
   })
 
-  it('renders nothing while the product is active ("IN EFFECT UNTIL …" is the default)', () => {
-    const { container } = render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T15:00:00Z" />)
-    expect(container).toBeEmptyDOMElement()
+  it('renders no banner while the product is active ("IN EFFECT UNTIL …" is the default)', () => {
+    render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T15:00:00Z" />)
+    expect(screen.queryByTestId('weather-product-state-banner')).toBeNull()
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  })
+
+  it('keeps one polite status region mounted across states, so a flip is announced', () => {
+    const { rerender } = render(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T15:00:00Z" />)
+    const region = screen.getByRole('status')
+    rerender(<ProductStateBanner product={WATCH} scenarioNow="2026-12-02T19:00:00Z" />)
+    expect(screen.getByRole('status')).toBe(region)
+    expect(region).toHaveTextContent('EXPIRED')
   })
 })
 
@@ -100,7 +109,7 @@ describe('ProductStateBanner: follows the live scenario clock (no refetch)', () 
 
   it('counts down, turns active, then expires as scenario time moves', () => {
     pinScenarioClock('2026-12-02T13:00:00Z')
-    const { container } = render(<ProductStateBanner product={WATCH} />)
+    render(<ProductStateBanner product={WATCH} />)
     expect(screen.getByTestId('weather-product-state-banner')).toHaveTextContent('EFFECTIVE IN 30 MIN')
 
     act(() => {
@@ -113,7 +122,7 @@ describe('ProductStateBanner: follows the live scenario clock (no refetch)', () 
       pinScenarioClock('2026-12-02T14:00:00Z')
       vi.advanceTimersByTime(30_000)
     })
-    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('weather-product-state-banner')).toBeNull()
 
     // A time jump past expiry.
     act(() => {

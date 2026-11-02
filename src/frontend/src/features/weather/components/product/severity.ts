@@ -15,24 +15,27 @@
  *   ext.weather.watch     -> var(--pulse-skin-ext-weather-watch,    #2e6b4f)
  *   ext.weather.advisory  -> var(--pulse-skin-ext-weather-advisory, #8a4b00)
  *
- * Text on a hue is fixed white: every default clears 4.5:1 against it
- * (pinned by SeverityChip.test.tsx). Story 06 owns the `ext.weather` schema
- * (`registerSkinExtension('weather', …)`): it declares these three keys as
- * `color` so an outlet override is AA-checked.
+ * Text on a hue is the AA-safe black or white for the hue actually in force
+ * (`useSeverityFill`): white for every default (pinned by SeverityChip.test.tsx),
+ * and black if an outlet overrides a key with a light hue, so an override can
+ * never yield white-on-light. Story 06 owns the `ext.weather` schema
+ * (`registerSkinExtension('weather', …)`) and declares these three keys as
+ * `color`.
  *
- * World: participant. No React, no MUI.
+ * World: participant. No MUI.
  */
 
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { faCircleInfo, faEye, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
-import type { CSSProperties } from 'react'
-import { skinExtColorVar } from '@/features/channels/skin'
+import { useContext, type CSSProperties } from 'react'
+import { onColor, skinExtColorVar } from '@/features/channels/skin'
+import { SkinContext } from '@/features/channels/skin/skinContext'
 import type { WeatherProductType } from '@/features/weather/contract'
 
 /** The `ext.weather` namespace the severity hues live in. */
 export const WEATHER_SKIN_EXT_NAMESPACE = 'weather'
 
-/** Text drawn on a severity hue. Fixed: skins cannot reach it. */
+/** Text drawn on every DEFAULT severity hue. */
 export const WEATHER_SEVERITY_ON_COLOR = '#ffffff'
 
 export interface WeatherSeverityPresentation {
@@ -57,7 +60,29 @@ export function severityHue(productType: WeatherProductType): string {
   return `var(${skinExtColorVar(WEATHER_SKIN_EXT_NAMESPACE, row.extKey)}, ${row.defaultHue})`
 }
 
-/** Fill + text colours for a severity surface (chip). */
-export function severityFillStyle(productType: WeatherProductType): CSSProperties {
-  return { backgroundColor: severityHue(productType), color: WEATHER_SEVERITY_ON_COLOR }
+const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+/**
+ * The hue in force for a product type: the mounted skin's finalized
+ * `ext.weather` value when it has one (the same value the scope publishes as
+ * the CSS variable), else the default. Outside a skin scope, the default.
+ */
+export function resolveSeverityHue(
+  productType: WeatherProductType,
+  ext: Readonly<Record<string, unknown>> | undefined,
+): string {
+  const row = WEATHER_SEVERITY[productType]
+  const value = ext?.[row.extKey]
+  return typeof value === 'string' && HEX.test(value) ? value : row.defaultHue
+}
+
+/** Fill + text colours for a severity surface (chip), for the given hue in force. */
+export function severityFillStyle(productType: WeatherProductType, hue: string): CSSProperties {
+  return { backgroundColor: severityHue(productType), color: onColor(hue) }
+}
+
+/** Fill + text colours, reading the hue in force from the mounted skin (if any). */
+export function useSeverityFill(productType: WeatherProductType): CSSProperties {
+  const ext = useContext(SkinContext)?.tokens.ext?.[WEATHER_SKIN_EXT_NAMESPACE]
+  return severityFillStyle(productType, resolveSeverityHue(productType, ext))
 }

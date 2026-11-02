@@ -38,6 +38,14 @@ describe('IbwGrid', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('drops the row of a blank field, and renders nothing when every field is blank', () => {
+    const { rerender, container } = render(<IbwGrid ibw={{ ...IBW, when: '  ' }} />)
+    expect([...container.querySelectorAll('dt')].map(dt => dt.textContent))
+      .toEqual(['WHAT', 'WHERE', 'IMPACTS'])
+    rerender(<IbwGrid ibw={{ what: '', where: '', when: '', impacts: '' }} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it('keeps authored line breaks in a value', () => {
     render(<IbwGrid ibw={{ ...IBW, impacts: 'Line one.\nLine two.' }} />)
     expect(screen.getByText(/Line one\./).textContent).toBe('Line one.\nLine two.')

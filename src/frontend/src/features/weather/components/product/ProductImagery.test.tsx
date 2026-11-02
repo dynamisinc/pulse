@@ -27,9 +27,11 @@ describe('ProductImagery', () => {
     expect(slot).toHaveAttribute('data-watermark-shown', 'true')
   })
 
-  it('puts the ExerciseBands on the image', () => {
+  it('puts the ExerciseBands on the image, inside the same positioned frame as the chip', () => {
     render(<ProductImagery media={RADAR} />)
-    expect(screen.getAllByText(/EXERCISE/).length).toBeGreaterThan(1)
+    const frame = screen.getByRole('img', { name: RADAR.alt }).parentElement as HTMLElement
+    expect(frame.querySelector('[data-testid="exercise-bands"]')).not.toBeNull()
+    expect(frame.querySelector('[data-testid="watermark-slot"]')).not.toBeNull()
   })
 
   it('renders the alt text and the caption', () => {
@@ -50,6 +52,8 @@ describe('ProductImagery', () => {
         media={mediaFixture({ id: 'v', kind: 'video', url: '/m/loop.mp4', contentType: 'video/mp4', alt: 'Radar loop' })}
       />,
     )
-    expect(screen.getByTestId('watermark-slot')).toBeInTheDocument()
+    const slot = screen.getByTestId('watermark-slot')
+    expect(slot).toHaveAttribute('data-watermark-shown', 'true')
+    expect(slot.className).toMatch(/clearControls/)
   })
 })

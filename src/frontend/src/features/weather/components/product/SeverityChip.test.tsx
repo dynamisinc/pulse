@@ -3,22 +3,24 @@
  * white text on every default hue at >= 4.5:1, hue overridable by the skin's `ext.weather` key.
  */
 import { render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
 import { contrastRatio } from '@/test/contrast'
 import { WEATHER_PRODUCT_TYPES } from '@/features/weather/contract'
 import { SeverityChip } from './SeverityChip'
-import { WEATHER_SEVERITY, WEATHER_SEVERITY_ON_COLOR, severityHue } from './severity'
+import {
+  WEATHER_SEVERITY,
+  WEATHER_SEVERITY_ON_COLOR,
+  resolveSeverityHue,
+  severityFillStyle,
+  severityHue,
+} from './severity'
 
 const EXPECTED = {
   watch: { word: 'WATCH', hue: '#2e6b4f', icon: 'eye' },
   warning: { word: 'WARNING', hue: '#8b0000', icon: 'triangle-exclamation' },
   advisory: { word: 'ADVISORY', hue: '#8a4b00', icon: 'circle-info' },
 } as const
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('SeverityChip', () => {
   it.each(WEATHER_PRODUCT_TYPES)('%s renders its icon, its word and its hue', productType => {
@@ -40,6 +42,19 @@ describe('SeverityChip', () => {
     expect(ratio).toBeGreaterThanOrEqual(4.5)
   })
 
+  it('a light override hue gets black text, so an override cannot break AA', () => {
+    const hue = resolveSeverityHue('advisory', { advisory: '#ffd966' })
+    expect(hue).toBe('#ffd966')
+    expect(severityFillStyle('advisory', hue).color).toBe('#000000')
+    expect(contrastRatio('#000000', hue)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('ignores a missing or non-hex override (default hue, white text)', () => {
+    expect(resolveSeverityHue('watch', undefined)).toBe('#2e6b4f')
+    expect(resolveSeverityHue('watch', { watch: 'red' })).toBe('#2e6b4f')
+    expect(severityFillStyle('watch', '#2e6b4f').color).toBe('#ffffff')
+  })
+
   it('the hue is read from the skin ext.weather key first, the default second', () => {
     expect(severityHue('warning')).toBe('var(--pulse-skin-ext-weather-warning, #8b0000)')
   })
@@ -53,29 +68,19 @@ describe('SeverityChip', () => {
 })
 
 describe('SeverityChip: never colour-only (forced colours / greyscale)', () => {
-  it.each(WEATHER_PRODUCT_TYPES)('%s keeps its text node under forced colours and greyscale', productType => {
-    // Forced colours: the platform drops author colours, so only text + shape remain.
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query.includes('forced-colors: active') || query.includes('prefers-contrast'),
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => false,
-    }))
-    const { container } = render(
-      <div style={{ filter: 'grayscale(1)', forcedColorAdjust: 'auto' }}>
-        <SeverityChip productType={productType} />
-      </div>,
-    )
-    const chip = within(container).getByTestId('weather-severity-chip')
-    // A real text node with the word, independent of any colour.
+  // jsdom paints nothing, so "with the colour removed" is checked structurally: the meaning
+  // must survive in the DOM text and the icon, and the stylesheet must keep a shape under
+  // forced colours (below). A real-browser forced-colors pass is story 14's conformance kit.
+  it.each(WEATHER_PRODUCT_TYPES)('%s carries its meaning in a text node, independent of colour', productType => {
+    render(<SeverityChip productType={productType} />)
+    const chip = screen.getByTestId('weather-severity-chip')
     const word = within(chip).getByText(EXPECTED[productType].word)
     expect(word.firstChild?.nodeType).toBe(Node.TEXT_NODE)
     expect(word.textContent).toBe(EXPECTED[productType].word)
-    expect(getComputedStyle(word).textTransform).not.toBe('uppercase')
+    // Strip every colour: the accessible text alone still names the type.
+    chip.style.backgroundColor = ''
+    chip.style.color = ''
+    expect(chip.textContent).toBe(EXPECTED[productType].word)
   })
 
   it('the stylesheet keeps an outline under forced colours and never transforms the word', () => {

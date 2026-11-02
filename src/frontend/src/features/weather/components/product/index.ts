@@ -30,7 +30,9 @@ export {
   WEATHER_SEVERITY,
   WEATHER_SEVERITY_ON_COLOR,
   WEATHER_SKIN_EXT_NAMESPACE,
+  resolveSeverityHue,
   severityFillStyle,
   severityHue,
+  useSeverityFill,
 } from './severity'
 export type { WeatherSeverityPresentation } from './severity'

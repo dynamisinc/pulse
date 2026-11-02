@@ -13,7 +13,9 @@
  *  - omit it and the banner follows the live clock itself (`useScenarioTime`:
  *    the clock's change notification plus a 30 s refresh).
  *
- * Icon + text, never colour alone; the icon is decorative.
+ * Icon + text, never colour alone; the icon is decorative. The banner sits in
+ * an always-mounted `role="status"` region (empty, and zero-height, while the
+ * product is active), so a clock-driven flip is announced politely.
  *
  * Participant world: CSS Module + skin variables, no COBRA, no MUI.
  */
@@ -58,15 +60,21 @@ function BannerView({
   className,
 }: ProductStateBannerProps & { readonly scenarioNow: Date | string }) {
   const banner = productBanner(product, scenarioNow, published)
-  if (banner === null) return null
+  // The status region is ALWAYS mounted (empty while active), so a flip to
+  // EXPIRED / CANCELLED / active is announced: a live region inserted already
+  // holding its text is often not read.
   return (
-    <div
-      className={[styles.banner, styles[banner.state], className].filter(Boolean).join(' ')}
-      data-testid="weather-product-state-banner"
-      data-product-state={banner.state}
-    >
-      <FontAwesomeIcon icon={BANNER_ICONS[banner.state]} className={styles.icon} aria-hidden="true" />
-      <span>{banner.text}</span>
+    <div role="status" className={className} data-testid="weather-product-state-region">
+      {banner !== null && (
+        <div
+          className={[styles.banner, styles[banner.state]].join(' ')}
+          data-testid="weather-product-state-banner"
+          data-product-state={banner.state}
+        >
+          <FontAwesomeIcon icon={BANNER_ICONS[banner.state]} className={styles.icon} aria-hidden="true" />
+          <span>{banner.text}</span>
+        </div>
+      )}
     </div>
   )
 }

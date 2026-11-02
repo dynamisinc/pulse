@@ -7,7 +7,9 @@
  *  - Styling only through skin variables: every colour in a stylesheet is a
  *    `var(--pulse-skin-…, fallback)` or a system colour keyword, and nothing transforms text
  *    (the headline and the severity words are shown as stored, D4-010).
- * Read off disk, so it covers every file added to the folder later.
+ * The TS sources are globbed, so a new file is covered automatically. The stylesheets are
+ * listed by name (a `?raw` glob of a CSS Module yields the module object under Vitest, not
+ * the text), and the list is checked against the CSS Modules the sources import.
  */
 import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
@@ -55,6 +57,14 @@ describe('weather product components: static rules', () => {
       './productBanner.ts',
       './severity.ts',
     ]))
+  })
+
+  it('the stylesheet list matches every CSS Module the sources import', () => {
+    const imported = files
+      .flatMap(([, source]) => extractImportSpecifiers(source))
+      .filter(specifier => specifier.endsWith('.module.css'))
+      .map(specifier => specifier.replace(/^\.\//, ''))
+    expect([...new Set(imported)].sort()).toEqual(STYLES.map(([path]) => path).sort())
   })
 
   it.each(files)('%s never reads the wall clock or the browser zone (COR-053)', (_path, source) => {
