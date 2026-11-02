@@ -1,0 +1,35 @@
+/*
+ * features/weather/components/product/ProductStateBanner.module.css
+ * A neutral, bordered strip in the skin's text colour: the state is carried by the icon and
+ * the word, so no state relies on a hue. Ended states (expired / cancelled) take a dashed rule.
+ */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--pulse-skin-space, 8px);
+  padding: 6px 12px;
+  border: 2px solid var(--pulse-skin-text, #1f2329);
+  border-radius: var(--pulse-skin-radius, 4px);
+  background-color: var(--pulse-skin-surface, #f6f7f9);
+  color: var(--pulse-skin-text, #1f2329);
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.icon {
+  flex: none;
+}
+
+.pending {
+  border-style: solid;
+}
+
+.expired,
+.cancelled {
+  border-style: dashed;
+}
