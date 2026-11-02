@@ -51,7 +51,7 @@ import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import type { ChromeBannerConfig, ChromeConfig } from './mountContract'
+import type { ChromeBannerConfig, ChromeConfig, ShellVariant } from './mountContract'
 
 /**
  * Wire shape of the `/chrome-config` response body. `watermark` is optional ON THE
@@ -203,20 +203,34 @@ export function useChromeConfig(): ChromeConfig {
 }
 
 /**
- * Whether participant media must carry the in-content "EXERCISE" marking
- * (demo-feedback DF-3): `config.watermark || !config.enabled`.
+ * Whether the shell draws the two compliance banners for `config` under `variant`
+ * (channels-foundation 22, PP-2): the exercise has chrome on AND the variant is not
+ * `kiosk`. The kiosk variant strips the banners whatever the config says (Q-33, D2
+ * "zero chrome"); `ShellLayout` does not mount `ComplianceChrome` there.
+ *
+ * `variant` is optional so a caller that cannot see the shell variant (media mounted
+ * outside a shell) answers from the config alone.
+ */
+export const isComplianceChromeDrawn = (config: ChromeConfig, variant?: ShellVariant): boolean =>
+  config.enabled && variant !== 'kiosk'
+
+/**
+ * Whether the in-content "EXERCISE" marking is required (demo-feedback DF-3,
+ * NFR-008): `config.watermark || !isComplianceChromeDrawn(config, variant)`.
  *
  *  - `watermark` — the exercise's own media-marking switch is on;
- *  - `!enabled`  — the NFR-008 invariant: chrome and the in-content watermark are
- *    never BOTH off. When compliance chrome is disabled (a legal state, AC3), the
- *    watermark becomes the required fallback signal whatever the switch says.
+ *  - chrome not drawn — the NFR-008 invariant: chrome and the in-content watermark are
+ *    never BOTH off. When compliance chrome is disabled (a legal state, AC3) OR the
+ *    shell is in the `kiosk` variant (channels-foundation 22, Q-33), the watermark
+ *    becomes the required fallback signal whatever the switch says.
  *
- * Only "watermark off AND banner on" leaves media unmarked. This module only exposes
- * the signal — `ExerciseBands` (social media) and the overlay layer's watermark slot
- * render it.
+ * So `isWatermarkRequired(config, 'kiosk')` is always `true`. Only "watermark off AND
+ * banners drawn" leaves media unmarked. This module only exposes the signal —
+ * `ExerciseBands` (social media), `WatermarkSlot` and the overlay layer's watermark slot
+ * render it, and `ShellLayout` draws the kiosk's permanent EXERCISE chip.
  */
-export const isWatermarkRequired = (config: ChromeConfig): boolean =>
-  config.watermark || !config.enabled
+export const isWatermarkRequired = (config: ChromeConfig, variant?: ShellVariant): boolean =>
+  config.watermark || !isComplianceChromeDrawn(config, variant)
 
 /**
  * Whether `useChromeConfig()` can run here: a React Query client AND a resolved

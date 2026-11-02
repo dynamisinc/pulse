@@ -58,8 +58,9 @@ import {
  *  - `full` — ordinary participant conduct.
  *  - `readOnly` — interactive affordances are ABSENT, never disabled
  *    (COR-015); a channel honors this by not rendering them at all.
- *  - `kiosk` — chrome-free + nav-free (PRT-040, Phase 3 rendering; the flag
- *    exists now so the contract stays stable across phases).
+ *  - `kiosk` — chrome-free + nav-free, alert bar kept, EXERCISE chip always
+ *    drawn (PRT-040 kiosk-lite; rendered by `ShellLayout` since
+ *    channels-foundation 22 / PP-2).
  *  - `preview` — rendered inside the staff frame (COR-041); still the same
  *    participant contract, just hosted differently.
  */
@@ -80,9 +81,8 @@ export type ShellVariant = 'full' | 'readOnly' | 'kiosk' | 'preview'
  * - `kiosk` (PRT-040, Phase 3) — a public/TTX display is not a credentialed
  *   participant session either; this predicate takes the same
  *   least-affordance stance as `useShellState`'s CR-W1 default rather than
- *   leaving it unspecified. Kiosk's chrome/nav stripping is NOT built by this
- *   story (Phase 3) — only this affordance answer is reserved now, alongside
- *   the flag itself.
+ *   leaving it unspecified. (The chrome/nav stripping itself is
+ *   `ShellLayout`'s, channels-foundation 22.)
  *
  * A channel calls this instead of re-deriving its own `variant === 'full'`
  * check, so the "which variants get affordances" answer lives in exactly one
@@ -206,6 +206,56 @@ export function useClaimShellAccountControl(active: boolean): void {
     if (!active || claim === undefined) return
     return claim()
   }, [active, claim])
+}
+
+// -----------------------------------------------------------------------------
+// Kiosk request (channels-foundation 22, PP-2; PRT-040 kiosk-lite)
+// -----------------------------------------------------------------------------
+
+/**
+ * Registers one kiosk request and returns its release function. Provided by
+ * `ShellLayout`; consumed through {@link useRequestShellKiosk}.
+ */
+type RequestShellKiosk = () => () => void
+
+const ShellKioskRequestContext = createContext<RequestShellKiosk | undefined>(undefined)
+
+export interface ShellKioskRequestProviderProps {
+  value: RequestShellKiosk
+  children: ReactNode
+}
+
+/** Binds the kiosk-request function for the channel subtree. `ShellLayout` is the only caller. */
+export function ShellKioskRequestProvider({ value, children }: ShellKioskRequestProviderProps) {
+  return createElement(ShellKioskRequestContext.Provider, { value }, children)
+}
+
+/**
+ * Puts the ENCLOSING shell into the `kiosk` variant while `active` is true
+ * (channels-foundation 22, PP-2). The kiosk-lite display (`/portal?display=1`,
+ * portal 18's `KioskGate`) mounts inside the channel router, i.e. inside an
+ * already-mounted `ShellLayout`, so it cannot re-mount the shell with a prop;
+ * it asks the shell it is in instead, exactly like
+ * {@link useClaimShellAccountControl}.
+ *
+ * While any request stands, `ShellLayout` resolves `variant: 'kiosk'` for the
+ * whole subtree: compliance chrome, channel nav and the sign-out row are
+ * removed, the alert bar stays (PRT-010), and the shell draws the permanent
+ * EXERCISE chip (NFR-008, Q-33). `kiosk` is a least-affordance variant
+ * (`affordancesAvailable('kiosk') === false`), so a request can only ever take
+ * affordances away. WHO may request it (read-only sessions only) is the
+ * caller's gate, not the shell's.
+ *
+ * Release is automatic (the request ends when `active` turns false or the
+ * caller unmounts). A layout effect, so the chrome never paints for a frame
+ * under a kiosk. A no-op outside a `ShellLayout`.
+ */
+export function useRequestShellKiosk(active: boolean): void {
+  const request = useContext(ShellKioskRequestContext)
+  useLayoutEffect(() => {
+    if (!active || request === undefined) return
+    return request()
+  }, [active, request])
 }
 
 // -----------------------------------------------------------------------------
