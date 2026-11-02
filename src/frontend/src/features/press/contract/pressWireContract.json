@@ -1,0 +1,81 @@
+{
+  "$comment": "FROZEN press-room wire contract (story 01, #738; PC-1, PC-2, PC-5). Read by BOTH suites: PressContractParityTests (C#, src/Pulse.WebApi.Tests/Features/Press) and pressWireContract.test.ts (TS). Additive-only after story 01, and only with the orchestrator. Edit this file, the C# records/PressVocabulary/PressTelemetry and types.ts/vocabulary.ts/telemetry.ts together.",
+  "vocabulary": {
+    "releaseStates": ["draft", "scheduled", "pending_approval", "returned", "published", "retracted"],
+    "inputPaths": ["rich", "attachment", "both"],
+    "letterheadExtKeys": [
+      "letterheadAddress", "letterheadContactName", "letterheadContactTitle", "letterheadContactPhone", "letterheadContactEmail"
+    ]
+  },
+  "wireRoomSlug": "wire-room",
+  "limits": {
+    "contactNameMaxLength": 120,
+    "contactTitleMaxLength": 120,
+    "contactPhoneMaxLength": 40,
+    "contactEmailMaxLength": 254,
+    "datelineMaxLength": 120,
+    "boilerplateMaxLength": 2000,
+    "crossPostTextMaxLength": 280,
+    "dekMaxLength": 160,
+    "letterheadAddressMaxLength": 300
+  },
+  "participantPayloadKeys": ["org", "contact", "dateline", "document"],
+  "staffOnlyPayloadKeys": ["crossPost", "approval", "inputPath"],
+  "telemetry": [
+    {
+      "eventType": "press_release",
+      "emitter": "funnel",
+      "payloadKeys": [
+        "kind", "inputPath", "crossPost", "embargoed", "approvalRequired", "draftStartedScenarioTime", "draftToPublishSec",
+        "revisionCountAtPublish", "orgPersonaId"
+      ]
+    },
+    { "eventType": "press_draft_created", "emitter": "server", "payloadKeys": ["orgPersonaId", "inputPath"] },
+    { "eventType": "press_embargo_set", "emitter": "server", "payloadKeys": ["scheduledScenarioTime", "orgPersonaId"] },
+    {
+      "eventType": "press_embargo_cancelled",
+      "emitter": "server",
+      "payloadKeys": ["scheduledScenarioTime", "orgPersonaId", "approversNotified"]
+    },
+    {
+      "eventType": "press_approval_requested",
+      "emitter": "server",
+      "payloadKeys": ["approvalId", "approverHumanId", "noteLength", "latencySec"]
+    },
+    {
+      "eventType": "press_approval_approved",
+      "emitter": "server",
+      "payloadKeys": ["approvalId", "approverHumanId", "noteLength", "latencySec"]
+    },
+    {
+      "eventType": "press_approval_returned",
+      "emitter": "server",
+      "payloadKeys": ["approvalId", "approverHumanId", "noteLength", "latencySec"]
+    }
+  ],
+  "shapes": {
+    "ReleaseContactDto": ["name", "title", "phone", "email"],
+    "ReleaseDocumentDto": ["mediaId", "fileName", "sizeBytes"],
+    "ReleaseOrgRefDto": ["name", "outletId"],
+    "ReleaseParticipantPayloadDto": ["org", "contact", "dateline", "document"],
+    "ReleaseCrossPostDto": ["text"],
+    "ReleaseAuthorPayloadDto": ["orgPersonaId", "inputPath", "contact", "dateline", "document", "boilerplate", "crossPost"],
+    "ReleaseOrgDto": ["personaId", "outletId", "name", "handle", "pairedHandle", "letterhead", "approvalRequired"],
+    "ReleaseLetterheadDto": ["logo", "address", "defaultContact"],
+    "ReleaseLastEditedByDto": ["displayName"],
+    "ReleaseReturnNoteDto": ["text", "byDisplayName", "scenarioTime"],
+    "ReleaseAuthorDto": [
+      "id", "orgPersonaId", "state", "headline", "bodyHtml", "payload", "media", "scheduledScenarioTime",
+      "updatedScenarioTime", "lastEditedBy", "returnNote", "permalink", "version", "revisions"
+    ],
+    "ReleaseWriteRequest": [
+      "orgPersonaId", "headline", "bodyHtml", "contact", "dateline", "documentMediaId", "imageMediaIds", "version"
+    ]
+  },
+  "participantShapes": ["ReleaseParticipantPayloadDto", "ReleaseOrgRefDto", "ReleaseContactDto", "ReleaseDocumentDto"],
+  "participantForbiddenKeyPatterns": [
+    "token", "hash", "version", "actinghumanid", "lastseen", "wallclock", "exerciseid", "crosspost", "approval", "inputpath",
+    "boilerplate", "personaid"
+  ],
+  "participantAllowedWords": ["hashtag", "conversation"]
+}
