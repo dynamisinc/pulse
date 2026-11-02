@@ -76,6 +76,15 @@ describe('registerChannel', () => {
     expect(consoleError).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    ['portal', '/news'],
+    ['social', '/weather'],
+  ] as const)('refuses a nav path outside the channel’s own prefix (%s → %s)', (id, navPath) => {
+    registerChannel({ ...news, id, pathPrefix: id === 'social' ? '/' : `/${id}`, navPath })
+
+    expect(getRegisteredChannels()).toEqual([])
+  })
+
   it('nav path defaults to the prefix', () => {
     expect(channelNavPath(news)).toBe('/news')
     expect(channelNavPath(social)).toBe('/home')
@@ -103,5 +112,19 @@ describe('findChannelForPath', () => {
 
   it('nothing registered at / → undefined', () => {
     expect(findChannelForPath('/home', [news])).toBeUndefined()
+  })
+})
+
+describe('hot reload', () => {
+  it('drops a hot-replaced module’s entry, so its re-evaluated registration takes effect', () => {
+    let dispose: () => void = () => {}
+    registerChannel(news, { dispose: callback => { dispose = callback } })
+
+    dispose()
+    const edited = { ...news, element: <p>edited news</p> }
+    registerChannel(edited)
+
+    expect(getRegisteredChannels()).toEqual([edited])
+    expect(consoleError).not.toHaveBeenCalled()
   })
 })

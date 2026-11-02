@@ -9,7 +9,7 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SessionProvider, clearTokens } from '@/core/auth'
+import { SessionProvider, clearTokens, resetClientSession } from '@/core/auth'
 import { resolveSession } from '@/core/auth/sessionResolver'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { completeSignIn } from '@/features/login/completeSignIn'
@@ -84,6 +84,20 @@ describe('remember / take', () => {
     rememberReturnTo(PERMALINK)
     vi.setSystemTime(new Date(Date.parse('2026-11-02T12:00:00Z') + RETURN_TO_TTL_MS + 1))
 
+    expect(takeReturnTo()).toBeNull()
+  })
+
+  it('refuses an entry stamped in the future (clock skew or an edited entry)', () => {
+    window.localStorage.setItem(
+      RETURN_TO_STORAGE_KEY,
+      JSON.stringify({ path: PERMALINK, savedAt: Date.parse(wallClockNowIso()) + 60_000 }),
+    )
+    expect(takeReturnTo()).toBeNull()
+  })
+
+  it('every client-session reset forgets it (sign-out; staff and participant sign-in)', () => {
+    rememberReturnTo(PERMALINK)
+    resetClientSession()
     expect(takeReturnTo()).toBeNull()
   })
 
@@ -167,5 +181,20 @@ describe('deep link survives login (round trip)', () => {
       returnTo: takeReturnTo(),
     })
     expect(navigate).toHaveBeenCalledWith('/', { replace: true })
+  })
+})
+
+describe('the participant sign-in pages hand the remembered path to completeSignIn', () => {
+  const pages: Record<string, string> = import.meta.glob(
+    ['@/features/login/pages/ParticipantSignInPage.tsx', '@/features/login/pages/JoinPage.tsx'],
+    { eager: true, query: '?raw', import: 'default' },
+  )
+
+  it('scans both pages (cannot vacuously pass)', () => {
+    expect(Object.keys(pages)).toHaveLength(2)
+  })
+
+  it.each(Object.keys(pages))('%s passes returnTo: takeReturnTo()', file => {
+    expect(pages[file]).toMatch(/completeSignIn\([\s\S]*?returnTo:\s*takeReturnTo\(\)/)
   })
 })

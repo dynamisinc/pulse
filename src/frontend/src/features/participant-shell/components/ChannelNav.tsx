@@ -37,9 +37,11 @@
  * own) it keeps the Phase-1 behaviour: every enabled channel, and a click only
  * moves the local current marker (AC3).
  *
- * **A11y (NFR-001):** both forms are native `<button>`s (keyboard-operable by
- * default, with an explicit `:focus-visible` ring since default button chrome
- * is stripped for the quiet participant styling) inside a labelled `<nav>`
+ * **A11y (NFR-001):** both forms are native links once routed (`<a href>`, so
+ * open-in-new-tab works; a plain click is handed to the router) and native
+ * `<button>`s before (keyboard-operable by default), with an explicit
+ * `:focus-visible` ring since default chrome is stripped for the quiet
+ * participant styling, inside a labelled `<nav>`
  * landmark. The current channel is marked BOTH visually (font-weight +
  * underline — never color alone) AND programmatically (`aria-current="page"`).
  *
@@ -59,7 +61,7 @@
  * labels only.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
@@ -130,6 +132,7 @@ const NAV_STYLES = `
   list-style: none;
 }
 .pulse-channel-nav-link {
+  text-decoration: none;
   background: none;
   border: none;
   margin: 0;
@@ -167,6 +170,7 @@ const NAV_STYLES = `
   font-family: system-ui, -apple-system, sans-serif;
 }
 .pulse-channel-nav-tab {
+  text-decoration: none;
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
@@ -228,9 +232,14 @@ export function ChannelNav() {
   const channels = navigable.channels
   const currentChannelId = navigable.routed ? navigable.currentChannelId : localCurrentId
 
-  const selectChannel = (channel: NavigableChannel) => {
-    setLocalCurrentId(channel.id)
-    if (channel.navPath !== undefined && channel.navPath !== pathname) navigate(channel.navPath)
+  // A routed entry is a real link (href, open-in-new-tab); a click is handled by the
+  // router so the page does not reload. Unrouted, the entry is a button that moves
+  // the local marker only (Phase-1 behaviour).
+  const followLink = (event: MouseEvent<HTMLAnchorElement>, navPath: string) => {
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    if (navPath !== pathname) navigate(navPath)
   }
 
   // If the enabled-channel set changes under us (e.g. the mock resolves from
@@ -272,18 +281,19 @@ export function ChannelNav() {
             const isCurrent = channel.id === currentChannelId
             return (
               <li key={channel.id}>
-                <button
-                  type="button"
+                <NavEntry
+                  channel={channel}
                   className={
                     isCurrent
                       ? 'pulse-channel-nav-link pulse-channel-nav-link--current'
                       : 'pulse-channel-nav-link'
                   }
-                  aria-current={isCurrent ? 'page' : undefined}
-                  onClick={() => selectChannel(channel)}
+                  isCurrent={isCurrent}
+                  onFollow={followLink}
+                  onSelect={setLocalCurrentId}
                 >
                   {channel.label}
-                </button>
+                </NavEntry>
               </li>
             )
           })}
@@ -300,23 +310,61 @@ export function ChannelNav() {
         {mobileChannels.map(channel => {
           const isCurrent = channel.id === currentChannelId
           return (
-            <button
+            <NavEntry
               key={channel.id}
-              type="button"
+              channel={channel}
               className={
                 isCurrent
                   ? 'pulse-channel-nav-tab pulse-channel-nav-tab--current'
                   : 'pulse-channel-nav-tab'
               }
-              aria-current={isCurrent ? 'page' : undefined}
-              onClick={() => selectChannel(channel)}
+              isCurrent={isCurrent}
+              onFollow={followLink}
+              onSelect={setLocalCurrentId}
             >
               <FontAwesomeIcon icon={CHANNEL_ICON_MAP[channel.icon]} aria-hidden="true" />
               <span className="pulse-channel-nav-tab-label">{channel.label}</span>
-            </button>
+            </NavEntry>
           )
         })}
       </nav>
     </>
+  )
+}
+
+interface NavEntryProps {
+  readonly channel: NavigableChannel
+  readonly className: string
+  readonly isCurrent: boolean
+  readonly onFollow: (event: MouseEvent<HTMLAnchorElement>, navPath: string) => void
+  readonly onSelect: (channelId: string) => void
+  readonly children: ReactNode
+}
+
+/** A routed channel is a real link; an unrouted one (no router composed) a marker button. */
+function NavEntry({ channel, className, isCurrent, onFollow, onSelect, children }: NavEntryProps) {
+  const ariaCurrent = isCurrent ? ('page' as const) : undefined
+  const { navPath } = channel
+  if (navPath !== undefined) {
+    return (
+      <a
+        href={navPath}
+        className={className}
+        aria-current={ariaCurrent}
+        onClick={event => onFollow(event, navPath)}
+      >
+        {children}
+      </a>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-current={ariaCurrent}
+      onClick={() => onSelect(channel.id)}
+    >
+      {children}
+    </button>
   )
 }

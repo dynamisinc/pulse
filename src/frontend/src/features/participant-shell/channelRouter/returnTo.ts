@@ -15,10 +15,13 @@
  * **Why `localStorage`, with a short lifetime.** The visitor may sign in on the
  * same tab (today's word, a pasted link) or by tapping their personal join link,
  * which a phone opens in a new tab; `sessionStorage` would lose the path there.
- * The entry expires after {@link RETURN_TO_TTL_MS}, so a stale link never
- * hijacks a later, unrelated sign-in. Auth lifetime is a real-time concern, so
- * the timestamp is wall-clock through the one documented seam
- * (`wallClockNowIso`), never scenario time, and it is never shown.
+ * The entry expires after {@link RETURN_TO_TTL_MS}, and every client-session
+ * reset forgets it (sign-out, and every sign-in, staff included, through
+ * `resetClientSession`), so a stale link left on a shared device never carries
+ * the next person to someone else's page. The participant pages take it before
+ * that reset runs (`completeSignIn`'s options are built first). Auth lifetime
+ * is a real-time concern, so the timestamp is wall-clock through the one
+ * documented seam (`wallClockNowIso`), never scenario time, and never shown.
  *
  * **Never an open redirect.** Only a same-origin, host-relative participant path
  * is kept, and it is re-checked on read (storage can be edited): it must start
@@ -31,13 +34,14 @@
  * World: participant (the only world with deep links into the fiction). No UI.
  */
 
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { wallClockNowIso } from '@/core/time/wallClock'
 
 /** The storage key. */
 export const RETURN_TO_STORAGE_KEY = 'pulse.participant.returnTo'
 
 /** How long a remembered path survives (a sign-in takes minutes, not hours). */
-export const RETURN_TO_TTL_MS = 30 * 60 * 1000
+export const RETURN_TO_TTL_MS = 15 * 60 * 1000
 
 /** The longest path kept. */
 export const RETURN_TO_MAX_LENGTH = 512
@@ -114,3 +118,14 @@ export function takeReturnTo(): string | null {
     return null
   }
 }
+
+/** Forgets any remembered destination. */
+export function clearReturnTo(): void {
+  try {
+    storage()?.removeItem(RETURN_TO_STORAGE_KEY)
+  } catch {
+    // Blocked storage holds nothing to clear.
+  }
+}
+
+registerSessionReset(clearReturnTo, import.meta.hot)

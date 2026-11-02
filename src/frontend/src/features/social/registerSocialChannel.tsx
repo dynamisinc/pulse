@@ -30,4 +30,4 @@ registerChannel({
   element: <SocialChannel />,
   themeScope: SocialBrandScope,
   claimsPath: pathname => matchSocialRoute(pathname) !== 'redirect',
-})
+}, import.meta.hot)

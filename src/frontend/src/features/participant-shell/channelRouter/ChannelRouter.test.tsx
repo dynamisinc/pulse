@@ -11,7 +11,7 @@
  * exactly as they do in the app. Channels are stub registrations: the router
  * is under test, not any channel's pages.
  */
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -216,6 +216,15 @@ describe('channel registry → router (AC1)', () => {
     expect(document.querySelector('[data-channel-router-scope]')).toBeNull()
   })
 
+  it('matches a channel prefix case-insensitively (a hand-typed /News link)', async () => {
+    respondWith({ social: true, news: true })
+    registerPrefixed('news')
+    renderRouter('/News/newsline-7/emergency-call-delays')
+
+    expect(await screen.findByTestId('channel-news')).toBeInTheDocument()
+    expect(screen.queryByTestId('channel-social')).not.toBeInTheDocument()
+  })
+
   it('a channel registered later is mounted without touching the router (late registration)', async () => {
     respondWith({ social: true, news: true })
     renderRouter('/news/newsline-7/emergency-call-delays')
@@ -328,17 +337,28 @@ describe('nav agreement (AC3)', () => {
 
     await screen.findByTestId('channel-social')
     await waitFor(() =>
-      expect(within(strip()).getByRole('button', { name: 'News', hidden: true })).toBeInTheDocument())
-    expect(within(strip()).queryByRole('button', { name: 'Weather', hidden: true })).toBeNull()
-    expect(within(strip()).getByRole('button', { name: 'Social', hidden: true }))
+      expect(within(strip()).getByRole('link', { name: 'News', hidden: true })).toBeInTheDocument())
+    expect(within(strip()).queryByRole('link', { name: 'Weather', hidden: true })).toBeNull()
+    expect(within(strip()).getByRole('link', { name: 'Social', hidden: true }))
       .toHaveAttribute('aria-current', 'page')
 
-    await user.click(within(strip()).getByRole('button', { name: 'News', hidden: true }))
+    await user.click(within(strip()).getByRole('link', { name: 'News', hidden: true }))
 
     expect(await screen.findByTestId('channel-news')).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/news')
-    expect(within(strip()).getByRole('button', { name: 'News', hidden: true }))
+    expect(within(strip()).getByRole('link', { name: 'News', hidden: true }))
       .toHaveAttribute('aria-current', 'page')
+  })
+
+  it('nav entries are real links to each channel’s nav path', async () => {
+    respondWith({ social: true, news: true })
+    renderRouter('/home')
+
+    await waitFor(() =>
+      expect(within(strip()).getByRole('link', { name: 'News', hidden: true }))
+        .toHaveAttribute('href', '/news'))
+    expect(within(strip()).getByRole('link', { name: 'Social', hidden: true }))
+      .toHaveAttribute('href', '/home')
   })
 
   it('the disabled channel’s URL renders the participant not-found', async () => {
@@ -354,8 +374,8 @@ describe('nav agreement (AC3)', () => {
     renderRouter('/home')
 
     await waitFor(() =>
-      expect(within(strip()).getByRole('button', { name: 'News', hidden: true })).toBeInTheDocument())
-    expect(within(strip()).queryByRole('button', { name: 'Press Room', hidden: true })).toBeNull()
+      expect(within(strip()).getByRole('link', { name: 'News', hidden: true })).toBeInTheDocument())
+    expect(within(strip()).queryByRole('link', { name: 'Press Room', hidden: true })).toBeNull()
   })
 
   it('moves focus to the new channel’s heading on a channel switch (keyboard only)', async () => {
@@ -363,17 +383,53 @@ describe('nav agreement (AC3)', () => {
     const user = userEvent.setup()
     renderRouter('/home')
     await waitFor(() =>
-      expect(within(strip()).getByRole('button', { name: 'News', hidden: true })).toBeInTheDocument())
+      expect(within(strip()).getByRole('link', { name: 'News', hidden: true })).toBeInTheDocument())
 
-    within(strip()).getByRole('button', { name: 'News', hidden: true }).focus()
+    within(strip()).getByRole('link', { name: 'News', hidden: true }).focus()
     await user.keyboard('{Enter}')
 
     const heading = await screen.findByRole('heading', { name: 'news heading' })
     expect(heading).toHaveFocus()
 
-    within(strip()).getByRole('button', { name: 'Social', hidden: true }).focus()
-    await user.keyboard(' ')
+    within(strip()).getByRole('link', { name: 'Social', hidden: true }).focus()
+    await user.keyboard('{Enter}')
     expect(await screen.findByRole('heading', { name: 'social heading' })).toHaveFocus()
+  })
+})
+
+describe('focus follows a late heading (AC8)', () => {
+  let revealHeading: () => void = () => {}
+
+  function LateHeadingChannel() {
+    const [ready, setReady] = useState(false)
+    useEffect(() => {
+      revealHeading = () => setReady(true)
+    }, [])
+    return ready ? <h1>weather heading</h1> : <p>loading forecast</p>
+  }
+
+  it('parks on the content scope, then moves to the heading once it renders', async () => {
+    registerSocial()
+    registerChannel({
+      id: 'weather',
+      pathPrefix: '/weather',
+      element: <LateHeadingChannel />,
+      themeScope: PlainScope,
+    })
+    respondWith({ social: true, weather: true })
+    const user = userEvent.setup()
+    renderRouter('/home')
+    await waitFor(() =>
+      expect(within(strip()).getByRole('link', { name: 'Weather', hidden: true })).toBeInTheDocument())
+
+    await user.click(within(strip()).getByRole('link', { name: 'Weather', hidden: true }))
+
+    expect(await screen.findByText('loading forecast')).toBeInTheDocument()
+    expect(document.activeElement).toHaveAttribute('data-channel-router-scope', 'weather')
+
+    act(() => revealHeading())
+
+    expect(await screen.findByRole('heading', { name: 'weather heading' })).toHaveFocus()
   })
 })
 

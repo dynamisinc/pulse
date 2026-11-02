@@ -38,6 +38,7 @@
  */
 
 import { useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
+import type { HotModule } from '@/core/auth/sessionReset'
 import { isChannelId, type ChannelId } from '../contract'
 
 /** The channel mounted at the site root. */
@@ -83,13 +84,26 @@ export function channelPathPrefix(id: ChannelId): string {
 
 const NAV_PATH = /^\/[a-z0-9-]*(?:\/[a-z0-9-]+)*$/
 
+/** A nav path is a plain path under the channel's own prefix (Social: any root path). */
+function isOwnNavPath(id: ChannelId, navPath: string): boolean {
+  if (!NAV_PATH.test(navPath)) return false
+  const prefix = channelPathPrefix(id)
+  if (prefix === '/') {
+    const segment = navPath.split('/')[1] ?? ''
+    return !isChannelId(segment) || segment === ROOT_CHANNEL_ID
+  }
+  return navPath === prefix || navPath.startsWith(`${prefix}/`)
+}
+
 /**
  * Registers a participant channel. Call once, at module scope, from the
  * channel's own feature folder. A second registration of the same id with a
  * different element is refused; re-registering the same registration is a
- * no-op (HMR, a module imported twice).
+ * no-op. Pass the registering module's `import.meta.hot` as `hot` (the
+ * `registerSessionReset` pattern): when Vite hot-replaces that module its old
+ * entry is dropped first, so the re-evaluated registration takes effect.
  */
-export function registerChannel(registration: ChannelRegistration): void {
+export function registerChannel(registration: ChannelRegistration, hot?: HotModule): void {
   const { id, pathPrefix, navPath } = registration
   if (!isChannelId(id)) {
     registryError(`"${String(id)}" is not a catalogued channel id`)
@@ -99,7 +113,7 @@ export function registerChannel(registration: ChannelRegistration): void {
     registryError(`channel "${id}" must register at "${channelPathPrefix(id)}", not "${pathPrefix}"`)
     return
   }
-  if (navPath !== undefined && !NAV_PATH.test(navPath)) {
+  if (navPath !== undefined && !isOwnNavPath(id, navPath)) {
     registryError(`channel "${id}" has an invalid navPath "${navPath}"`)
     return
   }
@@ -114,6 +128,11 @@ export function registerChannel(registration: ChannelRegistration): void {
   }
   channels.set(id, registration)
   changed()
+  hot?.dispose(() => {
+    if (channels.get(id) !== registration) return
+    channels.delete(id)
+    changed()
+  })
 }
 
 /** The registered channels, in registration order. */
@@ -146,7 +165,8 @@ export function findChannelForPath(
   pathname: string,
   registered: readonly ChannelRegistration[],
 ): ChannelRegistration | undefined {
-  const segment = pathname.split('/')[1] ?? ''
+  // Case-insensitive, like React Router's own matching: `/News/x` is News's.
+  const segment = (pathname.split('/')[1] ?? '').toLowerCase()
   const prefixed = registered.find(
     channel => channel.pathPrefix !== '/' && channel.pathPrefix === `/${segment}`,
   )
