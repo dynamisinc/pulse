@@ -195,7 +195,7 @@ export interface ChannelContentStaffDto extends Omit<ChannelContentDto, 'state' 
   readonly origin: ContentOrigin
   readonly actingHumanId: string
   readonly scheduledScenarioTime: string | null
-  /** Why the last scheduled publish was refused (the item went back to draft), else null. Staff-only. */
+  /** Why the last scheduled publish was refused (item back in draft), else null. Staff-only. */
   readonly lastError: string | null
   /** Wall clock: staff-only, never shown in-fiction. */
   readonly publishedWallClock: string | null

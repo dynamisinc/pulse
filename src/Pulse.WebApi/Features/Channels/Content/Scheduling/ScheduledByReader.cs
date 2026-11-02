@@ -13,9 +13,11 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// <c>ActingHumanId</c> is whoever drafted it.
 /// </summary>
 /// <remarks>
-/// The read runs in the item's exercise scope (the central filter confines it). When no schedule event can be read
+/// The same event's scenario time is when the schedule was made: the floor for the publish stamp, so a schedule set for
+/// a time already past never back-dates the item. The read runs in the item's exercise scope (the central filter confines it). When no schedule event can be read
 /// (telemetry pruned, a row written before the funnel), the item's own attribution is used, with a staff
-/// <c>controller</c> origin for an engine draft, since only staff schedule those (NWS-022).
+/// <c>controller</c> origin for an engine draft, since only staff schedule those (NWS-022), and the item's creation
+/// time as the floor.
 /// </remarks>
 public sealed class ScheduledByReader
 {
@@ -32,11 +34,11 @@ public sealed class ScheduledByReader
         _db = db;
     }
 
-    /// <summary>The caller to publish item <paramref name="itemId"/> as, or null when it is not visible in this scope.</summary>
+    /// <summary>Who scheduled item <paramref name="itemId"/>, and when; null when it is not visible in this scope.</summary>
     /// <param name="itemId">The scheduled item.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The scheduling human's caller.</returns>
-    public async Task<ContentCaller?> ReadAsync(Guid itemId, CancellationToken cancellationToken = default)
+    /// <returns>The scheduling human's caller and the scenario time of the schedule.</returns>
+    public async Task<ScheduledBy?> ReadAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         var entityId = itemId.ToString();
         var events = await _db.TelemetryEvents
@@ -47,7 +49,7 @@ public sealed class ScheduledByReader
                 && e.Target.EntityId == entityId)
             .OrderByDescending(e => e.EmittedAt)
             .Take(RecentEvents)
-            .Select(e => new { e.Origin, e.InjectId, e.Actor.ActingHumanId, e.Payload })
+            .Select(e => new { e.Origin, e.InjectId, e.Actor.ActingHumanId, e.Payload, e.ScenarioTime })
             .ToListAsync(cancellationToken);
 
         var scheduledBy = events.FirstOrDefault(e => IsScheduleAction(e.Payload));
@@ -55,7 +57,7 @@ public sealed class ScheduledByReader
         {
             // The envelope origin is the v0 union (ContentTelemetry.TelemetryOriginOf): null is a controller action.
             var origin = scheduledBy.Origin ?? ChannelVocabulary.OriginController;
-            return new ContentCaller
+            var caller = new ContentCaller
             {
                 Origin = origin,
                 ActingHumanId = scheduledBy.ActingHumanId,
@@ -63,12 +65,13 @@ public sealed class ScheduledByReader
                     ? injectId
                     : null,
             };
+            return new ScheduledBy(caller, scheduledBy.ScenarioTime);
         }
 
         var item = await _db.ContentItems
             .AsNoTracking()
             .Where(candidate => candidate.Id == itemId)
-            .Select(candidate => new { candidate.Origin, candidate.ActingHumanId, candidate.InjectId })
+            .Select(candidate => new { candidate.Origin, candidate.ActingHumanId, candidate.CreatedScenarioTime })
             .FirstOrDefaultAsync(cancellationToken);
         if (item is null)
         {
@@ -78,7 +81,8 @@ public sealed class ScheduledByReader
         var fallbackOrigin = item.Origin is ChannelVocabulary.OriginEngine or ChannelVocabulary.OriginInject
             ? ChannelVocabulary.OriginController
             : item.Origin;
-        return new ContentCaller { Origin = fallbackOrigin, ActingHumanId = item.ActingHumanId };
+        return new ScheduledBy(
+            new ContentCaller { Origin = fallbackOrigin, ActingHumanId = item.ActingHumanId }, item.CreatedScenarioTime);
     }
 
     private static bool IsScheduleAction(string? payload)
@@ -102,3 +106,8 @@ public sealed class ScheduledByReader
         }
     }
 }
+
+/// <summary>Who scheduled an item and the scenario time they did it at.</summary>
+/// <param name="Caller">The caller the scheduled publish acts as.</param>
+/// <param name="ScheduledAt">The scenario time of the schedule call (the publish stamp's floor), or null if unknown.</param>
+public sealed record ScheduledBy(ContentCaller Caller, DateTimeOffset? ScheduledAt);

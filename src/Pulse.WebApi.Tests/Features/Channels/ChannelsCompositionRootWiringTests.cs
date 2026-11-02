@@ -247,10 +247,6 @@ public sealed class ChannelsCompositionRootWiringTests
             "story 08 registers the gate RequireChannelEnabled resolves per request; a missing line 500s every gated route");
     }
 
-    /// <summary>
-    /// Boots the real <c>Program</c> host with a dummy, never-connecting connection string. When asked, every request
-    /// resolves to a fixed exercise (a scope from the bare Host header, and still no session). Overrides nothing else.
-    /// </summary>
     [Fact]
     public void ProgramCs_RegistersTheContentScheduleRunner_ThroughAddChannels()
     {
@@ -261,7 +257,7 @@ public sealed class ChannelsCompositionRootWiringTests
 
         using var scope = factory.Services.CreateScope();
         ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
-        scope.ServiceProvider.GetRequiredService<IContentScheduleFailureRecorder>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<IScheduledContentPublisher>().Should().BeOfType<ContentPublishService>();
         scope.ServiceProvider.GetRequiredService<ScheduledByReader>().Should().NotBeNull();
 
         var twice = new ServiceCollection().AddChannels().AddChannels();
@@ -269,6 +265,10 @@ public sealed class ChannelsCompositionRootWiringTests
             .Should().Be(1, "the runner runs once per host however often AddChannels() is called");
     }
 
+    /// <summary>
+    /// Boots the real <c>Program</c> host with a dummy, never-connecting connection string. When asked, every request
+    /// resolves to a fixed exercise (a scope from the bare Host header, and still no session). Overrides nothing else.
+    /// </summary>
     private sealed class WiringProbeFactory : WebApplicationFactory<Program>
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";

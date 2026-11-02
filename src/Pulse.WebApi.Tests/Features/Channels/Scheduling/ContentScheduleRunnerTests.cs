@@ -38,6 +38,8 @@ public sealed class ContentScheduleRunnerTests : IDisposable
     {
         _harness.Clock.Start(_harness.ExerciseId, FunnelHarness.ScenarioStart, TimeZoneInfo.Utc);
         _tiers = new PauseTierRegistry(_harness.Clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance);
+        SetStatus(_harness.ExerciseId, "live");
+        SetStatus(_harness.OtherExerciseId, "live");
     }
 
     public void Dispose() => _harness.Dispose();
@@ -150,6 +152,25 @@ public sealed class ContentScheduleRunnerTests : IDisposable
 
         await _tiers.SetTierAsync(_harness.ExerciseId, PauseTier.Running, "human-ctl");
         (await Runner().RunTickAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    public async Task AnExerciseNotLive_PublishesNothing_EvenWithAPersistedScenarioTimePastTheSchedule(string status)
+    {
+        var id = await ScheduleAsync("2033-09-04T08:10:00Z");
+        _harness.Clock.Jump(_harness.ExerciseId, 30);
+        SetStatus(_harness.ExerciseId, status);
+
+        (await Runner().RunTickAsync()).Should().Be(0, "only a live exercise fires scenario content (COR-032)");
+        (await _harness.ItemAsync(id)).Status.Should().Be("scheduled");
+
+        SetStatus(_harness.ExerciseId, "active");
+        (await Runner().RunTickAsync()).Should().Be(1, "the legacy 'active' literal reads as live");
     }
 
     [Theory]
@@ -304,7 +325,8 @@ public sealed class ContentScheduleRunnerTests : IDisposable
 
         var item = await _harness.ItemAsync(id);
         item.Status.Should().Be("draft");
-        item.LastError.Should().Be("Awaiting approval.");
+        item.LastError.Should().Be("Scheduled publish for 2033-09-04T08:10:00Z was refused: Awaiting approval.",
+            "the schedule is cleared, so the error keeps the time it was due for");
     }
 
     [Fact]
@@ -332,9 +354,10 @@ public sealed class ContentScheduleRunnerTests : IDisposable
         }
 
         using var read = _harness.InA();
-        var caller = await read.Services.GetRequiredService<ScheduledByReader>().ReadAsync(Guid.Parse(id));
+        var scheduledBy = await read.Services.GetRequiredService<ScheduledByReader>().ReadAsync(Guid.Parse(id));
 
-        caller.Should().BeEquivalentTo(new ContentCaller { Origin = "controller", ActingHumanId = "human-author" });
+        scheduledBy!.Caller.Should().BeEquivalentTo(new ContentCaller { Origin = "controller", ActingHumanId = "human-author" });
+        scheduledBy.ScheduledAt.Should().Be(FunnelHarness.ScenarioStart, "the floor falls back to the item's creation time");
     }
 
     [Fact]
@@ -344,10 +367,97 @@ public sealed class ContentScheduleRunnerTests : IDisposable
         var version = (await _harness.ItemAsync(id)).Version;
 
         using var scope = _harness.InA();
-        var recorder = scope.Services.GetRequiredService<IContentScheduleFailureRecorder>();
+        var recorder = scope.Services.GetRequiredService<IScheduledContentPublisher>();
         (await recorder.RecordScheduleFailureAsync(Guid.Parse(id), version - 1, "stale", Scheduler)).Should().BeFalse();
 
         (await _harness.ItemAsync(id)).Status.Should().Be("scheduled");
+    }
+
+    [Fact]
+    public async Task AStaffUnscheduleLandingAfterDiscovery_Wins_TheRunnerNeverPublishesTheDraft()
+    {
+        var first = await ScheduleAsync("2033-09-04T08:05:00Z", headline: "First");
+        var second = await ScheduleAsync("2033-09-04T08:10:00Z", headline: "Second");
+        _harness.Clock.Jump(_harness.ExerciseId, 30);
+
+        // Both are discovered; while the runner publishes the first, a controller unschedules the second.
+        _harness.Gates.Add(new ActionGate(Guid.Parse(first), async () =>
+        {
+            using var staff = _harness.InA();
+            (await staff.Funnel.UnscheduleAsync(Guid.Parse(second), FunnelHarness.Controller)).Outcome.Should().Be(ContentPublishOutcome.Ok);
+        }));
+
+        (await Runner().RunTickAsync()).Should().Be(1);
+
+        (await _harness.ItemAsync(second)).Status.Should().Be("draft", "the controller's withdrawal wins");
+        _harness.Broadcaster.Published.Select(content => content.Id).Should().Equal([first]);
+        (await _harness.EventsAsync()).Should().NotContain(e => e.EventType == ChannelTelemetryEventTypes.ContentScheduleFailed);
+    }
+
+    [Fact]
+    public async Task PublishDue_RefusesAStaleClaim_AnUnscheduledItem_AndANotYetDueItem()
+    {
+        var id = await ScheduleAsync("2033-09-04T08:10:00Z");
+        var discovered = (await _harness.ItemAsync(id)).Version;
+
+        using (var scope = _harness.InA())
+        {
+            var publisher = scope.Services.GetRequiredService<IScheduledContentPublisher>();
+            (await publisher.PublishDueAsync(Guid.Parse(id), discovered, null, Scheduler)).Outcome
+                .Should().Be(ContentPublishOutcome.Conflict, "08:10 is not due at 08:00");
+        }
+
+        _harness.Clock.Jump(_harness.ExerciseId, 30);
+        using (var scope = _harness.InA())
+        {
+            (await scope.Services.GetRequiredService<IScheduledContentPublisher>()
+                .PublishDueAsync(Guid.Parse(id), discovered - 1, null, Scheduler)).Outcome
+                .Should().Be(ContentPublishOutcome.Conflict, "the item changed since it was discovered");
+        }
+
+        using (var scope = _harness.InA())
+        {
+            await scope.Funnel.UnscheduleAsync(Guid.Parse(id), FunnelHarness.Controller);
+        }
+
+        using (var scope = _harness.InA())
+        {
+            var version = (await _harness.ItemAsync(id)).Version;
+            (await scope.Services.GetRequiredService<IScheduledContentPublisher>()
+                .PublishDueAsync(Guid.Parse(id), version, null, Scheduler)).Outcome
+                .Should().Be(ContentPublishOutcome.Conflict, "a draft is never published by the scheduler");
+        }
+
+        (await _harness.ItemAsync(id)).Status.Should().Be("draft");
+        _harness.Broadcaster.Published.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASchedulePlacedInThePast_IsStampedWhenItWasScheduled_NeverBackDated()
+    {
+        _harness.Clock.Jump(_harness.ExerciseId, 60); // 09:00
+        var id = await ScheduleAsync("2033-09-04T08:10:00Z");
+        _harness.Clock.Jump(_harness.ExerciseId, 30); // 09:30
+
+        (await Runner().RunTickAsync()).Should().Be(1);
+
+        (await _harness.ItemAsync(id)).PublishedScenarioTime.Should().Be(
+            FunnelHarness.ScenarioStart.AddMinutes(60), "the schedule was made at 09:00, so it cannot have run at 08:10");
+    }
+
+    [Fact]
+    public async Task PublishNow_OfAnOverdueScheduledItem_StampsNow()
+    {
+        var id = await ScheduleAsync("2033-09-04T08:10:00Z");
+        _harness.Clock.Jump(_harness.ExerciseId, 30);
+
+        using (var scope = _harness.InA())
+        {
+            (await scope.Funnel.PublishAsync(Guid.Parse(id), null, FunnelHarness.Controller)).Outcome.Should().Be(ContentPublishOutcome.Ok);
+        }
+
+        (await _harness.ItemAsync(id)).PublishedScenarioTime.Should().Be(
+            FunnelHarness.ScenarioStart.AddMinutes(30), "a staff publish-now is a publish at the current scenario time");
     }
 
     [Fact]
@@ -371,6 +481,14 @@ public sealed class ContentScheduleRunnerTests : IDisposable
         new ContentScheduleClockObserver(signal).ClockChanged(_harness.ExerciseId);
 
         (await signal.WaitAsync(TimeSpan.FromMinutes(5), TimeProvider.System, CancellationToken.None)).Should().BeTrue();
+    }
+
+    private void SetStatus(Guid exerciseId, string status)
+    {
+        using var scope = _harness.In(exerciseId);
+        var exercise = scope.Db.Exercises.IgnoreQueryFilters().Single(candidate => candidate.Id == exerciseId);
+        exercise.Status = status;
+        scope.Db.SaveChanges();
     }
 
     private ContentScheduleRunner Runner() => new(
@@ -412,6 +530,21 @@ public sealed class ContentScheduleRunnerTests : IDisposable
             {
                 Entered.TrySetResult();
                 await Release.Task;
+            }
+
+            return ContentPublishGateDecision.Allow();
+        }
+    }
+
+    /// <summary>Runs an action while one item's publish is mid-flight (to stage a staff change), then allows.</summary>
+    private sealed class ActionGate(Guid itemId, Func<Task> action) : IContentPublishGate
+    {
+        public async Task<ContentPublishGateDecision> EvaluateAsync(
+            ContentItem item, PublishContext context, CancellationToken cancellationToken = default)
+        {
+            if (item.Id == itemId)
+            {
+                await action();
             }
 
             return ContentPublishGateDecision.Allow();

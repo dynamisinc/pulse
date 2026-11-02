@@ -7,6 +7,7 @@ using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// The scheduled-publish runner (channels-foundation story 05; NWS-013, PRS-003, COR-050/051): a hosted service that
@@ -28,22 +29,27 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// (<see cref="IExerciseClock"/>, else the persisted <c>Exercise.CurrentScenarioTime</c>). An exercise whose scenario
 /// time is unknown publishes nothing: the wall clock never decides. Due items go out in scheduled order, and the funnel
 /// stamps each with its OWN scheduled time, so a forward jump past several keeps the timeline honest (COR-051). A
-/// backward jump makes nothing due and never un-publishes anything.
+/// backward jump makes nothing due and never un-publishes anything. Only an exercise whose lifecycle state fires
+/// scenario content (COR-032 <c>live</c>) publishes: a <c>build</c>, <c>staged</c>, <c>paused</c>, <c>completed</c> or
+/// <c>archived</c> exercise keeps its items scheduled, however stale its persisted scenario time.
 /// </para>
 /// <para>
-/// <b>Publish options (FC-7a).</b> The runner calls <c>PublishAsync(id, null, …)</c>, so the funnel replays the item's
+/// <b>Publish options (FC-7a).</b> The runner calls <see cref="IScheduledContentPublisher.PublishDueAsync"/>, the funnel's
+/// option-less publish (exactly <c>PublishAsync(id, null, …)</c> plus the claim below), so it replays the item's
 /// persisted <c>PublishOptionsJson</c> or the kind's <c>ResolvePublishOptions</c>; the alert and paired post chosen at
 /// schedule time fire at publish. The caller is the human who scheduled the item (<see cref="ScheduledByReader"/>).
 /// </para>
 /// <para>
-/// <b>Exactly once (the <c>Version</c> token).</b> The funnel's publish commits under the item's concurrency token, so a
-/// second instance (or a tick retried after a restart) that sees the same due item loses the race and gets
-/// <see cref="ContentPublishOutcome.Conflict"/>, which the runner skips silently; the side effects run only after the
-/// winning commit, so they never fire twice.
+/// <b>Exactly once (the <c>Version</c> token).</b> The publish is a claim on the item as discovered: it goes ahead only
+/// if the item is still <c>scheduled</c>, still due and still at the discovered <c>Version</c>, and it commits under
+/// the item's concurrency token. So a second instance (or a tick retried after a restart) loses the race, and a staff
+/// unschedule, edit or reschedule that landed since discovery wins; either way the runner gets
+/// <see cref="ContentPublishOutcome.Conflict"/> and skips silently. The side effects run only after the winning commit,
+/// so they never fire twice.
 /// </para>
 /// <para>
 /// <b>A refusal is visible, not a retry loop.</b> When the funnel refuses the publish (<c>Invalid</c>: a deleted outlet,
-/// a payload that no longer validates; or <c>Held</c> by a gate), <see cref="IContentScheduleFailureRecorder"/> returns
+/// a payload that no longer validates; or <c>Held</c> by a gate), <see cref="IScheduledContentPublisher"/> returns
 /// the item to <c>draft</c> with a staff-visible <c>LastError</c> and one <c>content_schedule_failed</c> event, so it is
 /// not found again.
 /// </para>
@@ -174,7 +180,8 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                 .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(exercise => exerciseIds.Contains(exercise.Id))
-                .Select(exercise => new ExerciseFacts(exercise.Id, exercise.OrganizationId, exercise.CurrentScenarioTime))
+                .Select(exercise => new ExerciseFacts(
+                    exercise.Id, exercise.OrganizationId, exercise.Status, exercise.CurrentScenarioTime))
                 .ToDictionaryAsync(exercise => exercise.ExerciseId, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -192,6 +199,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         foreach (var group in scheduled.GroupBy(item => item.ExerciseId))
         {
             if (!exercises.TryGetValue(group.Key, out var exercise)
+                || !ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires
                 || _pauseTiers.GetTier(group.Key) == PauseTier.Freeze
                 || _clock.IsFrozen(group.Key)
                 || (_clock.CurrentScenarioTime(group.Key) ?? exercise.CurrentScenarioTime) is not { } scenarioNow)
@@ -308,21 +316,32 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                 "The registered IExerciseContext is not settable; the content schedule runner cannot establish its scope (COR-001).");
         }
 
-        if (services.GetService<IOrganizationContext>() is OrganizationContext organizationContext)
+        switch (services.GetService<IOrganizationContext>())
         {
-            organizationContext.CurrentOrganizationId = exercise.OrganizationId;
+            case OrganizationContext organizationContext:
+                organizationContext.CurrentOrganizationId = exercise.OrganizationId;
+                break;
+            case null:
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "The registered IOrganizationContext is not settable; the content schedule runner cannot establish its tenant.");
         }
 
-        var caller = await services.GetRequiredService<ScheduledByReader>()
-            .ReadAsync(item.ItemId, cancellationToken)
-            .ConfigureAwait(false);
-        if (caller is null)
+        // Null: the item is not visible in its own scope (deleted since discovery), so there is nothing to publish.
+        if (await services.GetRequiredService<ScheduledByReader>().ReadAsync(item.ItemId, cancellationToken).ConfigureAwait(false)
+            is not { } scheduledBy)
         {
             return false;
         }
 
-        var result = await services.GetRequiredService<IContentPublishService>()
-            .PublishAsync(item.ItemId, options: null, caller, cancellationToken)
+        var caller = scheduledBy.Caller;
+        var publisher = services.GetRequiredService<IScheduledContentPublisher>();
+
+        // The claim: published only if still scheduled, still due and still at the discovered version — a staff unschedule
+        // or edit that landed since discovery wins (Conflict, skipped below).
+        var result = await publisher
+            .PublishDueAsync(item.ItemId, item.Version, scheduledBy.ScheduledAt, caller, cancellationToken)
             .ConfigureAwait(false);
 
         switch (result.Outcome)
@@ -334,7 +353,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                 var error = result.Errors.Count == 0
                     ? "The scheduled publish was refused."
                     : string.Join("; ", result.Errors);
-                if (await services.GetRequiredService<IContentScheduleFailureRecorder>()
+                if (await publisher
                         .RecordScheduleFailureAsync(item.ItemId, item.Version, error, caller, cancellationToken)
                         .ConfigureAwait(false))
                 {
@@ -344,7 +363,8 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                 return false;
 
             default:
-                // Conflict: another instance (or a staff action) got there first. NotFound: deleted meanwhile. Skip silently.
+                // Conflict: another instance or a staff action got there first, or the item is no longer due. NotFound:
+                // deleted meanwhile. Skip silently.
                 return false;
         }
     }
@@ -376,8 +396,8 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     /// <summary>A scheduled item found by the discovery read — ids and the schedule only.</summary>
     private sealed record ScheduledItem(Guid ExerciseId, Guid ItemId, DateTimeOffset ScheduledScenarioTime, int Version);
 
-    /// <summary>The exercise facts the per-item scope needs: its tenant and persisted scenario time.</summary>
-    private sealed record ExerciseFacts(Guid ExerciseId, Guid OrganizationId, DateTimeOffset? CurrentScenarioTime);
+    /// <summary>The exercise facts the sweep needs: its tenant, lifecycle state and persisted scenario time.</summary>
+    private sealed record ExerciseFacts(Guid ExerciseId, Guid OrganizationId, string Status, DateTimeOffset? CurrentScenarioTime);
 }
 
 /// <summary>The <see cref="ContentScheduleRunner"/> cadences.</summary>

@@ -278,8 +278,17 @@ public sealed partial class ContentPublishService : IContentPublishService
     }
 
     /// <inheritdoc />
-    public async Task<ContentPublishResult> PublishAsync(
-        Guid id, PublishOptions? options, ContentCaller caller, CancellationToken cancellationToken = default)
+    public Task<ContentPublishResult> PublishAsync(
+        Guid id, PublishOptions? options, ContentCaller caller, CancellationToken cancellationToken = default) =>
+        PublishCoreAsync(id, options, caller, claim: null, cancellationToken);
+
+    /// <summary>
+    /// The one publish path. <paramref name="claim"/> is the scheduler's (story 05): the item must still be the
+    /// <c>scheduled</c>, due item at the version the runner discovered, else <see cref="ContentPublishOutcome.Conflict"/>
+    /// and nothing changes; and it is stamped at its own scheduled time.
+    /// </summary>
+    private async Task<ContentPublishResult> PublishCoreAsync(
+        Guid id, PublishOptions? options, ContentCaller caller, ScheduledClaim? claim, CancellationToken cancellationToken)
     {
         caller = NormalizeCaller(caller);
 
@@ -290,9 +299,22 @@ public sealed partial class ContentPublishService : IContentPublishService
         }
 
         var (item, descriptor, exerciseId) = (load.Item!, load.Descriptor!, load.ExerciseId);
+        var time = await ClockAsync(exerciseId, cancellationToken);
 
-        // Story 05: an item drafted or scheduled earlier is re-checked as it goes live, so a scheduled publish whose outlet
-        // was deleted, or whose payload no longer validates, is refused (and the runner returns it to draft).
+        // Story 05: a staff unschedule, edit or reschedule that landed after the runner found the item wins; the runner
+        // never publishes a draft or an item that is no longer due.
+        if (claim is not null
+            && (item.Version != claim.ExpectedVersion
+                || item.Status != ChannelVocabulary.StatusScheduled
+                || item.ScheduledScenarioTime is not { } due
+                || due > time.ScenarioTime))
+        {
+            return await ConflictAsync(item, ScheduledClaimLostMessage);
+        }
+
+        // Story 05: EVERY publish (publish-now, the scheduler, inject fire, a participant composer) re-checks the item as
+        // it goes live — its outlet still exists and its stored payload still validates for `published` — since both were
+        // only checked when it was written. Fail closed: a refused scheduled publish goes back to draft via the runner.
         if (await WhyNotPublishableAsync(item, descriptor, exerciseId, cancellationToken) is { Count: > 0 } unpublishable)
         {
             return Invalid([.. unpublishable]);
@@ -310,16 +332,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         var callOptions = caller.Origin == ChannelVocabulary.OriginParticipant ? null : options;
         var (resolved, _) = PublishOptionsResolver.Resolve(callOptions, item, descriptor);
 
-        var time = await ClockAsync(exerciseId, cancellationToken);
-
-        // Story 05 (COR-051): a scheduled item that is already due goes live AT its own scheduled scenario time, so a
-        // runner tick after a forward jump (or a restart) never stamps the jump target and the timeline stays honest.
-        // An early publish-now of a not-yet-due item stamps now.
-        var publishedAt = item.Status == ChannelVocabulary.StatusScheduled
-            && item.ScheduledScenarioTime is { } due
-            && due < time.ScenarioTime
-                ? due
-                : time.ScenarioTime;
+        var publishedAt = claim is null ? time.ScenarioTime : ScheduledPublishTime(item, claim, time);
         item.Status = ChannelVocabulary.StatusPublished;
         item.PublishedScenarioTime = publishedAt;
         item.PublishedWallClock = time.WallClock;

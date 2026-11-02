@@ -14,7 +14,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// </remarks>
 public static class ContentSchedulingServiceCollectionExtensions
 {
-    /// <summary>Registers the scheduled-publish runner, its wake-up line and its failure write.</summary>
+    /// <summary>Registers the scheduled-publish runner, its wake-up line and the funnel's scheduler entry points.</summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddContentScheduling(this IServiceCollection services)
@@ -25,7 +25,7 @@ public static class ContentSchedulingServiceCollectionExtensions
         services.TryAddSingleton(new ContentScheduleRunnerOptions());
         services.TryAddSingleton<ContentScheduleSignal>();
         services.TryAddScoped<ScheduledByReader>();
-        services.TryAddScoped<IContentScheduleFailureRecorder, ContentPublishService>();
+        services.TryAddScoped<IScheduledContentPublisher, ContentPublishService>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IExerciseClockChangeObserver, ContentScheduleClockObserver>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ContentScheduleRunner>());
         return services;
