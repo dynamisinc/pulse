@@ -124,6 +124,25 @@ public static class ChannelCatalog
         new HashSet<string>(StringComparer.Ordinal) { SocialChannelId };
 
     /// <summary>
+    /// Whether <paramref name="channelId"/> is a catalogued channel id (exact, canonical casing). The one
+    /// membership test for the channel registry: <c>RequireChannelEnabled</c> refuses to map an uncatalogued id.
+    /// </summary>
+    /// <param name="channelId">The candidate id.</param>
+    /// <returns><c>true</c> when the id is in <see cref="All"/>.</returns>
+    public static bool IsCatalogued(string? channelId) =>
+        channelId is not null && All.Any(c => string.Equals(c.Id, channelId, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The EFFECTIVE enabled set for a parsed <see cref="Exercise.EnabledChannels"/> value: the configured set,
+    /// or <see cref="DefaultEnabledIds"/> when not configured. The nav config and the server-side channel gate
+    /// (channels-foundation 08, <c>IChannelEnablement</c>) both resolve through this one rule, so they agree.
+    /// </summary>
+    /// <param name="configured">The output of <see cref="ParseStored"/>.</param>
+    /// <returns>The enabled channel ids.</returns>
+    public static IReadOnlySet<string> ResolveEnabled(IReadOnlySet<string>? configured) =>
+        configured ?? DefaultEnabledIds;
+
+    /// <summary>
     /// Validates and canonicalizes a client-supplied channel-id list for STORAGE. Ids are matched
     /// case-insensitively and normalized to their canonical catalog casing; duplicates collapse; the result
     /// is emitted in catalog order. Fails (400) on an unknown id, an empty/blank id, an empty list, or an
@@ -648,7 +667,7 @@ public sealed class ParticipantShellConfigService
             return null;
         }
 
-        var enabled = source.EnabledChannelIds ?? ChannelCatalog.DefaultEnabledIds;
+        var enabled = ChannelCatalog.ResolveEnabled(source.EnabledChannelIds);
 
         var channels = ChannelCatalog.All
             .Select(entry => new ChannelNavChannel
