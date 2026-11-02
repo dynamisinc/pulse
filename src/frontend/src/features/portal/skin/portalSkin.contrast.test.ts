@@ -35,6 +35,9 @@ describe('portal default tokens: computed contrast (AC6)', () => {
     ['the red accent rule (breaking) on bg', p.breaking, p.bg],
     ['the red accent rule (breaking) on surface', p.breaking, p.surface],
   ])('%s is ≥ 3:1 (UI)', (_label, fg, bg) => {
+    // The red rule sits on the band's bottom edge but is decorative: the band/page
+    // boundary is carried by the accent itself (≥ 3:1 on bg, above). Red on the blue
+    // band is deliberately not a UI pair.
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(AA_LARGE)
   })
 

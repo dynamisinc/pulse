@@ -3,7 +3,7 @@
  * scenario-time dateline off the shell's `scenarioNow`, the alerts-entry and watermark
  * slots, and the a11y shape (one banner, one h1, axe clean).
  */
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import axe from 'axe-core'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -119,6 +119,13 @@ describe('PortalMasthead: masthead (AC3)', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Atlanta Today')
   })
 
+  it('drops a logo that fails to load and keeps the name', () => {
+    mount()
+    fireEvent.error(screen.getByTestId('portal-masthead-logo'))
+    expect(screen.queryByTestId('portal-masthead-logo')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Atlanta Today')
+  })
+
   it('a blank name renders the neutral "Local Today", never the exercise name', () => {
     mount({ masthead: { ...MASTHEAD, name: '   ' } })
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(PORTAL_FALLBACK_NAME)
@@ -180,6 +187,18 @@ describe('PortalMasthead: slots (AC5)', () => {
 })
 
 describe('PortalMasthead: a11y (AC6)', () => {
+  it('is still the banner when mounted beside the portal main, as story 17 will', async () => {
+    const { container } = render(
+      <Frame>
+        <PortalMasthead masthead={MASTHEAD} />
+        <main><h2>Top stories</h2></main>
+      </Frame>,
+    )
+    expect(screen.getByRole('banner')).toBe(screen.getByTestId('portal-masthead'))
+    const results = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(results.violations.map(v => `${v.id}: ${v.help}`)).toEqual([])
+  })
+
   it('is a banner landmark with a single h1', () => {
     mount()
     const banner = screen.getByRole('banner')
@@ -187,7 +206,7 @@ describe('PortalMasthead: a11y (AC6)', () => {
     expect(within(banner).getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 
-  it('axe reports no violations', async () => {
+  it('axe reports no violations (structure; contrast is computed separately)', async () => {
     const { container } = mount({
       alertsEntry: <button type="button">Alerts</button>,
       hero: <div>hero</div>,
@@ -196,7 +215,7 @@ describe('PortalMasthead: a11y (AC6)', () => {
     expect(results.violations.map(v => `${v.id}: ${v.help}`)).toEqual([])
   })
 
-  it('axe reports no violations without a logo or tagline', async () => {
+  it('axe reports no structural violations without a logo or tagline', async () => {
     const { container } = mount({ masthead: { name: 'Local Today', tagline: null, logo: null } })
     const results = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
     expect(results.violations.map(v => `${v.id}: ${v.help}`)).toEqual([])

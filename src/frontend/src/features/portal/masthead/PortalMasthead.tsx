@@ -16,7 +16,7 @@
  *    component does not read it. A blank name renders "Local Today" (Q-E3-1).
  *    It is the page's one `h1` and plain text, never a link out of the portal.
  *  - LOGO: optional; an image with its own `alt`, through `resolveSafeMediaUrl`.
- *    Without one (or with an unsafe one) the name stands alone.
+ *    Without one (an unsafe one, or one that fails to load) the name stands alone.
  *  - DATELINE: the shell's `scenarioNow` (the single "now", COR-053) through
  *    F14's `ScenarioDateline` in the exercise zone, so it advances with the
  *    shell's ticker and never refetches. Never labelled "scenario time".
@@ -24,6 +24,10 @@
  *    masthead draws no alert bar of its own (the shell hosts the one bar).
  *    `hero`, when given, gets a positioned box with F14's `WatermarkSlot`
  *    (NFR-008).
+ *  - LANDMARK: a `<header>` is the page `banner` only outside `main` / `article`
+ *    / `section`, so the portal channel (story 17) mounts it ABOVE its `main`, not
+ *    inside it. (An explicit `role="banner"` inside `main` would fail axe's
+ *    landmark-banner-is-top-level, so the element carries no role of its own.)
  *  - MOBILE: at 320 px the band is the name line (truncating, never scrolling
  *    sideways) plus the dateline; the tagline drops below 480 px.
  *
@@ -31,7 +35,7 @@
  * World: participant. CSS Module over the skin variables; no COBRA, no MUI.
  */
 
-import type { CSSProperties, ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { ScenarioDateline, WatermarkSlot, useSkin } from '@/features/channels'
 import { resolveSafeMediaUrl } from '@/core/media/player'
 import { useShellContext } from '@/features/participant-shell/mountContract'
@@ -59,6 +63,8 @@ export function PortalMasthead({ masthead, alertsEntry, hero }: PortalMastheadPr
   const tagline = masthead.tagline?.trim() ?? ''
   const logo = masthead.logo
   const logoSrc = logo && logo.kind === 'image' ? resolveSafeMediaUrl(logo.url) : undefined
+  // A logo that fails to load is dropped, not shown as broken-image alt text on the band.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const bandStyle = { '--portal-masthead-today': mastheadTodayColor(tokens) } as CSSProperties
 
   return (
@@ -66,8 +72,14 @@ export function PortalMasthead({ masthead, alertsEntry, hero }: PortalMastheadPr
       <div className={styles.band} style={bandStyle}>
         <div className={styles.nameLine}>
           <div className={styles.brand}>
-            {logo && logoSrc && (
-              <img className={styles.logo} src={logoSrc} alt={logo.alt} data-testid="portal-masthead-logo" />
+            {logo && logoSrc && logoSrc !== failedSrc && (
+              <img
+                className={styles.logo}
+                src={logoSrc}
+                alt={logo.alt}
+                data-testid="portal-masthead-logo"
+                onError={() => setFailedSrc(logoSrc)}
+              />
             )}
             <h1 className={styles.name}>
               {lead}

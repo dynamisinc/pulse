@@ -10,7 +10,6 @@
   display: block;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   background-color: var(--pulse-skin-bg);
 }
 
@@ -21,7 +20,8 @@
   padding: 10px 16px;
   background-color: var(--pulse-skin-accent);
   color: var(--pulse-skin-on-accent);
-  /* The red accent rule (D2-001); F13 keeps `breaking` >= 3:1 on the page bg. */
+  /* The red accent rule (D2-001). Decorative: the band edge itself is the accent,
+     >= 3:1 on the page bg (F13); the rule reads against the page below it. */
   border-bottom: 4px solid var(--pulse-skin-breaking);
 }
 
@@ -77,6 +77,7 @@
 
 .metaLine {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
@@ -97,13 +98,14 @@
 }
 
 .dateline {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
   color: var(--pulse-skin-on-accent);
   font-family: var(--pulse-skin-font-kicker);
   font-weight: 600;
   letter-spacing: 0.04em;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* The hero area: a positioned box so the EXERCISE watermark slot sits on it (NFR-008). */
