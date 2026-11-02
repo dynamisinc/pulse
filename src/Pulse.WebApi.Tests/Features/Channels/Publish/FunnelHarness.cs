@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
@@ -109,6 +110,12 @@ internal sealed class FunnelHarness : IDisposable
         }
 
         services.AddChannels();
+        if (!withAlertRaiser)
+        {
+            // AddChannels() now registers the real alert source (story 10); "absent" means no raiser at all.
+            services.RemoveAll<IAlertRaiser>();
+        }
+
         configure?.Invoke(services);
 
         harness = new FunnelHarness(services.BuildServiceProvider(), time, clock);
