@@ -265,6 +265,12 @@ public sealed class RoleMatrixTests
         Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
         Probe("POST /api/outlets/reorder", ControllerOnly);
         Probe("POST /api/outlets/defaults", ControllerOnly);
+
+        // exercise-portal 04 (#770): Resources shelf authoring is planner + controller (story AC "Staff CRUD").
+        Probe("POST /api/portal/resources", PlannerOrController);
+        Probe("PUT /api/portal/resources/{id:guid}", PlannerOrController);
+        Probe("DELETE /api/portal/resources/{id:guid}", PlannerOrController);
+        Probe("POST /api/portal/resources/reorder", PlannerOrController);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);

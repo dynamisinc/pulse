@@ -28,6 +28,7 @@ using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
 using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.Weather;                // weather-source 01
+using Pulse.WebApi.Features.Portal.Resources;       // exercise-portal 04
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -300,6 +301,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 // schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
 builder.Services.AddChannels();
 builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01); zones, read, delivery follow
+builder.Services.AddPortalResources();          // exercise-portal 04: Resources shelf service + sanitizer profile
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -546,6 +548,7 @@ app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapRuntimeStateReset();   // demo-feedback/18 POST /api/steering/runtime-state/reset (S-5; controller only)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
+app.MapPortalResources();     // exercise-portal 04: /api/portal/resources*
 app.MapChannels();             // channels-foundation 03+ (/api/outlets*, 10: /api/alerts*; later stories add routes inside MapChannels)
 
 // Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
