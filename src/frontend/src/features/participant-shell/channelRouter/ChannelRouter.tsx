@@ -9,9 +9,10 @@
  *
  * What a path resolves to:
  *
- *  - `/display` and below: nothing. The login-free display route lives outside
- *    the session shell (portal FU-3, deferred post-December), so the router
- *    neither mounts nor 404s it.
+ *  - `/display` and below: reserved for the login-free display route, which
+ *    lives outside the session shell (portal FU-3, deferred post-December) as a
+ *    sibling of `/login`, so it never reaches the router. Until it exists the
+ *    path is the participant not-found, never a blank shell.
  *  - `/` (the landing entry, PRT-001): the portal when it is registered and
  *    enabled (`/portal`, replacing the entry), otherwise the root channel
  *    (Social, which sends `/` on to its home exactly as in pilot mode). A
@@ -77,17 +78,25 @@ type RouterView =
 
 /**
  * The landing entry (PRT-001): the portal when it is registered and enabled,
- * otherwise the root channel. Waits for the enabled set only when a portal is
- * registered (pilot mode, Social only, renders at once, exactly as before).
+ * otherwise the root channel. It waits for the enabled set here only when a
+ * portal is registered. The root channel still passes its own `ChannelRoute`
+ * like every channel, so on a cold cache Social shows the quiet pending
+ * placeholder until the nav config answers (a request the nav makes anyway).
+ * With Social disabled and no portal registered, `/` is the not-found: an
+ * exercise with no reachable channel is story 08's call, not the router's.
  */
 function landingView(
   registered: readonly ChannelRegistration[],
   enabled: Pick<EnabledChannels, 'status' | 'isEnabled'>,
+  carry: string,
 ): RouterView {
   const portal = registered.find(channel => channel.id === LANDING_CHANNEL_ID)
   if (portal !== undefined) {
     if (enabled.status === 'loading') return { kind: 'pending' }
-    if (enabled.isEnabled(portal.id)) return { kind: 'redirect', to: channelNavPath(portal) }
+    // The query carries through: December's kiosk-lite is `/portal?display=1`.
+    if (enabled.isEnabled(portal.id)) {
+      return { kind: 'redirect', to: `${channelNavPath(portal)}${carry}` }
+    }
   }
   const root = registered.find(channel => channel.pathPrefix === '/')
   return root === undefined ? { kind: 'not-found' } : { kind: 'channel', channel: root }
@@ -95,14 +104,14 @@ function landingView(
 
 /** Mounts the participant channel for the current URL. See the module header. */
 export function ChannelRouter() {
-  const { pathname } = useLocation()
+  const { pathname, search, hash } = useLocation()
   const registered = useRegisteredChannels()
   const enabled = useEnabledChannels()
   const resolution = resolveChannelPath(pathname, registered)
 
-  if (resolution.kind === 'outside-shell') return null
-
-  const view: RouterView = resolution.kind === 'landing' ? landingView(registered, enabled) : resolution
+  const view: RouterView = resolution.kind === 'landing'
+    ? landingView(registered, enabled, `${search}${hash}`)
+    : resolution
   if (view.kind === 'redirect') return <Navigate to={view.to} replace />
 
   // The landing entry resolves to a channel too, so `/` -> Social -> `/home` keeps ONE

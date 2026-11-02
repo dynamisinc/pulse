@@ -216,14 +216,18 @@ describe('ParticipantSignInPage boundary - content security (NFR-004 / NFR-009)'
 
   it('the page does not put the word or the name in a URL', () => {
     // The page never calls navigate() itself: it hands `navigate` to the shared
-    // `completeSignIn`, which only ever goes to the role-aware entry '/'.
+    // `completeSignIn`, which goes to the role-aware entry '/' or to the remembered
+    // pre-sign-in deep link (channels-foundation 12). That link is read from storage by
+    // `takeReturnTo()` only, never built from the form, so neither field can reach it.
     expect(PAGE_CODE).not.toMatch(/\bnavigate\(/)
     expect(PAGE_CODE).toMatch(/completeSignIn\(/)
     const navigations = Array.from(
       COMPLETE_CODE.matchAll(/\bnavigate\(([^,)]*)/g),
       match => match[1]?.trim(),
     )
-    expect(navigations).toEqual(['SIGNED_IN_PATH'])
+    expect(navigations).toEqual(['options.returnTo ?? SIGNED_IN_PATH'])
+    expect(Array.from(PAGE_CODE.matchAll(/returnTo:\s*([^,}\n]*)/g), m => m[1]?.trim()))
+      .toEqual(['takeReturnTo()'])
     expect(COMPLETE_CODE).toMatch(/export const SIGNED_IN_PATH = '\/'/)
     expect(PAGE_CODE).not.toMatch(/location\.(search|hash|href)\s*=/)
     expect(PAGE_CODE).not.toMatch(/useSearchParams/)

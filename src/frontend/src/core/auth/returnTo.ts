@@ -1,5 +1,5 @@
 /**
- * features/participant-shell/channelRouter/returnTo.ts
+ * core/auth/returnTo.ts
  * ---------------------------------------------------------------------------
  * Return-to-after-login for participant deep links (channels-foundation 12,
  * #708; PRT-020). A signed-out visitor who opens a shared permalink
@@ -26,15 +26,18 @@
  * **Never an open redirect.** Only a same-origin, host-relative participant path
  * is kept, and it is re-checked on read (storage can be edited): it must start
  * with a single `/`, carry no scheme, backslash or control character, stay under
- * {@link RETURN_TO_MAX_LENGTH}, and not be a sign-in, join or staff path. The
+ * {@link RETURN_TO_MAX_LENGTH}, and not be a sign-in, join, staff or display path. The
  * path names nothing private: the server still decides what the signed-in
  * account may read, and a disabled channel or a missing item lands on the
  * participant `ChannelNotFound`.
  *
+ * Lives in `core/auth`, beside the session provider that remembers and the
+ * session reset that forgets, so `core` depends on no feature for it.
+ *
  * World: participant (the only world with deep links into the fiction). No UI.
  */
 
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerSessionReset } from './sessionReset'
 import { wallClockNowIso } from '@/core/time/wallClock'
 
 /** The storage key. */
@@ -47,7 +50,7 @@ export const RETURN_TO_TTL_MS = 15 * 60 * 1000
 export const RETURN_TO_MAX_LENGTH = 512
 
 /** First segments that are never a participant destination. */
-const EXCLUDED_SEGMENTS: readonly string[] = ['login', 'join', 'staff']
+const EXCLUDED_SEGMENTS: readonly string[] = ['login', 'join', 'staff', 'display']
 
 interface StoredReturnTo {
   readonly path: string

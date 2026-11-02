@@ -85,7 +85,7 @@ import { SessionExpiredError } from './sessionExpiredError'
 import { resolveSession, type Session } from './sessionResolver'
 import { getAccessToken } from './tokenStore'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
-import { rememberReturnTo } from '@/features/participant-shell/channelRouter/returnTo'
+import { rememberReturnTo } from './returnTo'
 
 type SessionState =
   | { readonly kind: 'loading' }

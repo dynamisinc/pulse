@@ -112,6 +112,14 @@ export const SOCIAL_RESERVED_SEGMENTS: readonly string[] = [
   'login',
   'join',
   'staff',
+  // The other channels' prefixes (FC-4) and the reserved display route: the channel
+  // router hands these to their own channel, so a persona handle here could never
+  // resolve to a profile (channels-foundation 12).
+  'portal',
+  'news',
+  'press',
+  'weather',
+  'display',
   THREAD_HANDLE_PLACEHOLDER,
 ]
 

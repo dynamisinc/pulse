@@ -207,13 +207,12 @@ describe('channel registry → router (AC1)', () => {
     expect(screen.queryByTestId('channel-not-found')).not.toBeInTheDocument()
   })
 
-  it('neither mounts nor 404s the login-free /display/:token route (portal FU-3)', async () => {
+  it('keeps /display (reserved for the login-free route outside the shell) off Social, '
+    + 'and never a blank shell while that route does not exist (portal FU-3)', async () => {
     renderRouter('/display/abc123')
 
-    await waitFor(() => expect(contentRegion()).toBeInTheDocument())
-    expect(within(contentRegion()).queryByTestId(/^channel-/)).not.toBeInTheDocument()
-    expect(screen.queryByTestId('channel-not-found')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-channel-router-scope]')).toBeNull()
+    expect(await screen.findByTestId('channel-not-found')).toBeInTheDocument()
+    expect(screen.queryByTestId('channel-social')).not.toBeInTheDocument()
   })
 
   it('matches a channel prefix case-insensitively (a hand-typed /News link)', async () => {
@@ -448,6 +447,18 @@ describe('landing (AC4, PRT-001)', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(/^\/portal$/)
   })
 
+  it('carries the query to the portal (kiosk-lite /portal?display=1)', async () => {
+    registerPrefixed('portal')
+    respondWith({ social: true, portal: true })
+    function SearchProbe() {
+      return <output data-testid="search">{useLocation().search}</output>
+    }
+    renderRouter('/?display=1', node => <>{node}<SearchProbe /></>)
+
+    expect(await screen.findByTestId('channel-portal')).toBeInTheDocument()
+    expect(screen.getByTestId('search')).toHaveTextContent('?display=1')
+  })
+
   it('lands on Social home when the portal is registered but disabled', async () => {
     registerPrefixed('portal')
     respondWith({ social: true, portal: false })
@@ -508,10 +519,10 @@ describe('channels cannot escape the shell (AC7)', () => {
 })
 
 describe('resolveChannelPath (pure)', () => {
-  it('resolves the landing entry, outside-shell paths and unregistered catalogued prefixes', () => {
+  it('resolves the landing entry, the reserved display path and unregistered catalogued prefixes', () => {
     expect(resolveChannelPath('/', []).kind).toBe('landing')
-    expect(resolveChannelPath('/display', []).kind).toBe('outside-shell')
-    expect(resolveChannelPath('/Display/abc', []).kind).toBe('outside-shell')
+    expect(resolveChannelPath('/display', []).kind).toBe('not-found')
+    expect(resolveChannelPath('/Display/abc', []).kind).toBe('not-found')
     expect(resolveChannelPath('/news/a/b', []).kind).toBe('not-found')
     expect(resolveChannelPath('/anything', []).kind).toBe('not-found')
   })

@@ -11,12 +11,17 @@
 
 import { findChannelForPath, type ChannelRegistration } from '@/features/channels/routing'
 
-/** First segments the router leaves alone: they live outside the session shell. */
+/**
+ * First segments reserved for routes that live OUTSIDE the session shell. The
+ * login-free `/display/:token` (deferred post-December, portal FU-3) will mount as
+ * a sibling of `/login` in `createRoleAwareRoutes`, so once it exists the router
+ * never sees it. Until then a `/display` path is the participant not-found: never
+ * a Social profile, never a blank shell.
+ */
 export const OUTSIDE_SHELL_SEGMENTS: readonly string[] = ['display']
 
 /** What a participant path resolves to. Pure, so the nav and the tests share it. */
 export type ChannelPathResolution =
-  | { readonly kind: 'outside-shell' }
   | { readonly kind: 'landing' }
   | { readonly kind: 'channel'; readonly channel: ChannelRegistration }
   | { readonly kind: 'not-found' }
@@ -27,7 +32,7 @@ export function resolveChannelPath(
   registered: readonly ChannelRegistration[],
 ): ChannelPathResolution {
   const segment = (pathname.split('/')[1] ?? '').toLowerCase()
-  if (OUTSIDE_SHELL_SEGMENTS.includes(segment)) return { kind: 'outside-shell' }
+  if (OUTSIDE_SHELL_SEGMENTS.includes(segment)) return { kind: 'not-found' }
   if (pathname === '/' || pathname === '') return { kind: 'landing' }
   const channel = findChannelForPath(pathname, registered)
   if (channel === undefined) return { kind: 'not-found' }

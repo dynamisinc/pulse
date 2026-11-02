@@ -1,5 +1,5 @@
 /**
- * features/participant-shell/channelRouter/returnTo.test.tsx
+ * core/auth/returnTo.test.tsx
  * ---------------------------------------------------------------------------
  * Channels-foundation 12 (#708), "deep links survive login": the return-to
  * helper, and the round trip through the REAL `SessionProvider` (signed-out
@@ -55,6 +55,7 @@ describe('isSafeReturnToPath', () => {
     '/login',
     '/join/abc',
     '/STAFF/console',
+    '/display/abc',
     '/news/\nx',
     `/${'a'.repeat(600)}`,
     42,

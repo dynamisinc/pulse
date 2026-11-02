@@ -78,7 +78,7 @@ export interface CompleteSignInOptions {
   readonly queryClient?: { clear: () => void }
   /**
    * Participant pages only: the remembered deep link to arrive at instead of `/`
-   * (`takeReturnTo()` from `participant-shell/channelRouter/returnTo`, already
+   * (`takeReturnTo()` from `@/core/auth/returnTo`, already
    * checked to be a safe participant path). `null`/omitted goes to `/`.
    */
   readonly returnTo?: string | null

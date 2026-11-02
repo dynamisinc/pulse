@@ -43,7 +43,10 @@ describe('socialPaths', () => {
 describe('reserved segments (COR-004)', () => {
   it('reserves exactly the routes the channel owns plus the app-level prefixes', () => {
     expect([...SOCIAL_RESERVED_SEGMENTS].sort()).toEqual(
-      ['alerts', 'explore', 'hashtag', 'home', 'i', 'join', 'login', 'notifications', 'staff'].sort(),
+      [
+        'alerts', 'explore', 'hashtag', 'home', 'i', 'join', 'login', 'notifications', 'staff',
+        'portal', 'news', 'press', 'weather', 'display',
+      ].sort(),
     )
   })
 
