@@ -206,12 +206,14 @@ const kioskContentRegionStyle: CSSProperties = {
  * `pointer-events: none` so it never takes a tap. Fixed white on near-black
  * (`#ffffff` on `#111418`, about 18:1), the same pair as the media
  * `WatermarkSlot`; skins cannot reach it (inline style, outside any brand scope).
- * The size scales with the viewport for the back of the room, with a 14px floor.
+ * The size scales with the viewport for the back of the room, with a 14px floor,
+ * and the offsets clear a device's safe area. The content region reserves no space
+ * for it: a full-screen frame lays out around the bottom-right corner.
  */
 const kioskChipStyle: CSSProperties = {
   position: 'fixed',
-  right: 'max(12px, 1.25vw)',
-  bottom: 'max(12px, 1.25vw)',
+  right: 'max(12px, 1.25vw, env(safe-area-inset-right, 0px))',
+  bottom: 'max(12px, 1.25vw, env(safe-area-inset-bottom, 0px))',
   zIndex: SHELL_Z.chrome,
   pointerEvents: 'none',
   padding: '0.35em 0.75em',

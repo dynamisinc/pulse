@@ -225,9 +225,11 @@ export const isComplianceChromeDrawn = (config: ChromeConfig, variant?: ShellVar
  *    becomes the required fallback signal whatever the switch says.
  *
  * So `isWatermarkRequired(config, 'kiosk')` is always `true`. Only "watermark off AND
- * banners drawn" leaves media unmarked. This module only exposes the signal —
- * `ExerciseBands` (social media), `WatermarkSlot` and the overlay layer's watermark slot
- * render it, and `ShellLayout` draws the kiosk's permanent EXERCISE chip.
+ * banners drawn" leaves media unmarked. This module only exposes the signal.
+ * `ExerciseBands` (social media) and `WatermarkSlot` render it for media, calling it
+ * WITHOUT a variant (config only). Under kiosk the always-on signal is therefore the
+ * shell's own permanent EXERCISE chip (`ShellLayout`), not the media bands; a media
+ * caller that wants the kiosk clause too passes the shell variant.
  */
 export const isWatermarkRequired = (config: ChromeConfig, variant?: ShellVariant): boolean =>
   config.watermark || !isComplianceChromeDrawn(config, variant)

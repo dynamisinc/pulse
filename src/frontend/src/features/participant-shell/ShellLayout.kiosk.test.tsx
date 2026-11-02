@@ -30,6 +30,7 @@ import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { api } from '@/core/services/api'
 import { ShellLayout } from './ShellLayout'
 import {
+  SHELL_CHROME_BOTTOM_VAR,
   SHELL_CHROME_TOP_VAR,
   useRequestShellKiosk,
   useShellContext,
@@ -111,6 +112,7 @@ beforeEach(() => {
 afterEach(() => {
   resetExerciseClock()
   document.documentElement.style.removeProperty(SHELL_CHROME_TOP_VAR)
+  document.documentElement.style.removeProperty(SHELL_CHROME_BOTTOM_VAR)
 })
 
 describe('ShellLayout kiosk — chrome stripped (AC1)', () => {
@@ -143,6 +145,17 @@ describe('ShellLayout kiosk — chrome stripped (AC1)', () => {
     await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('kiosk'))
 
     expectChromeStripped()
+  })
+
+  it('clears the chrome inset vars when a mounted shell enters kiosk', async () => {
+    // The request path mounts ComplianceChrome for one commit (variant full), which
+    // publishes the inset vars; entering kiosk unmounts it and must leave no gap.
+    setVariant('full')
+    renderShell(<KioskRequestingChannel />)
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('kiosk'))
+
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
   })
 
   it('restores the standard chrome when the kiosk request is released', async () => {
@@ -227,6 +240,9 @@ describe('ShellLayout kiosk — watermark clause (AC3, NFR-008, Q-33)', () => {
     expect(chip.style.background).toBe('rgb(17, 20, 24)')
   })
 
+  // The full variant x config proof is the pure truth table in chromeConfig.test.tsx; this
+  // is its rendered counterpart over the shipped (chrome-on) config: whichever variant,
+  // the shell draws the banners or the chip.
   it('never renders with both the banners and the chip off, in any variant', async () => {
     for (const variant of ['full', 'readOnly', 'kiosk', 'preview'] as const) {
       setVariant(variant)
@@ -259,7 +275,9 @@ describe('ShellLayout kiosk — isolation untouched (AC5, XC-001)', () => {
     const fullUrls = await urls('full')
     const kioskUrls = await urls('kiosk')
 
-    // Kiosk mounts fewer layers, so it can only ever drop a request, never add one.
+    // Kiosk mounts fewer layers, so it can only ever drop a request, never add one. It
+    // still reads its exercise's data (the exercise scope at least), so it is not empty.
+    expect(kioskUrls.size).toBeGreaterThan(0)
     for (const url of kioskUrls) expect(fullUrls).toContain(url)
     getSpy.mockRestore()
   })
@@ -291,7 +309,7 @@ describe('ShellLayout kiosk — accessibility (AC6, NFR-001)', () => {
     expect(serious).toEqual([])
   })
 
-  it('leaves no focusable shell control on a kiosk screen', async () => {
+  it('leaves no focusable shell control on a quiet kiosk screen (no active alert)', async () => {
     setVariant('kiosk')
     const { container } = renderShell(<p>content</p>)
     await waitFor(() => expect(screen.getByText('content')).toBeInTheDocument())
@@ -301,5 +319,22 @@ describe('ShellLayout kiosk — accessibility (AC6, NFR-001)', () => {
       'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
     )
     expect(focusable).toHaveLength(0)
+  })
+
+  it('with an active alert, the only focusable shell controls are the unchanged alert bar\'s', async () => {
+    // AC2 keeps the bar exactly as in every variant, so its own Details link / "+N more"
+    // stay. Hiding or neutering them on a display is portal 18's frame concern, not the
+    // shell's; what kiosk guarantees is that no nav or sign-out control is left.
+    mockUseAlerts.mockReturnValue([ACTIVE_ALERT])
+    setVariant('kiosk')
+    const { container } = renderShell(<p>content</p>)
+    await waitFor(() => expect(screen.getByText('content')).toBeInTheDocument())
+
+    expectChromeStripped()
+    const bar = screen.getByTestId('pulse-alert-bar')
+    const focusable = within(container).getByTestId('pulse-shell-root').querySelectorAll(
+      'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    for (const element of focusable) expect(bar.contains(element)).toBe(true)
   })
 })

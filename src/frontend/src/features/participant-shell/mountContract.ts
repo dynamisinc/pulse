@@ -239,7 +239,9 @@ export function ShellKioskRequestProvider({ value, children }: ShellKioskRequest
  * {@link useClaimShellAccountControl}.
  *
  * While any request stands, `ShellLayout` resolves `variant: 'kiosk'` for the
- * whole subtree: compliance chrome, channel nav and the sign-out row are
+ * whole subtree, overriding WHATEVER shell state resolved (`full`, `readOnly`
+ * and `preview` alike, so a staff preview of the display shows the kiosk):
+ * compliance chrome, channel nav and the sign-out row are
  * removed, the alert bar stays (PRT-010), and the shell draws the permanent
  * EXERCISE chip (NFR-008, Q-33). `kiosk` is a least-affordance variant
  * (`affordancesAvailable('kiosk') === false`), so a request can only ever take
