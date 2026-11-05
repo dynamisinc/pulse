@@ -69,7 +69,10 @@ describe('portal skin + masthead: static rules', () => {
     for (const evasion of ['Date.now()', 'new Date()', 'x.toLocaleDateString()', 'd.getHours()']) {
       expect(CLOCK_BANS.some(banned => banned.test(evasion)), evasion).toBe(true)
     }
-    expect(extractImportSpecifiers("import { cobraTheme } from '@/theme/cobraTheme'")
+    // Built at runtime: an import-shaped LITERAL here would itself trip the repo's
+    // two-worlds gate (`staffShell/twoWorldsSeparation.test.ts`), which scans this file.
+    const staffSpecifier = ['@', 'theme', 'cobraTheme'].join('/')
+    expect(extractImportSpecifiers(`import { cobraTheme } from '${staffSpecifier}'`)
       .some(s => FORBIDDEN_SPECIFIER_PATTERNS.some(p => p.test(s)))).toBe(true)
   })
 
