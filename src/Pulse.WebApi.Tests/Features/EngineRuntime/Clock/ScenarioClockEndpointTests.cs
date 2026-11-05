@@ -172,8 +172,8 @@ public sealed class ScenarioClockEndpointTests
 
         factory.Services.GetRequiredService<IExerciseClockChangeSink>().Should().BeOfType<ExerciseClockWriteThrough>(
             "the push composes with story 18's write-through; it must never displace it");
-        factory.Services.GetServices<IExerciseClockChangeObserver>().Should().ContainSingle()
-            .Which.Should().BeOfType<ScenarioClockChangedPublisher>();
+        factory.Services.GetServices<IExerciseClockChangeObserver>().OfType<ScenarioClockChangedPublisher>().Should().ContainSingle(
+            "the push is one observer among the additive set (channels story 05 adds the scheduler's wake-up)");
         factory.Services.GetRequiredService<IExerciseClock>().Should().BeOfType<ExerciseClockService>();
     }
 

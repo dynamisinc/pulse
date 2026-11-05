@@ -233,7 +233,12 @@ public sealed class ContentScheduleRunnerTests : IDisposable
         _harness.Gates.Add(parkFirst);
 
         var first = Runner().RunTickAsync();
-        await parkFirst.Entered.Task;
+        if (await Task.WhenAny(parkFirst.Entered.Task, first, Task.Delay(TimeSpan.FromSeconds(30))) != parkFirst.Entered.Task)
+        {
+            parkFirst.Release.TrySetResult();
+            throw new Xunit.Sdk.XunitException(
+                $"The first tick never reached the parking gate (completed: {first.IsCompleted}).");
+        }
         (await Runner().RunTickAsync()).Should().Be(1, "the second instance publishes while the first is mid-tick");
         parkFirst.Release.SetResult();
         (await first).Should().Be(0, "the first instance loses the Version claim");

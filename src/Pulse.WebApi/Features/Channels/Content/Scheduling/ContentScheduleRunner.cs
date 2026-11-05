@@ -65,12 +65,18 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 /// doubling up to <see cref="ContentScheduleRunnerOptions.MaxFailureBackoff"/>, and a repeated failure is logged once.
 /// One poisoned item is logged once and never stops the rest.
 /// </para>
+/// <para>
+/// <b>Inert in a host that does not compose the world.</b> The pause tiers and the exercise clock are what make a publish
+/// safe (Freeze, scenario time), so a host that registers neither (a slice test host calling <c>AddChannels()</c> alone)
+/// gets a runner that logs once and does nothing, rather than a host that fails to start or a runner that publishes
+/// blind. <c>Program.cs</c> composes both; the composition-root wiring test pins that the runner is live there.
+/// </para>
 /// </remarks>
 public sealed partial class ContentScheduleRunner : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly PauseTierRegistry _pauseTiers;
-    private readonly IExerciseClock _clock;
+    private readonly PauseTierRegistry? _pauseTiers;
+    private readonly IExerciseClock? _clock;
     private readonly TimeProvider _timeProvider;
     private readonly ContentScheduleSignal _signal;
     private readonly ContentScheduleRunnerOptions _options;
@@ -81,24 +87,22 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 
     /// <summary>Creates the runner.</summary>
     /// <param name="scopeFactory">Creates the discovery scope and one scope per item.</param>
-    /// <param name="pauseTiers">The in-memory tiered-pause state.</param>
-    /// <param name="clock">The native exercise clock (scenario time, COR-053).</param>
+    /// <param name="pauseTiers">The in-memory tiered-pause state; null (not composed) makes the runner inert.</param>
+    /// <param name="clock">The native exercise clock (scenario time, COR-053); null (not composed) makes the runner inert.</param>
     /// <param name="timeProvider">The server clock driving the cadence only.</param>
     /// <param name="signal">The wake-up line a clock change pokes.</param>
     /// <param name="options">The cadences.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public ContentScheduleRunner(
         IServiceScopeFactory scopeFactory,
-        PauseTierRegistry pauseTiers,
-        IExerciseClock clock,
+        PauseTierRegistry? pauseTiers,
+        IExerciseClock? clock,
         TimeProvider timeProvider,
         ContentScheduleSignal signal,
         ContentScheduleRunnerOptions options,
         ILogger<ContentScheduleRunner> logger)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
-        ArgumentNullException.ThrowIfNull(pauseTiers);
-        ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(signal);
         ArgumentNullException.ThrowIfNull(options);
@@ -136,6 +140,9 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         return backoffTicks >= cap.Ticks ? cap : TimeSpan.FromTicks((long)backoffTicks);
     }
 
+    /// <summary>Whether the host composed what a safe publish needs (the pause tiers and the exercise clock).</summary>
+    public bool IsActive => _pauseTiers is not null && _clock is not null;
+
     /// <summary>
     /// One sweep: discovers the scheduled items, then publishes each due one, in scheduled order, inside its exercise's
     /// own scope. A failure on one item never stops the sweep for the rest.
@@ -144,6 +151,11 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     /// <returns>How many items this sweep published.</returns>
     public async Task<int> RunTickAsync(CancellationToken cancellationToken = default)
     {
+        if (_pauseTiers is not { } pauseTiers || _clock is not { } clock)
+        {
+            return 0;
+        }
+
         List<ScheduledItem> scheduled;
         Dictionary<Guid, ExerciseFacts> exercises;
         await using (var discoveryScope = _scopeFactory.CreateAsyncScope())
@@ -200,9 +212,9 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         {
             if (!exercises.TryGetValue(group.Key, out var exercise)
                 || !ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires
-                || _pauseTiers.GetTier(group.Key) == PauseTier.Freeze
-                || _clock.IsFrozen(group.Key)
-                || (_clock.CurrentScenarioTime(group.Key) ?? exercise.CurrentScenarioTime) is not { } scenarioNow)
+                || pauseTiers.GetTier(group.Key) == PauseTier.Freeze
+                || clock.IsFrozen(group.Key)
+                || (clock.CurrentScenarioTime(group.Key) ?? exercise.CurrentScenarioTime) is not { } scenarioNow)
             {
                 continue;
             }
@@ -246,6 +258,12 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         // Never run inline in the host's start-up, and never sweep during it: the first sweep waits one interval (or a
         // wake-up), so a host that is starting does no database work on the runner's behalf.
         await Task.Yield();
+
+        if (!IsActive)
+        {
+            LogInert();
+            return;
+        }
 
         var consecutiveFailures = 0;
         string? lastLoggedFailure = null;
@@ -386,6 +404,12 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         Level = LogLevel.Information,
         Message = "Content schedule runner recovered after {FailedSweeps} failed sweeps.")]
     private partial void LogSweepRecovered(int failedSweeps);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Warning,
+        Message = "Content schedule runner is inactive: this host registers no pause tiers or exercise clock, so scheduled content will not publish.")]
+    private partial void LogInert();
 
     [LoggerMessage(
         EventId = 4,

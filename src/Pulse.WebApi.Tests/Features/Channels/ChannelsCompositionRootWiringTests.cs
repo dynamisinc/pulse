@@ -252,7 +252,8 @@ public sealed class ChannelsCompositionRootWiringTests
     {
         // Story 05: the runner is a hosted service on the REAL host, woken by clock changes; no Program.cs edit.
         using var factory = new WiringProbeFactory();
-        factory.Services.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle();
+        factory.Services.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
+            .Which.IsActive.Should().BeTrue("Program.cs composes the pause tiers and the exercise clock the runner needs");
         factory.Services.GetServices<IExerciseClockChangeObserver>().OfType<ContentScheduleClockObserver>().Should().ContainSingle();
 
         using var scope = factory.Services.CreateScope();
@@ -261,8 +262,18 @@ public sealed class ChannelsCompositionRootWiringTests
         scope.ServiceProvider.GetRequiredService<ScheduledByReader>().Should().NotBeNull();
 
         var twice = new ServiceCollection().AddChannels().AddChannels();
-        twice.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ContentScheduleRunner))
+        twice.Count(d => d.ServiceType == typeof(IHostedService)
+                && d.ImplementationFactory?.Method.ReturnType == typeof(ContentScheduleRunner))
             .Should().Be(1, "the runner runs once per host however often AddChannels() is called");
+
+        // A slice host that composes no pause tiers or clock still starts, with an inert runner (#817 CI: the outlet hosts).
+        using var slice = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
+            .AddChannels()
+            .BuildServiceProvider();
+        slice.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
+            .Which.IsActive.Should().BeFalse();
     }
 
     /// <summary>

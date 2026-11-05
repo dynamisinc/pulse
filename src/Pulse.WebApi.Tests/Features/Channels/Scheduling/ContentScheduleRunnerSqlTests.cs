@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -43,6 +44,7 @@ public sealed class ContentScheduleRunnerSqlTests
         item.Status = ChannelVocabulary.StatusScheduled;
         item.ScheduledScenarioTime = scenarioStart.AddMinutes(10);
         item.Version = 1;
+        item.CreatedScenarioTime = scenarioStart; // drafted before its 08:10 schedule (the stamp floor, W-001)
         await using (var seed = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseId }))
         {
             seed.Exercises.Add(new Exercise
@@ -78,8 +80,13 @@ public sealed class ContentScheduleRunnerSqlTests
         services.AddScoped<IContentKindDescriptor>(_ => new TestKindDescriptor("article", "news", ISanitizerProfileRegistry.RichBasic));
         services.AddSingleton<IContentPublishGate>(parkFirst);
         services.AddChannels();
+
+        // The real alert source needs a staff session this bare container has; the race is about the publish.
+        services.RemoveAll<IAlertRaiser>();
+        services.AddScoped<IAlertRaiser, FakeAlertRaiser>();
         await using var root = services.BuildServiceProvider();
 
+        var log = new MessageLogger();
         var tiers = new PauseTierRegistry(clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance);
         ContentScheduleRunner Runner() => new(
             root.GetRequiredService<IServiceScopeFactory>(),
@@ -88,10 +95,15 @@ public sealed class ContentScheduleRunnerSqlTests
             time,
             new ContentScheduleSignal(),
             new ContentScheduleRunnerOptions(),
-            NullLogger<ContentScheduleRunner>.Instance);
+            log);
 
         var first = Runner().RunTickAsync();
-        await parkFirst.Entered.Task;
+        if (await Task.WhenAny(parkFirst.Entered.Task, first, Task.Delay(TimeSpan.FromSeconds(30))) != parkFirst.Entered.Task)
+        {
+            parkFirst.Release.TrySetResult();
+            throw new Xunit.Sdk.XunitException(
+                $"The first tick never reached the parking gate (completed: {first.IsCompleted}). Runner log: {string.Join(" | ", log.Entries)}");
+        }
         (await Runner().RunTickAsync()).Should().Be(1, "the second instance publishes while the first is mid-tick");
         parkFirst.Release.SetResult();
         (await first).Should().Be(0, "the first instance loses the Version claim and skips silently");
@@ -105,6 +117,27 @@ public sealed class ContentScheduleRunnerSqlTests
         stored.Status.Should().Be(ChannelVocabulary.StatusPublished);
         stored.PublishedScenarioTime.Should().Be(item.ScheduledScenarioTime, "its own scheduled time, not the jump target");
         stored.LastError.Should().BeNull();
+    }
+
+    /// <summary>Keeps every runner log line with its exception, so a race test that stalls says why.</summary>
+    private sealed class MessageLogger : Microsoft.Extensions.Logging.ILogger<ContentScheduleRunner>
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _entries = new();
+
+        public System.Collections.Generic.IReadOnlyCollection<string> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            _entries.Enqueue($"{logLevel}: {formatter(state, exception)} {exception}");
     }
 
     /// <summary>Parks the FIRST publish evaluation until released (to stage two instances racing); passes the rest.</summary>
