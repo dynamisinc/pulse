@@ -68,8 +68,9 @@ import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvi
 import { PwaRoot } from '@/features/pwa'
 import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
-import { SocialChannel } from './features/social'
-import { SocialBrandScope } from './features/social/theme/SocialBrandScope'
+import { ChannelRouter } from './features/participant-shell/channelRouter'
+// Each participant channel registers itself with the router (channels-foundation 12).
+import './features/social/registerSocialChannel'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
@@ -100,10 +101,9 @@ const router = createBrowserRouter(
       <BrandThemeProvider>
         <PwaRoot />
         <ShellLayout>
-          {/* Sets `--pulse-ac` from the resolved brand for the whole channel (F5, #433). */}
-          <SocialBrandScope>
-            <SocialChannel />
-          </SocialBrandScope>
+          {/* Mounts the registered channel for the URL, each inside its own theme scope
+              (Social: SocialBrandScope, #433), behind the enablement guard (#708). */}
+          <ChannelRouter />
         </ShellLayout>
       </BrandThemeProvider>
     ),

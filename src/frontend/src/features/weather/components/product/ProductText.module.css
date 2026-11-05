@@ -1,0 +1,26 @@
+/*
+ * features/weather/components/product/ProductText.module.css
+ * Monospace product text (D4-009, Q-30). No truncation, and the case transform is pinned to
+ * none (it is inherited, so a skinned ancestor could otherwise change it): the headline is shown
+ * exactly as stored (D4-010, pinned by ProductText.test.tsx and product.static.test.ts).
+ */
+
+.text {
+  margin: 0;
+  padding: calc(var(--pulse-skin-space, 8px) * 2);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: var(--pulse-skin-rule-weight, 1px) solid var(--pulse-skin-rule, #c9ced6);
+  border-radius: var(--pulse-skin-radius, 4px);
+  background-color: var(--pulse-skin-surface, #f6f7f9);
+  color: var(--pulse-skin-text, #1f2329);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: var(--pulse-skin-body-size, 1rem);
+  line-height: 1.5;
+  text-transform: none;
+  font-variant-caps: normal;
+  /* Keep authored line breaks; wrap long lines (and long unbroken runs) inside the box. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
