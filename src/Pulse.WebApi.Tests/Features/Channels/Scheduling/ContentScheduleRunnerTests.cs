@@ -239,8 +239,17 @@ public sealed class ContentScheduleRunnerTests : IDisposable
             throw new Xunit.Sdk.XunitException(
                 $"The first tick never reached the parking gate (completed: {first.IsCompleted}).");
         }
-        (await Runner().RunTickAsync()).Should().Be(1, "the second instance publishes while the first is mid-tick");
-        parkFirst.Release.SetResult();
+        int second;
+        try
+        {
+            second = await Runner().RunTickAsync();
+        }
+        finally
+        {
+            parkFirst.Release.TrySetResult(); // never strand the parked tick, even if the second one throws
+        }
+
+        second.Should().Be(1, "the second instance publishes while the first is mid-tick");
         (await first).Should().Be(0, "the first instance loses the Version claim");
 
         _harness.Broadcaster.Published.Should().ContainSingle();

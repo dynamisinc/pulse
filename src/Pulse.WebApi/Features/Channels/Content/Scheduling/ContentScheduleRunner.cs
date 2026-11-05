@@ -407,7 +407,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 
     [LoggerMessage(
         EventId = 5,
-        Level = LogLevel.Warning,
+        Level = LogLevel.Error,
         Message = "Content schedule runner is inactive: this host registers no pause tiers or exercise clock, so scheduled content will not publish.")]
     private partial void LogInert();
 

@@ -79,8 +79,8 @@ jobs:
         run: dotnet build pulse.slnx --configuration Release --no-restore
 
       - name: Test
-        # --blame-hang-timeout: a single test stuck this long aborts the run with a hang dump naming it.
-        run: dotnet test pulse.slnx --configuration Release --no-build --blame-hang-timeout 15m
+        # --blame-hang-timeout: a single test stuck this long aborts the run and the log names it (no dump file).
+        run: dotnet test pulse.slnx --configuration Release --no-build --blame-hang-timeout 15m --blame-hang-dump-type none
 
   infra:
     name: Infra (Bicep)
