@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Channels;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Content.Read;
 using Pulse.WebApi.Features.Channels.Content.Staff;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
@@ -55,6 +56,7 @@ public static class ChannelsServiceCollectionExtensions
 
         services.AddChannelEnablement(); // 08: IChannelEnablement behind RequireChannelEnabled (FC-7)
 
+        services.AddContentRead(); // 06: the participant read service, projector and IInSimLinkResolver
         // Story 07: the staff content API's service, the funnel's featured-slot half and the content-publish policy.
         services.AddStaffContent();
         return services;
