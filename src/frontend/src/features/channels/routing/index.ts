@@ -9,3 +9,15 @@ export type { EnabledChannels } from './enabled'
 export { ChannelRoute } from './ChannelRoute'
 export type { ChannelRouteProps } from './ChannelRoute'
 export { ChannelNotFound } from './ChannelNotFound'
+export { ChannelPending } from './ChannelPending'
+export { useChannelTitle } from './useChannelTitle'
+export {
+  registerChannel,
+  useRegisteredChannels,
+  getRegisteredChannels,
+  findChannelForPath,
+  channelNavPath,
+  channelPathPrefix,
+  ROOT_CHANNEL_ID,
+} from './registry'
+export type { ChannelRegistration } from './registry'

@@ -36,6 +36,25 @@
  *  5. Provides `{variant, scenarioNow}` to the mounted channel via
  *     `ShellContextProvider` (`mountContract.ts`).
  *
+ * ## The kiosk variant (channels-foundation 22, PP-2; PRT-040 kiosk-lite)
+ * `variant === 'kiosk'` (resolved from shell state, or requested by a mounted
+ * channel through `useRequestShellKiosk()`, because the kiosk-lite display mounts
+ * inside the channel router, below this shell) is the ONLY switch; nothing here
+ * knows which channel asked. Under it the shell:
+ *   - does NOT mount `<ComplianceChrome>`, `<ChannelNav>` or the sign-out row:
+ *     they are absent from the DOM and the a11y tree, not hidden by CSS. With no
+ *     chrome mounted the `--pulse-chrome-*` vars are unset and the `0px`
+ *     fallbacks leave no gap;
+ *   - KEEPS `<AlertBar>` exactly as in every other variant (PRT-010): same
+ *     component, same severity styling, same live region;
+ *   - KEEPS `<OverlayLayer>` (pause / EndEx / break-fiction still cover a kiosk);
+ *   - draws the permanent EXERCISE chip (`KioskExerciseChip`, NFR-008/COR-031,
+ *     Q-33): with the banners stripped, `isWatermarkRequired(config, 'kiosk')` is
+ *     always true, and this chip is the shell's own on-screen signal, so chrome
+ *     and watermark are never both off;
+ *   - lets the content region grow to fill the viewport below the alert bar.
+ * Every other variant renders exactly as before.
+ *
  * ## Shell composition (Wave-2 integration)
  * `ShellLayout` is the assembly point for every shell-owned layer. It renders,
  * as siblings AROUND the content region (never inside its reset boundary):
@@ -101,7 +120,9 @@ import {
   SHELL_Z,
   ShellAccountControlClaimProvider,
   ShellContextProvider,
+  ShellKioskRequestProvider,
   type ShellMountProps,
+  type ShellVariant,
 } from './mountContract'
 import { useShellState } from './shellState'
 import { ComplianceChrome } from './components/ComplianceChrome'
@@ -162,14 +183,89 @@ const shellRootStyle: CSSProperties = {
   paddingBottom: `var(${SHELL_CHROME_BOTTOM_VAR}, 0px)`,
 }
 
+/**
+ * Kiosk only: the root becomes a column so the content region (its only in-flow
+ * child once nav and sign-out are gone) grows to fill the viewport below the
+ * alert bar. The fixed layers are out of flow and unaffected.
+ */
+const kioskShellRootStyle: CSSProperties = {
+  ...shellRootStyle,
+  display: 'flex',
+  flexDirection: 'column',
+}
+
+const kioskContentRegionStyle: CSSProperties = {
+  ...contentRegionStyle,
+  flex: '1 0 auto',
+}
+
+/**
+ * The kiosk's permanent EXERCISE chip (NFR-008, COR-031, Q-33). Bottom-right,
+ * fixed, at the chrome layer (it stands in for the banners), so channel content
+ * cannot cover it; break-fiction (above chrome) still can, by design.
+ * `pointer-events: none` so it never takes a tap. Fixed white on near-black
+ * (`#ffffff` on `#111418`, about 18:1), the same pair as the media
+ * `WatermarkSlot`; skins cannot reach it (inline style, outside any brand scope).
+ * The size scales with the viewport for the back of the room, with a 14px floor,
+ * and the offsets clear a device's safe area. The content region reserves no space
+ * for it: a full-screen frame lays out around the bottom-right corner.
+ */
+const kioskChipStyle: CSSProperties = {
+  position: 'fixed',
+  right: 'max(12px, 1.25vw, env(safe-area-inset-right, 0px))',
+  bottom: 'max(12px, 1.25vw, env(safe-area-inset-bottom, 0px))',
+  zIndex: SHELL_Z.chrome,
+  pointerEvents: 'none',
+  padding: '0.35em 0.75em',
+  borderRadius: '4px',
+  color: '#ffffff',
+  background: '#111418',
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  fontSize: 'max(14px, 1.1vw)',
+  fontWeight: 700,
+  letterSpacing: '0.12em',
+  lineHeight: 1.2,
+}
+
+/** The chip's text. Fixed copy (the media `WatermarkSlot` uses the same word). */
+const KIOSK_CHIP_TEXT = 'EXERCISE'
+
+/**
+ * Supplementary context to assistive tech, like `ComplianceChrome`'s banners
+ * (`role="note"`), not a live region: it never changes.
+ */
+function KioskExerciseChip() {
+  return (
+    <div
+      role="note"
+      aria-label="Exercise watermark"
+      data-testid="pulse-shell-kiosk-exercise-chip"
+      style={kioskChipStyle}
+    >
+      {KIOSK_CHIP_TEXT}
+    </div>
+  )
+}
+
 export function ShellLayout({ children }: ShellLayoutProps) {
   // Fail-closed exercise scoping (COR-001/XC-001) — see module header point 2.
   // The resolved scope is deliberately unused beyond this call: exerciseId is
   // read (inside useShellState) only to key that query, never rendered here.
   useExerciseContext()
 
-  const { variant, pending: variantPending } = useShellState()
+  const { variant: resolvedVariant, pending: variantPending } = useShellState()
   const { now: scenarioNow } = useScenarioTime()
+
+  // Kiosk requests from the mounted channel (`useRequestShellKiosk`, PP-2). A count,
+  // like the account-control claims below, so overlapping requests (a route swap)
+  // cannot release each other's.
+  const [kioskRequests, setKioskRequests] = useState(0)
+  const requestKiosk = useCallback(() => {
+    setKioskRequests(count => count + 1)
+    return () => setKioskRequests(count => Math.max(0, count - 1))
+  }, [])
+  const variant: ShellVariant = kioskRequests > 0 ? 'kiosk' : resolvedVariant
+  const isKiosk = variant === 'kiosk'
 
   // How many mounted channels currently render their own account control (see the
   // module header). A count, not a boolean, so overlapping claims (a channel swap)
@@ -183,10 +279,15 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   const mountProps: ShellMountProps = { variant, scenarioNow, variantPending }
 
   return (
-    <div data-testid="pulse-shell-root" style={shellRootStyle}>
+    <div
+      data-testid="pulse-shell-root"
+      data-shell-variant={variant}
+      style={isKiosk ? kioskShellRootStyle : shellRootStyle}
+    >
       {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
-          inset vars the content region below consumes. */}
-      <ComplianceChrome />
+          inset vars the content region below consumes. Not mounted in kiosk:
+          the EXERCISE chip replaces them (Q-33). */}
+      {isKiosk ? <KioskExerciseChip /> : <ComplianceChrome />}
 
       {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
           Persists across every channel; renders a zero-height empty live
@@ -195,21 +296,27 @@ export function ShellLayout({ children }: ShellLayoutProps) {
 
       {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
           the content region (never inside its reset boundary) — it is shell
-          chrome, not channel content (COR-060). */}
-      <ChannelNav />
+          chrome, not channel content (COR-060). Not mounted in kiosk. */}
+      {!isKiosk && <ChannelNav />}
 
       {/* Participant sign-out (feature: login, story 04). Its own sibling —
           see the module header for why this is not folded into ChannelNav.
           Absent while a mounted channel has claimed the account control
-          (it renders its own Sign out). */}
-      {accountClaims === 0 && <ParticipantSignOutControl />}
+          (it renders its own Sign out), and in kiosk (a display has no
+          operator at it, and no focusable control). */}
+      {!isKiosk && accountClaims === 0 && <ParticipantSignOutControl />}
 
       {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
           inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
-      <div data-testid="pulse-shell-content-region" style={contentRegionStyle}>
+      <div
+        data-testid="pulse-shell-content-region"
+        style={isKiosk ? kioskContentRegionStyle : contentRegionStyle}
+      >
         <ShellContextProvider value={mountProps}>
           <ShellAccountControlClaimProvider value={claimAccountControl}>
-            {children}
+            <ShellKioskRequestProvider value={requestKiosk}>
+              {children}
+            </ShellKioskRequestProvider>
           </ShellAccountControlClaimProvider>
         </ShellContextProvider>
       </div>

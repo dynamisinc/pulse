@@ -300,7 +300,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 // December channels release (channels-foundation, FC-9.10): the one channels DI seam. Story 01 registers nothing (its
 // schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
 builder.Services.AddChannels();
-builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01); zones, read, delivery follow
+builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01), zones (02); read, delivery follow
 builder.Services.AddPress();                    // press-room (E5): release kind, seam defaults, org newsrooms (01)
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
@@ -549,6 +549,7 @@ app.MapRuntimeStateReset();   // demo-feedback/18 POST /api/steering/runtime-sta
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
 app.MapChannels();             // channels-foundation 03+ (/api/outlets*, 10: /api/alerts*; later stories add routes inside MapChannels)
+app.MapWeather();              // weather-source 02+ (/api/weather/zones*; later weather stories add routes inside MapWeather)
 
 // Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
 // the controller-role filter on every mutation). MapPostPins() stays at TOP LEVEL on purpose: a view-only session

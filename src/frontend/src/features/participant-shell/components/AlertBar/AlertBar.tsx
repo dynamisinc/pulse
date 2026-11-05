@@ -10,10 +10,11 @@
  * banner (story 01) that PERSISTS across every channel (PRT-010). The shell
  * supplies the container, severities, collapse, stacking, scenario
  * timestamp, and the Details link-through (PRT-012); channels/controllers
- * supply alert CONTENT (out of scope here — see `useAlerts.ts`).
+ * supply alert CONTENT through `useAlerts()` — live since channels-foundation
+ * story 11 (`GET /alerts` + the `AlertsChanged` push; see `useAlerts.ts`).
  *
  * SELF-CONTAINED (mirrors `ComplianceChrome.tsx`): reads its own
- * `useAlerts()` mock hook internally, so mounting `<AlertBar />` anywhere in
+ * `useAlerts()` hook internally, so mounting `<AlertBar />` anywhere in
  * the participant shell needs no prop threading. Positions itself with
  * `position: fixed; top: var(--pulse-chrome-top, 0px)` — the SAME published
  * inset var name `ComplianceChrome` sets (`mountContract.ts`'s
@@ -32,14 +33,24 @@
  *    wraps on a phone — see "Mobile wrapping" below); a severity chip
  *    (icon + LABEL) using this alert's palette, a monospace message, the
  *    scenario timestamp, and the Details link. With more than one alert, it
- *    auto-rotates every {@link ROTATE_INTERVAL_MS} through ALL of them — the
+ *    auto-rotates every {@link ROTATE_INTERVAL_MS} through ALL of them in
+ *    severity-then-recency order (`useAlerts()` sorts; weather FU-5) — the
  *    chip swaps color/label/icon to match whichever alert is currently
- *    showing.
+ *    showing. Rotation PAUSES while the pointer is over the bar or focus is
+ *    inside it (WCAG 2.2.2: a reader can finish the message and reach its
+ *    link), and holds entirely under reduced motion or an overlay.
  *  - **`emergencyBand`** — forced the instant ANY active alert is
  *    `emergency` (an emergency always escapes the ticker to the full band,
  *    SHELL-CONTRACT.md §2). Solid `#b3261e`, white text, NEVER collapses.
- *    Shows the highest-severity (emergency) alert plus a "+N more" chip when
- *    other alerts are also active, expanding the full stack in place.
+ *    Shows the newest emergency alert plus a "+N more" chip when other alerts
+ *    are also active (a watch under a warning stays listed there), expanding
+ *    the full stack in place.
+ *
+ * "Details →" goes straight to the shown alert's host-relative `href` (its
+ * source item) when it has one, else to the alerts history (`AlertDetailsLink`).
+ * The message is rendered verbatim (WX-011) — never rewritten. (Only the
+ * scrolled, collapsed ticker clamps it to two lines; its tap target's
+ * `aria-label` carries the full text, and a tap re-expands it.)
  *
  * ## Collapse-on-scroll (ticker only)
  * SHELL-CONTRACT.md §2 is explicit that "the ticker is already one-line and
@@ -64,13 +75,17 @@
  * it in the shell's flow so nothing in-flow (the channel nav) sits under it.
  *
  * ## Accessibility (NFR-001 hard gate)
- * The host is `role="status"` (a polite, atomic live region by ARIA default;
- * emergency explicitly upgrades to `aria-live="assertive"` given the higher
- * urgency — SHELL-CONTRACT.md still names the ROLE as `status`, which this
- * preserves). Severity is carried by the chip's ICON *and* LABEL TEXT
- * together with color — never color alone. Content changes (a new/rotated
- * alert, a severity escalation) update the live region's text, so assistive
- * tech announces the change without any separate announcer element.
+ * The bar's live region is a visually hidden `role="status"` node INSIDE the
+ * host (`pulse-alert-bar-live`; polite and atomic by ARIA default, upgraded to
+ * `aria-live="assertive"` when it announces an emergency — SHELL-CONTRACT.md
+ * names the ROLE as `status`, which this preserves). It is always mounted
+ * (empty in `none`), so the none → first-alert transition is announced.
+ * It announces each alert ONCE, when it ARRIVES (its id, severity or message
+ * was not in the previous set; channels-foundation story 11): ticker rotation,
+ * an alert clearing, and a push that changes nothing announce nothing. Before
+ * story 11 the whole host was the live region, so every 3.5 s rotation was
+ * re-read. Severity is carried by the chip's ICON *and* LABEL TEXT together
+ * with color — never color alone — and the announcement names it in words.
  *
  * ## Scenario time (COR-053)
  * Every rendered timestamp comes from `formatScenarioTime()` /
@@ -287,6 +302,19 @@ const moreChipStyle: CSSProperties = {
   fontFamily: "'JetBrains Mono', 'Courier New', monospace",
 }
 
+/** Visually hidden but read by assistive tech (the bar's live region). */
+const visuallyHiddenStyle: CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: 0,
+  border: 0,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+}
+
 const stackListStyle: CSSProperties = {
   marginTop: '6px',
   display: 'flex',
@@ -312,6 +340,67 @@ function pickActiveAlert(
     ? alerts.find(alert => alert.severity === 'emergency')
     : alerts[tickerIndex]
   return preferred ?? alerts[0] ?? null
+}
+
+/** What makes an alert "new" for the live region: a new id, or a revised severity/message. */
+function announceKey(alert: Alert): string {
+  return `${alert.id}\u0000${alert.severity}\u0000${alert.message}`
+}
+
+/** The spoken form of one alert: severity in words, then the message verbatim. */
+function announceText(alert: Alert): string {
+  return `${SEVERITY_META[alert.severity].label} alert: ${alert.message}`
+}
+
+interface Announcement {
+  readonly text: string
+  readonly level: 'polite' | 'assertive'
+}
+
+const SILENT: Announcement = { text: '', level: 'polite' }
+
+/**
+ * Announces each alert once, on arrival (see the module header). Returns the
+ * live region's text and urgency: assertive only when an arrival is an emergency.
+ */
+function useArrivalAnnouncement(alerts: readonly Alert[]): Announcement {
+  const [announcement, setAnnouncement] = useState<Announcement>(SILENT)
+  // The announce keys of the previous set. Replaced (not accumulated) each time, so an
+  // alert that clears and later returns is new again.
+  const seenRef = useRef<ReadonlySet<string>>(new Set())
+  // Alternates a trailing no-break space, so an arrival worded exactly like the
+  // previous announcement still changes the region's text and is read.
+  const alternateRef = useRef(false)
+  // The announce keys of what the region currently says.
+  const announcedRef = useRef<readonly string[]>([])
+
+  // `useAlerts()` keeps the same array while the set is unchanged (structural sharing),
+  // and a fresh-but-equal array finds no arrival below, so neither announces.
+  useEffect(() => {
+    const keys = alerts.map(announceKey)
+    const seen = seenRef.current
+    const current = new Set(keys)
+    seenRef.current = current
+    const arrived = alerts.filter((_, index) => !seen.has(keys[index] ?? ''))
+    if (arrived.length === 0) {
+      // Never leave a cleared alert (say an emergency) readable in the region: as soon
+      // as ANY alert it announced is no longer active, it falls silent. Removing text is
+      // not announced, and the active set is always readable in the bar itself.
+      if (!announcedRef.current.every(key => current.has(key))) {
+        announcedRef.current = []
+        setAnnouncement(SILENT)
+      }
+      return
+    }
+    announcedRef.current = arrived.map(announceKey)
+    alternateRef.current = !alternateRef.current
+    setAnnouncement({
+      text: `${arrived.map(announceText).join(' ')}${alternateRef.current ? '' : '\u00a0'}`,
+      level: arrived.some(alert => alert.severity === 'emergency') ? 'assertive' : 'polite',
+    })
+  }, [alerts])
+
+  return announcement
 }
 
 /**
@@ -370,15 +459,22 @@ export function AlertBar() {
   const [tickerIndex, setTickerIndex] = useState(0)
   const reduceMotion = usePrefersReducedMotion()
   const { overlayActive } = useAlertPauseBridge()
+  // Rotation pauses while the pointer is over the bar or focus is inside it
+  // (WCAG 2.2.2), so the shown alert cannot change under a reader or a link.
+  const [hovered, setHovered] = useState(false)
+  const [focusWithin, setFocusWithin] = useState(false)
+  const rotationPaused = hovered || focusWithin
   useEffect(() => {
     // prefers-reduced-motion (NFR-001): the ticker holds on its current alert;
     // every alert stays reachable through "Details →" (/alerts).
-    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || overlayActive) return
+    if (
+      treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || overlayActive || rotationPaused
+    ) return
     const id = setInterval(() => {
       setTickerIndex(current => (current + 1) % alerts.length)
     }, ROTATE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [treatment, alerts.length, reduceMotion, overlayActive])
+  }, [treatment, alerts.length, reduceMotion, overlayActive, rotationPaused])
   // A shrinking alert list can leave a stale index — wrap it back in range
   // rather than indexing out of bounds.
   const safeTickerIndex = alerts.length === 0 ? 0 : tickerIndex % alerts.length
@@ -407,10 +503,11 @@ export function AlertBar() {
   // DOM already-populated is not reliably announced by assistive tech, so the
   // most important transition — `none` → the first alert (which may itself be
   // an emergency) — would be SILENT if the bar returned `null` while empty.
-  // Keeping ONE persistent host means the region exists (empty) before any
-  // content arrives, so every state change announces. In `none` it carries
+  // Keeping ONE persistent host (and its hidden region) means the region exists
+  // (empty) before any content arrives. In `none` the host carries
   // `noneHostStyle` (zero-height, no padding, out of flow), so AC1's "no
   // reserved space" still holds — the region is present but invisible.
+  const announcement = useArrivalAnnouncement(alerts)
   const activeAlert =
     treatment === 'none' ? null : pickActiveAlert(alerts, hasEmergency, safeTickerIndex)
   // Mirror the shown alert for the pause dialog (aria-modal hides this bar from AT).
@@ -418,11 +515,19 @@ export function AlertBar() {
     ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
     : ''
   const activeSeverity = activeAlert?.severity ?? null
+  // A focused control that unmounts (its alert cleared, the treatment swapped,
+  // the ticker collapsing or re-expanding) fires no blur, so re-check where focus
+  // is after each of those swaps: a pause must never outlive the focus that caused it.
+  const activeAlertId = activeAlert?.id ?? null
+  useEffect(() => {
+    if (focusWithin && !(hostRef.current?.contains(document.activeElement) ?? false)) {
+      setFocusWithin(false)
+    }
+  }, [focusWithin, activeAlertId, treatment, collapsed])
   useEffect(() => {
     alertPauseBridge.setAlert(activeSummary, activeSeverity)
     return () => alertPauseBridge.setAlert('', null)
   }, [activeSummary, activeSeverity])
-  const liveAnnounceLevel = activeAlert?.severity === 'emergency' ? 'assertive' : 'polite'
   const otherAlerts =
     activeAlert && treatment === 'emergencyBand'
       ? alerts.filter(alert => alert.id !== activeAlert.id)
@@ -442,15 +547,32 @@ export function AlertBar() {
       <style>{TOUCH_TARGET_STYLES}</style>
       <div
         ref={hostRef}
-        role="status"
-        aria-live={liveAnnounceLevel}
-        aria-atomic="true"
         inert={overlayActive}
         data-testid="pulse-alert-bar"
         data-alert-severity={activeAlert?.severity ?? 'none'}
         data-alert-treatment={dataTreatment}
+        data-rotation-paused={rotationPaused ? 'true' : undefined}
         style={hostStyle}
+        // A touch "hover" has no reliable leave, so only a real pointer pauses on hover.
+        onPointerEnter={event => {
+          if (event.pointerType !== 'touch') setHovered(true)
+        }}
+        onPointerLeave={() => setHovered(false)}
+        onFocus={() => setFocusWithin(true)}
+        onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocusWithin(false)
+        }}
       >
+        {/* The bar's live region: announces arrivals only (see the module header). */}
+        <div
+          role="status"
+          aria-live={announcement.level}
+          aria-atomic="true"
+          data-testid="pulse-alert-bar-live"
+          style={visuallyHiddenStyle}
+        >
+          {announcement.text}
+        </div>
         {treatment === 'emergencyBand' && activeAlert && (
           <>
             <div style={rowStyle}>
@@ -462,6 +584,7 @@ export function AlertBar() {
                 {format(activeAlert.scenarioTime)}
               </span>
               <AlertDetailsLink
+                href={activeAlert.href}
                 className={TOUCH_TARGET_CLASS}
                 style={{ ...detailsLinkStyle, color: '#ffffff' }}
               >
@@ -517,7 +640,11 @@ export function AlertBar() {
               <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
                 {format(activeAlert.scenarioTime)}
               </span>
-              <AlertDetailsLink className={TOUCH_TARGET_CLASS} style={detailsLinkStyle}>
+              <AlertDetailsLink
+                href={activeAlert.href}
+                className={TOUCH_TARGET_CLASS}
+                style={detailsLinkStyle}
+              >
                 Details →
               </AlertDetailsLink>
             </div>

@@ -47,6 +47,17 @@ export interface Alert {
    * `formatScenarioTime()`/`useScenarioTime()`; never wall-clock (COR-053).
    */
   readonly scenarioTime: string
+  /**
+   * Host-relative "Details" target (PRT-012, FC-9.3), or null/absent for an
+   * alert with no source item — "Details →" then opens the alerts history.
+   * Additive (channels-foundation story 11): the live `/alerts` source sends
+   * it; the canned mock and older shapes omit it.
+   */
+  readonly href?: string | null
+  /** The channel the alert came from, or null for a console alert. Additive (story 11). */
+  readonly sourceChannel?: string | null
+  /** The source content item's id, or null. Additive (story 11). */
+  readonly contentId?: string | null
 }
 
 /**
