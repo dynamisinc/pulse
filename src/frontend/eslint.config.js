@@ -120,4 +120,28 @@ export default defineConfig([
       ],
     },
   },
+  // Weather product components (weather-source 07, COR-053): on top of the participant
+  // wall-clock ban, no `toLocale*` (it renders in the BROWSER's zone, not the exercise
+  // zone). Times go through ScenarioDateline. A later block REPLACES the rule's options,
+  // so the two wall-clock selectors are repeated here.
+  {
+    files: ['src/features/weather/components/product/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+          message: 'Participant surfaces render scenario time only (COR-053). Use scenarioNow()/formatScenarioTime() from @/core/clock — never `new Date()` (wall-clock).',
+        },
+        {
+          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+          message: 'Participant surfaces render scenario time only (COR-053). Use scenarioNow() from @/core/clock — never Date.now() (wall-clock).',
+        },
+        {
+          selector: "CallExpression[callee.property.name=/^toLocale/]",
+          message: 'Weather product times render in the exercise zone (COR-053). Use ScenarioDateline / formatScenarioTime() — never toLocale* (browser zone).',
+        },
+      ],
+    },
+  },
 ])
