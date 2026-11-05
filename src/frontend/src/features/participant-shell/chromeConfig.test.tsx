@@ -23,9 +23,9 @@ import type { ReactNode } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { isWatermarkRequired, useChromeConfig } from './chromeConfig'
+import { isComplianceChromeDrawn, isWatermarkRequired, useChromeConfig } from './chromeConfig'
 import { api } from '@/core/services/api'
-import type { ChromeConfig } from './mountContract'
+import type { ChromeConfig, ShellVariant } from './mountContract'
 
 vi.mock('@/core/services/api', () => ({
   api: { get: vi.fn() },
@@ -70,6 +70,41 @@ describe('isWatermarkRequired (DF-3: watermark || !enabled; NFR-008 never both o
   it('is false ONLY when the watermark switch is off and the banners are on', () => {
     const config: ChromeConfig = { enabled: true, watermark: false, top: banner, bottom: banner }
     expect(isWatermarkRequired(config)).toBe(false)
+  })
+})
+
+describe('the kiosk clause (channels-foundation 22, PP-2; NFR-008, COR-031, Q-33)', () => {
+  const banner = { text: 'X', fg: '#000000', bg: '#ffffff' }
+  const VARIANTS: readonly ShellVariant[] = ['full', 'readOnly', 'kiosk', 'preview']
+  const CONFIGS: readonly ChromeConfig[] = [true, false].flatMap(enabled =>
+    [true, false].map(watermark => ({ enabled, watermark, top: banner, bottom: banner })),
+  )
+
+  it.each(CONFIGS.map(config => [config.enabled, config.watermark, config] as const))(
+    'requires the watermark in kiosk whatever the config (enabled=%s, watermark=%s)',
+    (_enabled, _watermark, config) => {
+      expect(isWatermarkRequired(config, 'kiosk')).toBe(true)
+      expect(isComplianceChromeDrawn(config, 'kiosk')).toBe(false)
+    },
+  )
+
+  it('leaves every non-kiosk variant answering exactly as the config-only rule', () => {
+    for (const variant of VARIANTS.filter(v => v !== 'kiosk')) {
+      for (const config of CONFIGS) {
+        expect(isWatermarkRequired(config, variant)).toBe(isWatermarkRequired(config))
+        expect(isComplianceChromeDrawn(config, variant)).toBe(config.enabled)
+      }
+    }
+  })
+
+  it('never has chrome and watermark both off, in any variant and any config', () => {
+    for (const variant of [...VARIANTS, undefined]) {
+      for (const config of CONFIGS) {
+        const chromeDrawn = isComplianceChromeDrawn(config, variant)
+        const watermarkOn = isWatermarkRequired(config, variant)
+        expect(chromeDrawn || watermarkOn).toBe(true)
+      }
+    }
   })
 })
 

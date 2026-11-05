@@ -57,6 +57,7 @@
  */
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChannelNav } from './ChannelNav'
 import { useChannelNav } from '../channelNavConfig'
@@ -109,7 +110,7 @@ describe('ChannelNav — config-driven rendering (AC1)', () => {
   it('renders every enabled channel as a link/button in BOTH the desktop strip and the mobile tab bar', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const strip = screen.getByTestId('pulse-channel-nav-strip')
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
@@ -123,7 +124,7 @@ describe('ChannelNav — config-driven rendering (AC1)', () => {
   it('both forms are landmarks labelled "Channel navigation" for assistive tech', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     // hidden: true to include the desktop strip's <nav> (see file header,
     // jsdom limitation 1). Asserting the aria-label attribute directly rather
@@ -151,7 +152,7 @@ describe('ChannelNav — config-driven visibility, no dangling doors (AC2, D2-00
       hideWhenSingleChannel: false,
     })
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     for (const forbidden of ['Local News', 'Press Room', 'Weather', 'Neighborhood Portal']) {
       expect(screen.queryByText(forbidden)).not.toBeInTheDocument()
@@ -165,7 +166,7 @@ describe('ChannelNav — config-driven visibility, no dangling doors (AC2, D2-00
       hideWhenSingleChannel: true,
     })
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     expect(screen.queryByTestId('pulse-channel-nav-strip')).not.toBeInTheDocument()
     expect(screen.queryByTestId('pulse-channel-nav-tabs')).not.toBeInTheDocument()
@@ -179,7 +180,7 @@ describe('ChannelNav — config-driven visibility, no dangling doors (AC2, D2-00
       hideWhenSingleChannel: false,
     })
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const strip = screen.getByTestId('pulse-channel-nav-strip')
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
@@ -194,7 +195,7 @@ describe('ChannelNav — config-driven visibility, no dangling doors (AC2, D2-00
       hideWhenSingleChannel: false,
     })
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     expect(screen.queryByTestId('pulse-channel-nav-strip')).not.toBeInTheDocument()
     expect(screen.queryByTestId('pulse-channel-nav-tabs')).not.toBeInTheDocument()
@@ -215,7 +216,7 @@ describe('ChannelNav — config-driven visibility, no dangling doors (AC2, D2-00
     }
     mockUseChannelNav.mockReturnValue(sixChannels)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const strip = screen.getByTestId('pulse-channel-nav-strip')
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
@@ -236,7 +237,7 @@ describe('ChannelNav — current channel marked, never color-only (AC1/AC5, NFR-
       hideWhenSingleChannel: false,
     })
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const stripCurrent = within(screen.getByTestId('pulse-channel-nav-strip'))
       .getByRole('button', { name: 'Local News', hidden: true })
@@ -260,7 +261,7 @@ describe('ChannelNav — current channel marked, never color-only (AC1/AC5, NFR-
   it('the "--current" style rules carry more than color — font-weight AND text-decoration (NFR-001: never color alone)', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const styleText = container.querySelector('style')?.textContent ?? ''
 
@@ -286,7 +287,7 @@ describe('ChannelNav — switching persists per shell instance (AC3)', () => {
     const user = userEvent.setup()
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const strip = screen.getByTestId('pulse-channel-nav-strip')
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
@@ -310,7 +311,7 @@ describe('ChannelNav — switching persists per shell instance (AC3)', () => {
     const user = userEvent.setup()
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
     const strip = screen.getByTestId('pulse-channel-nav-strip')
@@ -325,7 +326,7 @@ describe('ChannelNav — switching persists per shell instance (AC3)', () => {
     const user = userEvent.setup()
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { rerender } = render(<ChannelNav />)
+    const { rerender } = render(<ChannelNav />, { wrapper: MemoryRouter })
     await user.click(screen.getByRole('button', { name: 'Local News' }))
     expect(screen.getAllByRole('button', { name: 'Local News' })[0]).toHaveAttribute('aria-current', 'page')
 
@@ -340,7 +341,7 @@ describe('ChannelNav — switching persists per shell instance (AC3)', () => {
 
   it('falls back to the new initialChannelId — not a dangling pointer — when the current channel disappears from a changed config', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
-    const { rerender } = render(<ChannelNav />)
+    const { rerender } = render(<ChannelNav />, { wrapper: MemoryRouter })
     expect(screen.getAllByRole('button', { name: 'Social' })[0]).toHaveAttribute('aria-current', 'page')
 
     // A differently-scoped config resolves (e.g. a fresh exercise) whose
@@ -362,7 +363,7 @@ describe('ChannelNav — keyboard operability (NFR-001)', () => {
     const user = userEvent.setup()
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const target = screen.getAllByRole('button', { name: 'Local News' })[0]
     if (!target) throw new Error('expected a "Local News" button to be rendered')
@@ -377,7 +378,7 @@ describe('ChannelNav — keyboard operability (NFR-001)', () => {
   it('publishes a :focus-visible outline rule for both nav forms (visible focus indicator)', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const styleText = container.querySelector('style')?.textContent ?? ''
     expect(styleText).toContain('.pulse-channel-nav-link:focus-visible')
@@ -392,7 +393,7 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     setExerciseClock(fixedClock(instant))
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     // Computed independently via the SAME real utility ChannelNav is
     // documented to call - if the component ever passed the wrong format
@@ -413,7 +414,7 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     mockUseExerciseContext.mockReturnValue({ ...DEFAULT_EXERCISE_SCOPE, timeZone: 'Asia/Tokyo' })
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const expectedDateline = formatScenarioTime(instant, 'Asia/Tokyo', { format: 'dateline' })
     const utcDateline = formatScenarioTime(instant, 'UTC', { format: 'dateline' })
@@ -431,7 +432,7 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     resetExerciseClock()
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     // The default clock's "now" is the real date; showing it beside
     // scenario-time posts would leak wall-clock time into the fiction.
@@ -444,7 +445,7 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     setExerciseClock(fixedClock(new Date('2026-07-16T14:00:00Z')))
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const bodyText = document.body.textContent ?? ''
     expect(bodyText).not.toContain(DEFAULT_EXERCISE_SCOPE.exerciseId)
@@ -455,7 +456,7 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
 describe('ChannelNav — touch targets (mobile-tablet 17)', () => {
   it('grows the strip and its links to the 44 px touch floor on coarse pointers only', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const styleText = container.querySelector('style')?.textContent ?? ''
     const coarse = styleText.slice(styleText.indexOf('@media (pointer: coarse)'))
@@ -470,7 +471,7 @@ describe('ChannelNav — mobile-first responsive mechanism', () => {
   it('defaults the tab bar visible and the strip hidden outside any media query (mobile-first)', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const styleText = container.querySelector('style')?.textContent ?? ''
     const mediaIndex = styleText.indexOf('@media')
@@ -488,7 +489,7 @@ describe('ChannelNav — mobile-first responsive mechanism', () => {
   it('toggles to the desktop strip (and hides the tab bar) inside a min-width media query', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const styleText = container.querySelector('style')?.textContent ?? ''
     const mediaBlock = styleText.slice(styleText.indexOf('@media'))
@@ -501,7 +502,7 @@ describe('ChannelNav — mobile-first responsive mechanism', () => {
   it('both nav forms are simultaneously present in the DOM (jsdom cannot evaluate @media; see file header)', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     expect(screen.getByTestId('pulse-channel-nav-strip')).toBeInTheDocument()
     expect(screen.getByTestId('pulse-channel-nav-tabs')).toBeInTheDocument()
@@ -512,7 +513,7 @@ describe('ChannelNav — participant world: quiet styling, FontAwesome-only, no 
   it('renders no MUI/COBRA class names anywhere in its output', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    const { container } = render(<ChannelNav />)
+    const { container } = render(<ChannelNav />, { wrapper: MemoryRouter })
 
     expect(container.querySelector('[class*="Mui"]')).toBeNull()
     expect(container.querySelector('[class*="Cobra"]')).toBeNull()
@@ -521,7 +522,7 @@ describe('ChannelNav — participant world: quiet styling, FontAwesome-only, no 
   it('renders a FontAwesome <svg> icon (aria-hidden) per tab in the mobile bar, and none in the desktop strip', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     const strip = screen.getByTestId('pulse-channel-nav-strip')
     const tabs = screen.getByTestId('pulse-channel-nav-tabs')
@@ -537,7 +538,7 @@ describe('ChannelNav — participant world: quiet styling, FontAwesome-only, no 
   it('renders only the configured channel labels as button text — no instructional copy (XC-002)', () => {
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
 
-    render(<ChannelNav />)
+    render(<ChannelNav />, { wrapper: MemoryRouter })
 
     // hidden: true so this covers the desktop strip's buttons too, not just
     // the mobile tab bar's (see file header, jsdom limitation 1).

@@ -5,10 +5,12 @@
  * what a disabled channel, an unknown item, a draft or another exercise's item
  * all render, indistinguishably (XC-001/002).
  *
- * Channels-foundation 08 ships this baseline so `<ChannelRoute>` never renders
- * a COBRA 404 or a blank page; story 12 (participant channel router) owns the
- * brand-skinned final look and may restyle it in place without changing the
- * export.
+ * Channels-foundation 08 shipped this baseline so `<ChannelRoute>` never
+ * renders a COBRA 404 or a blank page; story 12 (participant channel router)
+ * renders it for every unknown participant path too, and sets the page title.
+ * It must stay OUTSIDE any channel or outlet skin scope, so it always carries
+ * the exercise's brand (`--pulse-brand-*`), never an outlet's look. "Go to the
+ * home page" goes to `/`, the landing entry (portal if enabled, else Social).
  *
  * Fiction-safe copy: no exercise, admin, "disabled" or "not enabled" wording,
  * so a participant cannot tell a switched-off channel from a mistyped URL.
@@ -18,6 +20,7 @@
  */
 
 import { Link } from 'react-router-dom'
+import { useChannelTitle } from './useChannelTitle'
 
 const wrapperStyle = {
   display: 'flex',
@@ -40,6 +43,7 @@ const linkStyle = {
 
 /** The participant-world "page not found" for a channel route. */
 export function ChannelNotFound() {
+  useChannelTitle('Page not found')
   return (
     <section style={wrapperStyle} aria-labelledby="channel-not-found-heading" data-testid="channel-not-found">
       <h1 id="channel-not-found-heading" style={{ margin: 0, fontSize: '1.5rem' }}>
