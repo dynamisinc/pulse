@@ -23,6 +23,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.Channels.Content.Read;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
@@ -243,6 +244,64 @@ public sealed class ChannelsCompositionRootWiringTests
 
         scope.ServiceProvider.GetRequiredService<IChannelEnablement>().Should().BeOfType<ChannelEnablement>(
             "story 08 registers the gate RequireChannelEnabled resolves per request; a missing line 500s every gated route");
+    }
+
+    /// <summary>Story 06: the participant content read routes, mapped by <c>MapChannels()</c>.</summary>
+    /// <returns>The raw route pattern of each GET route.</returns>
+    public static TheoryData<string> ContentReadRoutes() => new()
+    {
+        "/api/channels/news/content",
+        "/api/channels/news/content/{outletSlug}/{contentSlug}",
+        "/api/channels/press/content",
+        "/api/channels/press/content/{outletSlug}/{contentSlug}",
+        "/api/channels/weather/content",
+        "/api/channels/weather/content/{outletSlug}/{contentSlug}",
+        "/api/link-previews",
+    };
+
+    [Fact]
+    public void ProgramCs_WiresTheContentReadApi_ExactlyOnce()
+    {
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<IInSimLinkResolver>().Should().BeOfType<InSimLinkResolver>();
+        scope.ServiceProvider.GetRequiredService<ContentReadService>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<ParticipantContentProjector>().Should().NotBeNull();
+
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+        foreach (string pattern in ContentReadRoutes())
+        {
+            var matches = endpoints
+                .Where(endpoint => string.Equals(endpoint.RoutePattern.RawText?.TrimEnd('/'), pattern, StringComparison.OrdinalIgnoreCase)
+                    && (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("GET") ?? false))
+                .ToList();
+            matches.Should().ContainSingle(
+                "GET {0} is wired exactly once (MapChannels -> MapContentRead); mapped: {1}",
+                pattern,
+                string.Join(", ", endpoints.Select(e => e.RoutePattern.RawText).Where(p => p?.Contains("content", StringComparison.Ordinal) ?? false)));
+        }
+
+        new ServiceCollection().AddChannels().AddChannels()
+            .Count(d => d.ServiceType == typeof(IInSimLinkResolver)).Should().Be(1, "AddContentRead is idempotent");
+    }
+
+    [Theory]
+    [MemberData(nameof(ContentReadRoutes))]
+    public async Task ContentRead_AnAnonymousCall_IsRefused_NeverA404(string pattern)
+    {
+        using var factory = new WiringProbeFactory(resolveExercise: true);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync(pattern
+            .Replace("{outletSlug}", "newsline-7", StringComparison.Ordinal)
+            .Replace("{contentSlug}", "a-story", StringComparison.Ordinal));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Unauthorized,
+            "GET {0}: an anonymous caller is refused before any handler or database work (an unwired route would 404)",
+            pattern);
     }
 
     /// <summary>
