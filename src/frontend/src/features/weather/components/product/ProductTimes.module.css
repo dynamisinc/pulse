@@ -1,0 +1,32 @@
+/*
+ * features/weather/components/product/ProductTimes.module.css
+ * Label / value pairs; the value wraps under its label on a narrow screen.
+ */
+
+.times {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--pulse-skin-text, #1f2329);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--pulse-skin-space, 8px);
+  min-width: 0;
+}
+
+.label {
+  min-width: 5.5em;
+  font-weight: 700;
+}
+
+.value {
+  margin: 0;
+  min-width: 0;
+}
