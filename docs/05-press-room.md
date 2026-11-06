@@ -19,7 +19,7 @@ Looking Glass parity: PR Wire lets Communications Players/PIOs post releases (pa
 | ID | Requirement |
 |---|---|
 | PRS-001 | Participants with PIO/comms permission (COR-010) author releases on behalf of the organization(s) they operate (COR-018 org-account grants). Multiple humans publishing under one org banner is a supported, per-human-attributed pattern (JIC reality); joint/JIC releases publish from a participant-operated JIC org account — not a controller workaround. |
-| PRS-002 | Authoring inputs, **PDF-first (decided from exercise experience — PIOs mostly drop finished PDFs):** primary path is drag-and-drop PDF rendered inline as pages (plus download), with headline, release org, and contact block wrapped around it. Rich-text editor with clean paste-from-Word (sanitized per NFR-004) is the secondary path. Image attachment on both. |
+| PRS-002 | Authoring inputs, **PDF-first (decided from exercise experience — PIOs mostly drop finished PDFs):** primary path is drag-and-drop PDF rendered inline as pages (plus download), with headline, release org, and contact block wrapped around it. Rich-text editor with clean paste-from-Word (sanitized per NFR-004) is the secondary path. Image attachment on both. **Amended 10/29 (Tom):** December is **rich-text-first** (clean paste-from-Word, sanitized per NFR-004) with a **download-only PDF attachment**; inline PDF rendering (pages) is post-December. |
 | PRS-003 | Release timing: publish immediately or **embargo/schedule** for a set time. Scheduled releases are visible to their author and staff, invisible to the public until release. |
 | PRS-004 | Drafts autosave; a draft's full edit timeline is retained (evaluators can see how long a release took to produce, and what changed between drafts — rich evaluation signal; capture disclosed per NFR-007). |
 | PRS-005 | Releases can be updated post-publish with visible revision markers ("Updated 14:32" — scenario time, COR-053), preserving prior versions. |
@@ -82,4 +82,4 @@ Press-conference simulation (live video/AV — future consideration), media-inqu
 ## 5. Open questions
 
 1. Should embargoed releases be visible to media personas pre-release (real embargo behavior, enabling "outlet breaks the embargo" scenarios)? Compelling but adds workflow — recommend post-launch.
-2. ~~PDF-first vs. rich-text-first~~ **Resolved:** PDF-first (PRS-002).
+2. ~~PDF-first vs. rich-text-first~~ **Resolved:** PDF-first (PRS-002). **Amended 10/29 (Tom):** December is rich-text-first with a download-only PDF attachment.

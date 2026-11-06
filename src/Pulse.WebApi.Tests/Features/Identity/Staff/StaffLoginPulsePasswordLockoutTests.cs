@@ -155,10 +155,12 @@ public sealed class StaffLoginPulsePasswordLockoutTests
         DynamisStaffAccount[]? allowlist = null)
     {
         await using var context = _fixture.CreateContext();
+        var verifier = TestPasswordVerifiers.New();
         var provider = new PulsePasswordIdentityProvider(
             context,
-            new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = [.. allowlist ?? []] })));
-        var service = new StaffLoginService(context, provider, issuer);
+            new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = [.. allowlist ?? []] })),
+            verifier);
+        var service = new StaffLoginService(context, provider, verifier, TestSignInTiming.NoFloor, issuer);
         return await service.LoginAsync(new StaffLoginRequest { Username = username, Secret = secret, ExerciseId = exerciseId.ToString() });
     }
 

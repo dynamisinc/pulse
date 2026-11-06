@@ -95,7 +95,7 @@ import {
 } from '@/theme/styledComponents'
 import { usePermissions } from '@/core/auth'
 import { touchTargetSx, useCoarsePointer } from '../components/confirm'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useActiveExerciseInternalName } from '@/features/staff/hooks/useActiveExerciseInternalName'
 import { useReadiness } from '@/features/planner/hooks/useReadiness'
 import { EndExerciseDialog } from './EndExerciseDialog'
 import { useExerciseLifecycle } from './useExerciseLifecycle'
@@ -167,7 +167,8 @@ export function ExerciseLifecycleControl() {
 function ExerciseLifecycleControlBody() {
   const lifecycle = useExerciseLifecycle()
   const touchSx = useCoarsePointer() ? touchTargetSx : undefined
-  const { exerciseName } = useExerciseContext()
+  // INTERNAL name (staff world); the scope's name is participant-facing and nullable.
+  const exerciseName = useActiveExerciseInternalName()
   const {
     canStart,
     canEnd,

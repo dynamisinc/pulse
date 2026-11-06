@@ -1,0 +1,48 @@
+/*
+ * features/weather/components/product/IbwGrid.module.css
+ * Mobile-first: each row stacks label over value; from 600px the rows share a two-column grid.
+ * No fixed widths anywhere, so a long value wraps instead of scrolling sideways.
+ */
+
+.grid {
+  margin: 0;
+  display: grid;
+  gap: calc(var(--pulse-skin-space, 8px) * 1.5);
+  min-width: 0;
+  color: var(--pulse-skin-text, #1f2329);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+}
+
+.row {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.value {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--pulse-skin-body-size, 1rem);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 600px) {
+  .grid {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: calc(var(--pulse-skin-space, 8px) * 2);
+  }
+
+  /* Each row hands its two cells to the parent grid, so the labels share one column. */
+  .row {
+    display: contents;
+  }
+}

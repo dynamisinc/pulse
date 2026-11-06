@@ -22,6 +22,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
                 "/api/personas",
                 "/api/posts",
                 "/api/media",
+                "/api/clock",
                 "/api/shell-state",
                 "/api/chrome-config",
                 "/api/brand-tokens",
@@ -30,7 +31,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
                 "/api/overlay-state",
             ],
             "the covered set is implementation.md's 'participant-gating seam' list, verbatim, plus demo-polish BM's "
-            + "/api/media (implementation.md demo-polish §1.6)");
+            + "/api/media (implementation.md demo-polish §1.6), plus fix/noise-new-posts-clock's /api/clock (gated like /api/personas)");
 
     /// <summary>AC3: every covered participant route matches, including the templated thread route.</summary>
     [Theory]
@@ -39,6 +40,7 @@ public sealed class ExerciseLifecycleGatedRoutesTests
     [InlineData("/api/personas")]
     [InlineData("/api/posts")]
     [InlineData("/api/media")]
+    [InlineData("/api/clock")]
     [InlineData("/api/shell-state")]
     [InlineData("/api/chrome-config")]
     [InlineData("/api/brand-tokens")]

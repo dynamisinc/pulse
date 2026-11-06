@@ -269,7 +269,7 @@ not sent anywhere yet: the admin reset returns the link once, for the admin to h
 and reset link stops working (the table is dropped), staff avatar names and upload attribution are dropped, and every
 removed (soft-deleted) enrollment row is hard-deleted first, which is what removal did before A2. EF generates a
 rollback script when the FROM migration is newer than the TO migration:
-`dotnet ef migrations script 20261019200000_A2CredentialFoundation 20261017120000_AdminIdentityFoundation --project src/Pulse.WebApi`.
+`dotnet ef migrations script 20261106150645_A2CredentialFoundation 20261029174012_Channels_M1_ContentFoundation --project src/Pulse.WebApi`.
 
 ## Incident log
 

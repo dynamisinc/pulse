@@ -108,7 +108,13 @@ export function isExerciseStatus(value: unknown): value is ExerciseStatus {
  */
 export interface ExerciseScope {
   readonly exerciseId: string
-  readonly exerciseName: string
+  /**
+   * The PARTICIPANT-facing exercise name (planner-set), or null when none is set. There is
+   * deliberately NO fallback to the internal name (exercise-build-golive story 09): participant
+   * surfaces render brand-only on null. STAFF surfaces must NOT read this for their label; they
+   * use the internal name from the staff assignments (`useActiveExerciseInternalName`).
+   */
+  readonly exerciseName: string | null
   readonly timeZone: string
   readonly status: ExerciseStatus
 }
@@ -116,7 +122,7 @@ export interface ExerciseScope {
 /** Wire shape of the (future) `/exercise-context` response body. */
 interface ExerciseContextResponseBody {
   readonly exerciseId: string
-  readonly exerciseName: string
+  readonly exerciseName: string | null
   readonly timeZone: string
   readonly status: ExerciseStatus
 }
@@ -202,7 +208,8 @@ function isValidResponseBody(
   return (
     !!body &&
     typeof body.exerciseId === 'string' && body.exerciseId.length > 0 &&
-    typeof body.exerciseName === 'string' && body.exerciseName.length > 0 &&
+    (body.exerciseName === null ||
+      (typeof body.exerciseName === 'string' && body.exerciseName.length > 0)) &&
     typeof body.timeZone === 'string' && body.timeZone.length > 0 &&
     isExerciseStatus(body.status)
   )

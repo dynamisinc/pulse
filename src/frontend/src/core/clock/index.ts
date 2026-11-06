@@ -34,3 +34,10 @@ export {
   isWallMirroringExerciseClock,
 } from './exerciseClock'
 export type { IExerciseClock } from './exerciseClock'
+
+export {
+  serverExerciseClock,
+  createServerExerciseClock,
+  isServerClockInstalled,
+} from './serverClock'
+export type { ScenarioClockState, ServerExerciseClock } from './serverClock'

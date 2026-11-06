@@ -130,7 +130,7 @@ function ScopedConsole() {
   })
 
   const data = scopedQuery.data ?? '(no data)'
-  frames.push({ label: scope.exerciseName, data })
+  frames.push({ label: scope.exerciseName ?? '(none)', data })
 
   // A layout effect, so the mount count is settled before any assertion can see
   // the DOM (a passive effect can still be pending under CI load).
