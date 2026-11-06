@@ -110,3 +110,28 @@ export function errorMessage(status: number | undefined, code: string | undefine
   if (status === 400) return 'The request was not valid. Refresh the page and try again.'
   return 'Something went wrong and nothing was changed. Try again.'
 }
+
+/** Maps an invite failure to words (shown beside an icon). */
+export function inviteErrorMessage(status: number | undefined, code: string | undefined): string {
+  if (status === 400) {
+    if (code === 'invalid-email') return 'Enter a valid email address.'
+    if (code === 'invalid-display-name') return 'Enter a display name.'
+    return 'The request was not valid. Check the email and name and try again.'
+  }
+  if (status === 409) {
+    switch (code) {
+      case 'already-active':
+        return 'This person already has a password. Use Reset link for them instead.'
+      case 'person-disabled':
+        return 'This person is disabled, so an invite would not work. Enable them first.'
+      case 'target-is-org-admin':
+        return 'This person is another organization admin and cannot be re-invited. They can reset their own password.'
+      default:
+        return 'The invite conflicts with the current state. The list has been refreshed; try again.'
+    }
+  }
+  if (status === 503 && code === 'invite-link-unavailable') {
+    return 'Invite links are not available because no sign-in address is configured.'
+  }
+  return 'Something went wrong and no invite was created. Try again.'
+}

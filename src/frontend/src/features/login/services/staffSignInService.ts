@@ -66,7 +66,7 @@ export interface StaffLoginEnvelope {
 
 /**
  * Org-level staff sign-in body (story 15): `orgSlug` is optional (omitted = match across orgs).
- * Types only: no UI sends this yet.
+ * Sent by `staffOrgSignIn` (the invite page's straight-to-sign-in).
  */
 export interface StaffOrgSignInCredentials {
   readonly orgSlug?: string
@@ -203,4 +203,31 @@ export async function staffSignIn(
   }
 
   return data
+}
+
+/**
+ * Org-shape staff sign-in: `POST /auth/staff/login { orgSlug, email, password }`. Resolves the
+ * success envelope or a multi-org choice list (discriminate with `isStaffOrgChoiceResponse`).
+ * Throws `StaffSignInError` on 401/400/network or a body that is neither shape. The password is
+ * sent in the body only; never logged or echoed.
+ */
+export async function staffOrgSignIn(
+  credentials: StaffOrgSignInCredentials,
+): Promise<StaffOrgLoginResponse> {
+  let data: unknown
+  try {
+    const response = await api.post<StaffOrgLoginResponse>(STAFF_LOGIN_ENDPOINT, credentials)
+    data = response.data
+  } catch (error) {
+    throw toStaffSignInError(error, 'Could not reach the sign-in service.')
+  }
+
+  if (isStaffLoginEnvelope(data)) return data
+  if (typeof data === 'object' && data !== null) {
+    const body = data as Record<string, unknown>
+    if (Array.isArray(body.choose) && typeof body.choiceToken === 'string') {
+      return data as StaffOrgChoiceResponse
+    }
+  }
+  throw new StaffSignInError('staffOrgSignIn: response was empty or malformed.')
 }

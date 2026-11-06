@@ -138,16 +138,38 @@ Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):
 - **Shared devices: tap Sign out.** A participant session ends at midnight in the exercise time zone.
   A **View-only code** session also persists, but is not day-capped (accepted for the demo).
 
-## Test staff accounts (role smoke)
+## Adding staff (invite, #575b)
 
-UAT has one staff login (`controller1`, the lead). To add a non-lead controller, a planner or an evaluator:
+Staff are added **in the app**, not through secrets. An org admin opens **People → Invite person**, enters the email
+and name, and hands the one-time invite link to the person (email is off until ACS is deployed, so the link is
+copied). The person sets a password at `/staff/invite`; a planner or org admin then assigns them on the exercise's
+**Staff** tab (or before they redeem — then the invite signs them straight in). No secret edit, infra deploy or
+`bootstrap-exercise` call is needed.
 
-1. Replace the `STAFF_IDENTITY_ACCOUNTS_JSON` secret with the full array, keeping `controller1` unchanged.
-2. Re-run **Deploy Infrastructure**.
-3. Enroll each login by re-running `bootstrap-exercise` with only the `staff` sub-request.
+**`STAFF_IDENTITY_ACCOUNTS_JSON` is break-glass only** (ADMIN-IDENTITY-MODEL §1.3). Keep `controller1`'s entry as it
+is; do not add new people to it. A person who has a Pulse password is never signed in by the allowlist.
+The old secret-based steps remain in
+[login/06 → Adding test staff accounts](features/login/06-uat-goLive-config-runbook.md#adding-test-staff-accounts-role-smoke)
+for break-glass use only.
 
-Steps and caveats:
-[login/06 → Adding test staff accounts](features/login/06-uat-goLive-config-runbook.md#adding-test-staff-accounts-role-smoke).
+## Provisioning a customer organization (`POST /api/ops/organizations`, #575b)
+
+The one platform action Dynamis performs for a new customer (§7.6). Gated by the same `X-Bootstrap-Secret` as the other
+ops routes (`Authentication__Bootstrap__Secret`); a wrong or unconfigured secret is a bare `404`. Needs
+`Authentication__FrontendBaseUrl` (else `503 invite-link-unavailable`).
+
+```bash
+curl -sS -X POST "$API/api/ops/organizations" \
+  -H "X-Bootstrap-Secret: $BOOTSTRAP_SECRET" -H "Content-Type: application/json" \
+  -d '{"name":"Lantern County OEM","adminEmail":"admin@lantern.example","adminDisplayName":"Avery Admin"}'
+```
+
+`201 { organizationId, name, slug, adminPersonId, inviteUrl, emailed }`. It creates the organization (slug from the
+name, `-2`, `-3`… on a collision), its first org admin (with the staff facet) and a 7-day invite. **The `inviteUrl` is
+shown once** and is a bearer credential: send it to the admin over a private channel, never paste it in a ticket or
+chat log. The admin sets a password and is signed in to the (empty) organization. `409 organization-exists` when the
+name is taken. **If the first admin's invite expires unused**, there is no ops re-issue route yet (follow-up), and the
+name is now taken, so re-running the call is a `409`: raise it with engineering.
 
 ## Timeout auto-send (swamped mode): single instance only
 

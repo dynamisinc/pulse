@@ -70,14 +70,30 @@ public sealed class CredentialCompositionRootWiringTests
     }
 
     [Fact]
-    public void IsStaleFor_CountsTheTieAsStale_SoClockSkewFailsClosed()
+    public void IsStaleFor_RefusesOnlyATokenCreatedStrictlyBeforeThePasswordChange()
     {
         var at = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
         var token = new Pulse.WebApi.Data.Entities.CredentialToken { TokenHash = "h", Purpose = "reset", CreatedAt = at };
 
-        CredentialTokenService.IsStaleFor(token, at).Should().BeTrue("CreatedAt == PasswordChangedAt is stale (fails closed)");
         CredentialTokenService.IsStaleFor(token, at.AddTicks(-1)).Should().BeFalse("a token issued after the change is fresh");
-        CredentialTokenService.IsStaleFor(token, at.AddTicks(1)).Should().BeTrue();
+        CredentialTokenService.IsStaleFor(token, at.AddTicks(1)).Should().BeTrue("a token issued before the change is stale");
         CredentialTokenService.IsStaleFor(token, null).Should().BeFalse("no password change yet");
+    }
+
+    [Fact]
+    public void IsStaleFor_TheTie_IsFresh_SoATokenIssuedInTheSameUnitOfWorkAsAPasswordChangeSurvivesIt()
+    {
+        // #575b: one operation takes ONE wall-clock read, so an invite staged in the same unit of work as a password change
+        // carries exactly PasswordChangedAt. Counting that tie as stale would kill the invite the moment it was issued.
+        var now = new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+        var invite = new Pulse.WebApi.Data.Entities.CredentialToken
+        {
+            TokenHash = "h",
+            Purpose = Pulse.WebApi.Data.Entities.CredentialTokenPurposes.Invite,
+            CreatedAt = now,
+        };
+
+        CredentialTokenService.IsStaleFor(invite, passwordChangedAt: now).Should().BeFalse(
+            "CreatedAt == PasswordChangedAt is the same instant, not an older credential");
     }
 }

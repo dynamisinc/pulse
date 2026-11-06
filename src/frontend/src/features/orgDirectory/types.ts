@@ -44,3 +44,18 @@ export interface OrgPeopleQuery {
 
 /** PATCH body: exactly one member. */
 export type OrgPersonPatch = { readonly isOrgAdmin: boolean } | { readonly disabled: boolean }
+
+/** POST /org/people/invite body. */
+export interface OrgInviteRequest {
+  readonly email: string
+  readonly displayName: string
+}
+
+/** 200 body of the invite: `inviteUrl` is a single-use bearer link returned ONCE; never log it. */
+export interface OrgInviteResult {
+  readonly personId: string
+  readonly inviteUrl: string
+  readonly emailed: boolean
+  /** False = an existing directory person without a password was re-invited (old link voided). */
+  readonly created: boolean
+}

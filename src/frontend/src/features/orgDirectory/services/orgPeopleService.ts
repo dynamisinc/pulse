@@ -11,6 +11,10 @@
  *   POST  /api/org/people/{id}/password-reset (#576)           -> { resetUrl }
  *         404 bare; 409 target-is-org-admin | person-disabled; 503 reset-link-unavailable
  *
+ *   POST  /api/org/people/invite { email, displayName } (#575b) -> { personId, inviteUrl, emailed, created }
+ *         400 invalid-email | invalid-display-name; 409 already-active | person-disabled |
+ *         target-is-org-admin; 503 invite-link-unavailable
+ *
  * Every route is org-admin only; the tenant is the caller's own, resolved server-side (never sent).
  * The reset link is a one-time credential: it is returned to the caller, never logged, stored or
  * put in an error message. STAFF world, no UI.
@@ -18,7 +22,14 @@
 
 import axios from 'axios'
 import { api } from '@/core/services/api'
-import type { OrgPeoplePage, OrgPeopleQuery, OrgPerson, OrgPersonPatch } from '../types'
+import type {
+  OrgInviteRequest,
+  OrgInviteResult,
+  OrgPeoplePage,
+  OrgPeopleQuery,
+  OrgPerson,
+  OrgPersonPatch,
+} from '../types'
 
 const PEOPLE_ENDPOINT = '/org/people'
 
@@ -84,5 +95,33 @@ export async function issuePasswordResetLink(personId: string): Promise<string> 
     return response.data.resetUrl
   } catch (error) {
     throw toError(error, 'Issuing the reset link')
+  }
+}
+
+/** Invites a person by email (copy-link flow; email is off). The link is returned once, never logged. */
+export async function inviteOrgPerson(request: OrgInviteRequest): Promise<OrgInviteResult> {
+  try {
+    const response = await api.post<OrgInviteResult>(`${PEOPLE_ENDPOINT}/invite`, {
+      email: request.email,
+      displayName: request.displayName,
+    })
+    const body: unknown = response.data
+    const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
+    if (
+      typeof data.personId !== 'string' ||
+      typeof data.inviteUrl !== 'string' ||
+      data.inviteUrl.length === 0
+    ) {
+      throw new OrgPeopleError('Inviting the person failed')
+    }
+    return {
+      personId: data.personId,
+      inviteUrl: data.inviteUrl,
+      emailed: data.emailed === true,
+      created: data.created === true,
+    }
+  } catch (error) {
+    if (error instanceof OrgPeopleError) throw error
+    throw toError(error, 'Inviting the person')
   }
 }

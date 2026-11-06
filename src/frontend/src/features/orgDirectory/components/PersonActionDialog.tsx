@@ -13,11 +13,13 @@
  * STAFF world: COBRA components, FontAwesome only, MUI 9 sx-only.
  */
 
-import { useId, useState } from 'react'
+import { useId } from 'react'
 import { Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCheck, faCircleExclamation, faCopy } from '@fortawesome/free-solid-svg-icons'
-import { CobraLinkButton, CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
+import { faCircleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { CobraLinkButton, CobraPrimaryButton } from '@/theme/styledComponents'
+import { OneTimeLinkPanel } from './OneTimeLinkPanel'
+import { copyStatusMessage, useCopyLink } from './useCopyLink'
 import { useIssuePasswordReset, useUpdateOrgPerson } from '../hooks/useOrgPeople'
 import type { OrgPeopleError } from '../services/orgPeopleService'
 import type { OrgPerson } from '../types'
@@ -55,12 +57,10 @@ export function PersonActionDialog({
   const reset = useIssuePasswordReset()
   const titleId = useId()
   const bodyId = useId()
-  const [copied, setCopied] = useState(false)
-  const [copyFailed, setCopyFailed] = useState(false)
-
   const pending = update.isPending || reset.isPending
   const error: OrgPeopleError | null = update.error ?? reset.error
   const link = reset.data
+  const copyState = useCopyLink(link)
 
   const close = () => {
     if (!pending) onClose()
@@ -81,25 +81,10 @@ export function PersonActionDialog({
     }
   }
 
-  const dialogStatus = copied
-    ? 'Link copied to the clipboard.'
-    : copyFailed
-      ? 'Could not copy automatically. Select the link and copy it.'
-      : link !== undefined
-        ? successMessage('resetPassword', person.displayName)
-        : ''
-
-  const copy = async () => {
-    if (link === undefined) return
-    try {
-      await navigator.clipboard.writeText(link)
-      setCopied(true)
-      setCopyFailed(false)
-    } catch {
-      setCopied(false)
-      setCopyFailed(true)
-    }
-  }
+  const dialogStatus = copyStatusMessage(
+    copyState,
+    link !== undefined ? successMessage('resetPassword', person.displayName) : '',
+  )
 
   return (
     <Dialog
@@ -129,28 +114,13 @@ export function PersonActionDialog({
         )}
 
         {link !== undefined && (
-          <div data-testid="reset-link-panel" style={{ marginTop: 12 }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 700 }}>
-              Reset link (shown once; give it to {person.displayName} directly)
-            </Typography>
-            <Typography
-              component="code"
-              data-testid="reset-link"
-              sx={{ display: 'block', fontSize: 12, wordBreak: 'break-all', mt: 0.5 }}
-            >
-              {link}
-            </Typography>
-            <CobraSecondaryButton
-              type="button"
-              size="small"
-              onClick={() => { void copy() }}
-              startIcon={<FontAwesomeIcon icon={copied ? faCheck : faCopy} aria-hidden="true" />}
-              sx={{ mt: 1 }}
-              data-testid="copy-reset-link"
-            >
-              {copied ? 'Copied' : 'Copy link'}
-            </CobraSecondaryButton>
-          </div>
+          <OneTimeLinkPanel
+            link={link}
+            label="Reset link"
+            recipientName={person.displayName}
+            copied={copyState.copied}
+            onCopy={() => { void copyState.copy() }}
+          />
         )}
 
         {/* Always mounted, inside the modal (it hides the page region), so it is announced. */}

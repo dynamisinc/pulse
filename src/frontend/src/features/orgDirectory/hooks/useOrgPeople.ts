@@ -16,12 +16,20 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query'
 import {
+  inviteOrgPerson,
   issuePasswordResetLink,
   listOrgPeople,
   updateOrgPerson,
   type OrgPeopleError,
 } from '../services/orgPeopleService'
-import type { OrgPeoplePage, OrgPeopleQuery, OrgPerson, OrgPersonPatch } from '../types'
+import type {
+  OrgInviteRequest,
+  OrgInviteResult,
+  OrgPeoplePage,
+  OrgPeopleQuery,
+  OrgPerson,
+  OrgPersonPatch,
+} from '../types'
 
 /** Prefix of every directory query; invalidating it refetches the visible page. */
 export const ORG_PEOPLE_QUERY_KEY = ['org', 'people'] as const
@@ -57,5 +65,23 @@ export function useIssuePasswordReset(): UseMutationResult<string, OrgPeopleErro
   return useMutation<string, OrgPeopleError, string>({
     mutationFn: (personId: string) => issuePasswordResetLink(personId),
     gcTime: 0,
+  })
+}
+
+/**
+ * Invites a person. Resolves to the one-time link result; the directory refetches on success
+ * (a new person appears) and on failure (a 409 means the row on screen may be stale). `gcTime: 0`
+ * drops the link from the mutation cache once the dialog unmounts.
+ */
+export function useInviteOrgPerson(): UseMutationResult<
+  OrgInviteResult,
+  OrgPeopleError,
+  OrgInviteRequest
+> {
+  const queryClient = useQueryClient()
+  return useMutation<OrgInviteResult, OrgPeopleError, OrgInviteRequest>({
+    mutationFn: (request: OrgInviteRequest) => inviteOrgPerson(request),
+    gcTime: 0,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ORG_PEOPLE_QUERY_KEY }),
   })
 }

@@ -232,13 +232,17 @@ public sealed class CredentialTokenService
     /// <param name="passwordChangedAt">The subject's last password change, or <c>null</c>.</param>
     /// <returns><c>true</c> when the token must be refused.</returns>
     /// <remarks>
-    /// The tie (<c>CreatedAt == PasswordChangedAt</c>) counts as stale: under clock skew between instances this fails
-    /// CLOSED — a link is refused rather than outliving the credential change it may predate.
+    /// Only a token created STRICTLY before the change is stale. The tie (<c>CreatedAt == PasswordChangedAt</c>) is
+    /// fresh (#575b): every operation takes ONE wall-clock read, so a token staged in the SAME unit of work as a password
+    /// change (an invite issued alongside it) carries exactly that instant and must survive it. A token that really
+    /// predates the change in another unit of work was voided by <see cref="StageCredentialChangeInvalidationAsync"/>
+    /// in the change's own transaction, so this check only has to catch the concurrent-commit window, where an exact
+    /// tick tie is not a credible ordering signal either way.
     /// </remarks>
     public static bool IsStaleFor(CredentialToken token, DateTimeOffset? passwordChangedAt)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return passwordChangedAt is { } changedAt && token.CreatedAt <= changedAt;
+        return passwordChangedAt is { } changedAt && token.CreatedAt < changedAt;
     }
 
     /// <summary>

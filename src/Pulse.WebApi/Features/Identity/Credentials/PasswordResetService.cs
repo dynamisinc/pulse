@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Identity.Credentials;
 
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -14,8 +15,7 @@ using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
 /// Sets a staff person's password from a single-use link (identity-auth-roles/21, ADMIN-IDENTITY-MODEL §3.3):
-/// <c>POST /api/auth/password/reset {token, newPassword}</c>. Works for both <c>reset</c> and <c>invite</c> tokens; the
-/// invite's "mint a session only if a grant exists" landing is #575's, so this only sets the password.
+/// <c>POST /api/auth/password/reset {token, newPassword}</c>. Works for both <c>reset</c> and <c>invite</c> tokens.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,6 +27,16 @@ using Pulse.WebApi.Features.Realtime;
 /// outstanding credential token of both purposes and every unconsumed org-choice candidate of the person are voided,
 /// every live session of the person is revoked, the lockout counter is cleared, and the change is audited.
 /// (4) After the commit, the revoked sessions' live hub connections are cut (best effort).
+/// </para>
+/// <para>
+/// <b>The invite landing (#575b, ADMIN-IDENTITY-MODEL §3.3 "Staff invites without a grant").</b> Redeeming an INVITE also
+/// answers where the person goes next (<see cref="InviteLanding"/>): <see cref="InviteLanding.SignInNext"/> when they hold
+/// a grant the org sign-in can mint a session from — a staff facet AND (<c>OrgRole = orgAdmin</c> or an active staff
+/// enrollment in the organization) — else <see cref="InviteLanding.AwaitingAssignmentNext"/>. This route mints no session
+/// itself: the client signs in through the ordinary org sign-in (<c>POST /api/auth/staff/login {orgSlug, email,
+/// password}</c>), so lockout, the fixed slow-hash work, the timing floor and the sign-in audit stay in ONE place. The
+/// landing carries the org slug and the person's own email: the caller just proved possession of a token that was
+/// delivered to that address, so it discloses nothing the caller does not already hold. A reset answers no landing.
 /// </para>
 /// <para>
 /// <b>Audit, not XC-004.</b> <c>TelemetryEvent</c> needs an exercise and a person has none here (the route is
@@ -41,6 +51,9 @@ public sealed partial class PasswordResetService
 
     /// <summary>The org-audit kind of a completed credential change.</summary>
     public const string CredentialChangedKind = "identity.credential.changed";
+
+    /// <summary>The org-audit kind of a redeemed invite (alongside <see cref="CredentialChangedKind"/>).</summary>
+    public const string InviteRedeemedKind = "org.invite.redeemed";
 
     /// <summary>The audit outcome of a completed change.</summary>
     public const string SuccessOutcome = "success";
@@ -115,12 +128,14 @@ public sealed partial class PasswordResetService
         }
 
         // org-scope-exempt(TenantRoot): a by-id lookup of the person's OWN organization (token.OrganizationId, which the
-        // server stamped at issue) for its name — the policy refuses a password containing it. Never an enumeration.
-        var organizationName = await _dbContext.Organizations
+        // server stamped at issue) for its name — the policy refuses a password containing it — and its slug (an invite's
+        // landing). Never an enumeration.
+        var organization = await _dbContext.Organizations
             .AsNoTracking()
             .Where(o => o.Id == token.OrganizationId)
-            .Select(o => o.Name)
+            .Select(o => new { o.Name, o.Slug })
             .FirstOrDefaultAsync(cancellationToken);
+        var organizationName = organization?.Name;
 
         var policyError = PasswordPolicy.Validate(
             request!.NewPassword,
@@ -132,10 +147,10 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(policyError);
         }
 
-        List<Guid>? revokedSessionIds;
+        CredentialChange? change;
         try
         {
-            revokedSessionIds = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
+            change = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
         }
         catch (Exception exception) when (IsDeadlock(exception))
         {
@@ -145,13 +160,17 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(InvalidTokenError);
         }
 
-        if (revokedSessionIds is null)
+        if (change is null)
         {
             return PasswordResetResult.Invalid(InvalidTokenError);
         }
 
-        await CutRevokedConnectionsAfterCommitAsync(revokedSessionIds, cancellationToken);
-        return PasswordResetResult.Ok();
+        await CutRevokedConnectionsAfterCommitAsync(change.RevokedSessionIds, cancellationToken);
+
+        var landing = token.Purpose == CredentialTokenPurposes.Invite && organization is not null && person.Email is { Length: > 0 } email
+            ? new InviteLanding(change.HasGrant ? InviteLanding.SignInNext : InviteLanding.AwaitingAssignmentNext, organization.Slug, email)
+            : null;
+        return PasswordResetResult.Ok(landing);
     }
 
     private static bool IsDeadlock(Exception exception) =>
@@ -159,10 +178,11 @@ public sealed partial class PasswordResetService
         || exception.InnerException is SqlException { Number: DeadlockVictimErrorNumber };
 
     /// <summary>
-    /// The single transaction of a credential change. Returns the revoked session ids, or <c>null</c> when the claim was
-    /// lost (a concurrent redemption, or the token expired in between) and nothing changed.
+    /// The single transaction of a credential change. Returns the revoked session ids and (for an invite) whether the
+    /// person holds a grant, or <c>null</c> when the claim was lost (a concurrent redemption, or the token expired in
+    /// between) and nothing changed.
     /// </summary>
-    private async Task<List<Guid>?> ChangeCredentialAsync(
+    private async Task<CredentialChange?> ChangeCredentialAsync(
         CredentialToken token,
         Person person,
         string newPassword,
@@ -170,6 +190,7 @@ public sealed partial class PasswordResetService
         CancellationToken cancellationToken)
     {
         List<Guid> revokedSessionIds;
+        var hasGrant = false;
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
             if (!await _tokens.TryClaimAsync(token.Id, token.OrganizationId, now, cancellationToken))
@@ -208,11 +229,60 @@ public sealed partial class PasswordResetService
                 OccurredAt = now,
             });
 
+            if (token.Purpose == CredentialTokenPurposes.Invite)
+            {
+                // Read inside the transaction, so the landing and its audit record agree with the committed state.
+                hasGrant = await HasStaffGrantAsync(person, token.OrganizationId, cancellationToken);
+                _dbContext.OrgAuditEvents.Add(new OrgAuditEvent
+                {
+                    Id = Guid.NewGuid(),
+                    OrganizationId = token.OrganizationId,
+                    Kind = InviteRedeemedKind,
+                    Outcome = SuccessOutcome,
+                    ActorPersonId = person.Id,
+                    SubjectPersonId = person.Id,
+                    ExerciseId = null,
+                    Payload = hasGrant ? "{\"next\":\"sign-in\"}" : "{\"next\":\"awaiting-assignment\"}",
+                    OccurredAt = now,
+                });
+            }
+
             await _dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
-        return revokedSessionIds;
+        return new CredentialChange(revokedSessionIds, hasGrant);
+    }
+
+    /// <summary>
+    /// Whether the org sign-in can mint a staff session for <paramref name="person"/> (§3.3 "a grant"): the shared-key
+    /// staff facet exists AND the person is an org admin or holds an ACTIVE staff enrollment on an exercise of their own
+    /// organization — the same facet and landing-enrollment reads <c>OrgStaffLoginService</c> makes.
+    /// </summary>
+    private async Task<bool> HasStaffGrantAsync(Person person, Guid organizationId, CancellationToken cancellationToken)
+    {
+        var hasFacet = await _dbContext.StaffUsers
+            .AsNoTracking()
+            .InOrganization(organizationId)
+            .AnyAsync(u => u.Id == person.Id, cancellationToken);
+        if (!hasFacet)
+        {
+            return false;
+        }
+
+        if (Person.IsOrgAdmin(person.OrgRole))
+        {
+            return true;
+        }
+
+        return await (
+            // org-scope-exempt(TenantChecked): own-only (PersonId is the person whose invite was just redeemed) and every
+            // row must inner-join an Exercise of the token's own organization (InOrganization), so no other customer's
+            // enrollment can count as a grant. Cross-exercise by design: the redemption has no exercise scope.
+            from enrollment in _dbContext.Enrollments.IgnoreQueryFilters().Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            where enrollment.PersonId == person.Id
+            join exercise in _dbContext.Exercises.AsNoTracking().InOrganization(organizationId) on enrollment.ExerciseId equals exercise.Id
+            select enrollment.Id).AnyAsync(cancellationToken);
     }
 
     /// <summary>
@@ -273,12 +343,57 @@ public sealed class PasswordResetResult
     /// <summary>The error code on <see cref="PasswordResetOutcome.Invalid"/>.</summary>
     public string? Error { get; }
 
+    /// <summary>Where a redeemed INVITE goes next (200 with it); <c>null</c> for a reset (204).</summary>
+    public InviteLanding? Landing { get; private init; }
+
     /// <summary>A success.</summary>
+    /// <param name="landing">The invite landing, or <c>null</c> for a reset.</param>
     /// <returns>The result.</returns>
-    public static PasswordResetResult Ok() => new(PasswordResetOutcome.Ok, null);
+    public static PasswordResetResult Ok(InviteLanding? landing = null) => new(PasswordResetOutcome.Ok, null) { Landing = landing };
 
     /// <summary>A 400 carrying <paramref name="error"/>.</summary>
     /// <param name="error">The error code.</param>
     /// <returns>The result.</returns>
     public static PasswordResetResult Invalid(string error) => new(PasswordResetOutcome.Invalid, error);
 }
+
+/// <summary>
+/// Where a redeemed staff invite goes next (#575b, ADMIN-IDENTITY-MODEL §3.3): sign in now, or the "awaiting
+/// assignment" page. The wire body of the invite's <c>200</c>.
+/// </summary>
+public sealed class InviteLanding
+{
+    /// <summary>The person holds a grant: sign in through the org sign-in.</summary>
+    public const string SignInNext = "sign-in";
+
+    /// <summary>No grant yet: show "awaiting assignment"; sign-in works once they are assigned.</summary>
+    public const string AwaitingAssignmentNext = "awaiting-assignment";
+
+    /// <summary>Creates the landing.</summary>
+    /// <param name="next"><see cref="SignInNext"/> or <see cref="AwaitingAssignmentNext"/>.</param>
+    /// <param name="orgSlug">The person's organization slug (the org sign-in body's <c>orgSlug</c>).</param>
+    /// <param name="email">The person's own email (the org sign-in body's <c>email</c>).</param>
+    public InviteLanding(string next, string orgSlug, string email)
+    {
+        Next = next;
+        OrgSlug = orgSlug;
+        Email = email;
+    }
+
+    /// <summary><see cref="SignInNext"/> or <see cref="AwaitingAssignmentNext"/>.</summary>
+    [JsonPropertyName("next")]
+    public string Next { get; }
+
+    /// <summary>The person's organization slug.</summary>
+    [JsonPropertyName("orgSlug")]
+    public string OrgSlug { get; }
+
+    /// <summary>The person's own email.</summary>
+    [JsonPropertyName("email")]
+    public string Email { get; }
+}
+
+/// <summary>What one committed credential change did.</summary>
+/// <param name="RevokedSessionIds">The sessions it revoked (their connections are cut after commit).</param>
+/// <param name="HasGrant">For an invite: whether the person holds a grant the org sign-in can mint from.</param>
+internal sealed record CredentialChange(List<Guid> RevokedSessionIds, bool HasGrant);

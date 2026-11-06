@@ -1,6 +1,6 @@
 # Story: Staff invite and assign to exercises
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress (assign half: #667; invite half, 575b, not started)
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress (assign half: #667, merged; invite half: 575b, in review)
 **Requirements:** COR-010, COR-011, COR-077  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §3.3, §7.5, §8.2  ·  **Issue:** #575
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation, security)  ·  **Wave:** A2
 
@@ -8,10 +8,10 @@
 Today nothing creates staff enrollments except bootstrap and the creator. Org admins invite people to the org, and planners (or org admins) assign staff roles in an exercise ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1, §3.3, §7.5). Staff world.
 
 ## Acceptance Criteria
-- [ ] **Invite.** Given an org admin and an email, when they invite, then a `Person` is created (or the existing one reused) and a single-use `CredentialToken` (purpose `invite`, 7 days) is emailed via `IPulseMailer`; the invitee sets a password (policy §3.2, 12-character staff minimum) and is signed in.
+- [x] **Invite.** Given an org admin and an email, when they invite, then a `Person` is created (or the existing one reused) and a single-use `CredentialToken` (purpose `invite`, 7 days) is emailed via `IPulseMailer`; the invitee sets a password (policy §3.2, 12-character staff minimum) and is signed in.
 - [ ] **Assign.** Given a planner of exercise X (or an org admin), when they enroll a directory person as planner/controller/evaluator, then an `Enrollment` is created; the same person already holding a participant enrollment in X gets 409 `conflicting-enrollment`.
 - [ ] **Last planner.** Removing the last planner of an exercise is refused (409); removing a controller/evaluator succeeds and revokes that person's sessions for that exercise. If the removed controller is the **lead**, the same transaction also clears `IsLead`, swamped mode is turned off after commit (idempotent), and both are audited (Option A, design doc §1.1/§12).
-- [ ] **Org admin platform provisioning.** `POST /api/ops/organizations {name, adminEmail}` (bootstrap-secret gated) creates the org, its slug and first org-admin `Person` and sends an invite; an empty org admin can then sign in at `/o/{slug}`.
+- [x] **Org admin platform provisioning.** `POST /api/ops/organizations {name, adminEmail}` (bootstrap-secret gated) creates the org, its slug and first org-admin `Person` and sends an invite; an empty org admin can then sign in at `/o/{slug}`.
 - [ ] **Self-enroll.** An org admin may enroll themselves; it is audited as `org.enrollment.self-granted`.
 - [ ] **Emails** show the participant-facing/org name only, never an internal exercise name (#376).
 - [ ] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
@@ -30,7 +30,7 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 - [ ] Removing or demoting the **lead** controller is allowed. In one transaction it revokes that person's sessions on the exercise and clears `IsLead`. Swamped mode is turned off after commit, idempotently. All three are audited. Tests cover removal and demotion, each with swamped mode on beforehand: afterwards it is off, the exercise has no lead, and the old tokens get 401.
 
 ### Copilot review 5 fold (2026-10-16)
-- [ ] Redeeming an invite sets the password but mints a session **only if a grant exists** (`OrgRole` or a staff enrollment in the org). Otherwise it shows an **"awaiting assignment"** page in COBRA staff styling, and normal sign-in works once the person is assigned. Tests cover both paths.
+- [x] Redeeming an invite sets the password but mints a session **only if a grant exists** (`OrgRole` or a staff enrollment in the org). Otherwise it shows an **"awaiting assignment"** page in COBRA staff styling, and normal sign-in works once the person is assigned. Tests cover both paths.
 - [ ] Enrollment removal or a role change also aborts the person's live SignalR connections on that exercise.
 
 ### Copilot review 7 fold (2026-10-16)
@@ -109,3 +109,48 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
 - **LoginChoice IP binding**: `LoginChoice.CreatedFromIpHash` is stored but `OrgStaffLoginService.ChooseAsync` never compares it. Fix before real passwords exist.
 - **L-2** (connection registry race) matters for the "abort SignalR connections on removal/role change" AC.
 - **Soft-delete revoke**: see 4.
+
+## 575b (invite half) — as built
+
+- **Invite:** `POST /api/org/people/invite {email, displayName}` (`Features/Org/PeopleDirectory/OrgInviteService`; the
+  task placed it in the directory slice rather than a new `Features/Org/Invites`). Org admin on an org-scope session.
+  Creates the `Person` (no password, no grant, no facet) in the caller's organization or reuses the one with that
+  email; issues a 7-day `invite` token with the admin as issuer; returns `{personId, inviteUrl, emailed, created}` once
+  (`no-store`). 409 `already-active` / `person-disabled` / `target-is-org-admin` / `invite-conflict`; 400
+  `invalid-email` / `invalid-display-name`; 503 `invite-link-unavailable`. Audit `org.invite.issued`.
+- **Email:** `IPulseMailer` exists (#665) but defaults to `NullPulseMailer`, so the copy-link flow is the delivery
+  today (`emailed: false`). The raw link never reaches a log. The "Emails show the org name" AC waits for the ACS
+  template (no email is sent yet).
+- **Redeem:** the existing `POST /api/auth/password/reset` route. An invite token answers `200 {next, orgSlug, email}`,
+  `next` = `sign-in` when the person has a staff facet and (org admin or an active staff enrollment in the org), else
+  `awaiting-assignment`; a reset token still answers 204. The route mints no session itself: the `/staff/invite` page
+  signs the person in through the ordinary org sign-in (`POST /api/auth/staff/login {orgSlug, email, password}`), so
+  lockout, the fixed KDF work, the timing floor and the sign-in audit stay in one place. Audit `org.invite.redeemed`
+  beside `identity.credential.changed`.
+- **Awaiting assignment:** shown by the `/staff/invite` page after a redeem with no grant (COBRA). A later sign-in
+  attempt before assignment stays the uniform 401 (deliberate: #602 M-2, "no grant" is one of the uniform refusals).
+- **Provisioning:** `POST /api/ops/organizations {name, adminEmail, adminDisplayName?}`
+  (`Features/Ops/Organizations/*`), pre-auth allowlisted, `X-Bootstrap-Secret` gated (bare 404), own per-IP limiter,
+  `no-store`. Creates the org (shared `OrganizationSlugAllocator`, #602 L-5 — `BootstrapService` now uses it too), the
+  first org admin WITH the staff facet, and a null-issuer invite delivered to the admin's own email (the null-issuer
+  rule). 201 with the link once; 409 `organization-exists`. Audits `org.organization.created` + `org.invite.issued`.
+- **`CredentialTokenService.IsStaleFor`:** the tie (`CreatedAt == PasswordChangedAt`) is now fresh, so a token staged in
+  the same unit of work as a password change survives it.
+- **No EF migration.**
+
+**#575b linkage:**
+- `OrgInviteEndpointTests.Invite_CreatesAPersonWithNoPasswordOrGrant_IssuesA7DayInvite_AuditsIt_AndReturnsTheLinkOnce_NoStore` (Invite)
+- `OrgInviteEndpointTests.Reinvite_OfAPersonWithNoPasswordYet_ReusesThePerson_AndVoidsTheEarlierInvite` (Invite: reuse)
+- `OrgInviteEndpointTests.Invite_Refusals_400ForABadBody_409ForAnActiveDisabledOrPeerAdminPerson_AndWriteNothing`
+- `OrgInviteEndpointTests.Invite_OfAnAddressThatExistsInAnotherOrg_CreatesASeparatePersonInTheCallersOrg_AndNeverTouchesTheForeignOne` (Isolation)
+- `OrgInviteEndpointTests.Invite_IsOrgAdminOnly_OnAnOrgScopeSession_AndNeedsAFrontendBaseUrl`
+- `OrgInviteEndpointTests.Redeem_WithNoGrant_SetsThePassword_AnswersAwaitingAssignment_AndSignInWorksOnlyOnceAssigned` (Copilot 5 fold)
+- `OrgInviteEndpointTests.Redeem_WithAGrant_AnswersSignIn_AndTheOrgSignInThenMintsASession` (Copilot 5 fold)
+- `OrgInviteEndpointTests.Redeem_OfARevokedOnlyEnrollment_IsAwaitingAssignment_BecauseEveryEnrollmentReadIsActiveOnly`
+- `OrgInviteEndpointTests.Redeem_OfAnInviteIssuedInTheSameInstantAsTheLastPasswordChange_IsNotStale` and
+  `CredentialCompositionRootWiringTests.IsStaleFor_TheTie_IsFresh_SoATokenIssuedInTheSameUnitOfWorkAsAPasswordChangeSurvivesIt`
+- `OpsOrganizationEndpointTests.*` (Org admin platform provisioning: secret gate, create, first-admin sign-in at the slug, slug suffix + 409, 400/503)
+- `RoleMatrixTests` rows `POST /api/org/people/invite` (OrgAdminOnly) and `POST /api/ops/organizations` (PreAuth);
+  `OrgScopeRouteSweepTests.OrgScopeRoutes` entry for the invite route; `DefaultDenySessionGateTests` allowlist row
+- Frontend: `features/orgDirectory` invite dialog, `features/staffPasswordReset` `/staff/invite` + awaiting-assignment tests
+
