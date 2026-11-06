@@ -155,13 +155,14 @@ internal static class ArticlePayloadReader
         return text;
     }
 
-    // Controls; line/paragraph separators (U+2028/2029, "one line"); zero-width characters (U+200B-200D, U+2060, U+FEFF);
+    // Controls; line/paragraph separators (U+2028/2029, "one line"); zero-width and invisible characters (U+00AD, U+200B-200D, U+2060-2064, U+FEFF);
     // and the bidi marks, embeddings, overrides and isolates (U+061C, U+200E/F, U+202A-202E, U+2066-2069), which are
     // invisible and can reorder displayed text (spoofing).
     private static bool IsInvisibleOrControl(char c) =>
         char.IsControl(c)
-        || c is (char)0x061C or (char)0x2028 or (char)0x2029 or (char)0x2060 or (char)0xFEFF
+        || c is (char)0x00AD or (char)0x061C or (char)0x2028 or (char)0x2029 or (char)0xFEFF
         || c is >= (char)0x200B and <= (char)0x200F
+        || c is >= (char)0x2060 and <= (char)0x2064
         || c is >= (char)0x202A and <= (char)0x202E
         || c is >= (char)0x2066 and <= (char)0x2069;
 }

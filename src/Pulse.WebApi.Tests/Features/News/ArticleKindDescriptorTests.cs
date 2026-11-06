@@ -153,6 +153,8 @@ public sealed class ArticleKindDescriptorTests
     [InlineData("Bridge\uFEFFclosed")]
     [InlineData("Bridge\u200Fclosed")]
     [InlineData("Bridge\u061Cclosed")]
+    [InlineData("Bridge\u00ADclosed")]
+    [InlineData("Bridge\u2062closed")]
     public async Task ControlAndBidiCharacters_AreRefused(string value)
     {
         var result = await ValidateAsync(WithField("breaking.text", value));
