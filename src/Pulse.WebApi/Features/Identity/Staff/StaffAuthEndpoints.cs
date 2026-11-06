@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -58,6 +59,9 @@ public static class StaffAuthEndpoints
         services.AddScoped<DynamisIdentityProvider>();
         services.AddScoped<IIdentityProvider, PulsePasswordIdentityProvider>();
 
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<StaffLoginService>();
 
         // identity-auth-roles/15: the org sign-in ({orgSlug?, email, password}) and the org choice.

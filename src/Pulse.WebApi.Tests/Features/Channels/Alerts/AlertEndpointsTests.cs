@@ -19,6 +19,7 @@ using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Injects;
 using Xunit;
 
@@ -87,7 +88,7 @@ public sealed class AlertEndpointsTests
 
         host.Time.Advance(TimeSpan.FromMinutes(11));
 
-        // The clock is not started and no scenario instant is persisted: expiry is never decided on wall time (COR-053).
+        // The clock is not started and the exercise has no posts: expiry is never decided on wall time (COR-053).
         (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
 
         await PinScenarioTimeAsync(host, host.Time.GetUtcNow(), exercise.ExerciseId);
@@ -171,7 +172,7 @@ public sealed class AlertEndpointsTests
         host.ActAs(b.ExerciseId, b.StaffUserId);
         var bId = await RaiseOkAsync(host, new { severity = "emergency", headline = "B", expiresScenarioTime = expires });
 
-        // The exercise clocks are not started here, so pin a persisted scenario instant: the sweep never expires on wall time.
+        // The exercise clocks are not started here, so put each world at a later post: the sweep never expires on wall time.
         await PinScenarioTimeAsync(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
 
         var sweeper = ActivatorUtilities.CreateInstance<AlertExpirySweeper>(host.Services);
@@ -291,16 +292,17 @@ public sealed class AlertEndpointsTests
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
     }
 
-    /// <summary>Persists a scenario instant on the exercise rows (the clock's fallback when it is not started).</summary>
+    /// <summary>
+    /// Puts each exercise's world at <paramref name="scenarioTime"/>: one post at that instant, which is the scenario now
+    /// when the clock is not started (engine-runtime/08, CLK-2).
+    /// </summary>
     private static async Task PinScenarioTimeAsync(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
     {
         await using var db = host.Db(exerciseId: null);
-        foreach (var exercise in await db.Exercises.IgnoreQueryFilters().Where(x => exerciseIds.Contains(x.Id)).ToListAsync())
+        foreach (var exerciseId in exerciseIds)
         {
-            exercise.CurrentScenarioTime = scenarioTime;
+            await TestScenarioNow.SeedWorldTimeAsync(db, exerciseId, scenarioTime);
         }
-
-        await db.SaveChangesAsync();
     }
 
     private static Task<HttpResponseMessage> ClearAsync(InjectTestHost host, string id) =>

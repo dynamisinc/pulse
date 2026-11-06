@@ -159,11 +159,12 @@ public sealed partial class ExerciseReportService
     /// <param name="dbContext">The request's persistence context.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope, the only source of "which exercise".</param>
     /// <param name="engagementReader">The real like/repost/reply counts.</param>
-    /// <param name="exerciseFacts">The exercise's name, time zone, tenant and stored scenario time.</param>
+    /// <param name="exerciseFacts">The exercise's name, time zone and tenant.</param>
     /// <param name="currentStaffSession">The acting staff human, for the telemetry actor.</param>
     /// <param name="mediaUrlSigner">Mints read URLs for in-scope media.</param>
     /// <param name="timeProvider">The server clock (prepared-at, shown in the exercise zone, and telemetry wall clock).</param>
-    /// <param name="exerciseClock">The live scenario clock, when the host runs one (telemetry scenario time).</param>
+    /// <param name="exerciseClock">The live scenario clock, when the host runs one (the report's <c>scenarioNow</c>, and the
+    /// first tier of the viewed event's scenario time).</param>
     /// <param name="logger">Diagnostics for a failed signing batch; optional.</param>
     /// <param name="limits">The size limits; <see cref="ExerciseReportLimits.Default"/> unless a host registers others.</param>
     public ExerciseReportService(
@@ -312,6 +313,8 @@ public sealed partial class ExerciseReportService
         var injects = BuildInjects(posts, postFacts, lookups, bins, chartBinMinutes, filter, zone);
         var busiest = ExerciseReportBuilder.BusiestFiveMinutes(scopedFacts);
         var now = _timeProvider.GetUtcNow();
+        DateTimeOffset? latestPost = posts.Count == 0 ? null : posts.Max(post => post.CreatedScenarioTime);
+        var clockNow = _exerciseClock?.CurrentScenarioTime(exerciseId);
 
         var report = new ExerciseReportDto
         {
@@ -327,9 +330,10 @@ public sealed partial class ExerciseReportService
                 PreparedAt = FormatAt(now, zone),
                 LatestDay = LatestDay(posts, zone),
                 SpansMultipleDays = SpansMultipleDays(scoped, listed, injects.RespondedAt, zone),
+                // engine-runtime/08: the later of the running clock and the latest post (CLK-2 retired the stored
+                // placeholder). null only when the exercise has neither.
                 ScenarioNow = ExerciseReportBuilder.ScenarioNow(
-                        _exerciseClock?.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime,
-                        posts.Count == 0 ? null : posts.Max(post => post.CreatedScenarioTime)) is { } scenarioNow
+                        clockNow, latestPost) is { } scenarioNow
                     ? FormatAt(scenarioNow, zone)
                     : null,
             },
@@ -386,7 +390,11 @@ public sealed partial class ExerciseReportService
 
         // 8. One XC-004 event, stamped from the same clock read as preparedAt.
         var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
-        _dbContext.TelemetryEvents.Add(BuildViewedEvent(exerciseId, facts, staff, lookups, listed.Count, now));
+        // engine-runtime/08 (CLK-2, S-6): the IScenarioNow order (the running clock, else the latest post, else now) over
+        // what this build already read: `posts` is every post of this exercise (soft-deleted included), so its maximum IS
+        // the resolver's post tier, and a second MAX query would only re-read it.
+        var scenarioTime = clockNow ?? latestPost ?? now;
+        _dbContext.TelemetryEvents.Add(BuildViewedEvent(exerciseId, facts, staff, lookups, listed.Count, now, scenarioTime));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return ExerciseReportResult.Ok(report);
@@ -864,13 +872,14 @@ public sealed partial class ExerciseReportService
 #pragma warning restore CA1031
     }
 
-    private TelemetryEvent BuildViewedEvent(
+    private static TelemetryEvent BuildViewedEvent(
         Guid exerciseId,
         ExerciseFacts facts,
         CurrentStaffSession? staff,
         ReportLookups lookups,
         int listedPosts,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime)
     {
         string? role = null;
         if (staff is not null)
@@ -895,7 +904,7 @@ public sealed partial class ExerciseReportService
                 Role = string.IsNullOrWhiteSpace(role) ? null : role,
             },
             WallClockTime = now,
-            ScenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = string.IsNullOrWhiteSpace(facts.TimeZone) ? ExerciseDay.UtcZoneId : facts.TimeZone,
             Target = new TelemetryTarget { EntityType = "exercise", EntityId = exerciseId.ToString() },
             Payload = JsonSerializer.Serialize(new ViewedPayload { Posts = listedPosts }),

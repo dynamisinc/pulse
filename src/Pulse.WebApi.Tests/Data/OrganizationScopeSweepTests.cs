@@ -150,7 +150,12 @@ public sealed class OrganizationScopeSweepTests
         // own per-exercise scope).
         // channels-foundation 08 (#704): +1 for ChannelEnablement.IsEnabledAsync — the enablement gate's read of the
         // resolved exercise's EnabledChannels by the IExerciseContext id.
-        ["ResolvedScope"] = 34,
+        // engine-runtime/08 (CLK-2): -1 — MediaUploadService.PersistAsync no longer reads the exercise row (its only use
+        // was the retired CurrentScenarioTime fallback; scenario time now comes from IScenarioNow, which reads Posts by
+        // an explicit ExerciseId and is not an org-owned read). The ReactionService, ContentPublishService.ClockAsync,
+        // AlertReader.ReadTimeAsync and EngineSteeringLeverRecorder reads above stay, but no longer select the retired
+        // column (time zone / organization only).
+        ["ResolvedScope"] = 33,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

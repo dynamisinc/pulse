@@ -117,7 +117,6 @@ internal static class MediaSeed
             Hostname = host,
             TimeZone = "UTC",
             Status = status,
-            CurrentScenarioTime = ScenarioTime,
         });
         return new SeededExercise(exerciseId, host);
     }

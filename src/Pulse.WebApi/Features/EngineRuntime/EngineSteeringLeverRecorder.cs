@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Enrollments;
 
 /// <summary>One steering-lever change to record (#618): what changed, on which exercise, and who changed it.</summary>
@@ -81,11 +82,11 @@ public sealed partial class EngineSteeringLeverRecorder : IEngineSteeringLeverRe
 
             // org-scope-exempt(ResolvedScope): record.ExerciseId is the SERVER-resolved scope the lever acted on
             // (EngineReviewService.TryResolveScope over IExerciseContext); this reads only that exercise's organization
-            // (where the audit row lives), stored scenario instant and zone.
+            // (where the audit row lives) and zone.
             var facts = await dbContext.Exercises
                 .AsNoTracking()
                 .Where(e => e.Id == record.ExerciseId)
-                .Select(e => new { e.OrganizationId, e.CurrentScenarioTime, e.TimeZone })
+                .Select(e => new { e.OrganizationId, e.TimeZone })
                 .FirstOrDefaultAsync(CancellationToken.None);
             if (facts is null)
             {
@@ -93,12 +94,18 @@ public sealed partial class EngineSteeringLeverRecorder : IEngineSteeringLeverRe
                 return;
             }
 
-            // COR-053: the live scenario clock's instant, else the exercise's stored one (StaffChangeRecorder then falls
-            // back to the wall clock, the pre-COR-050 placeholder every staff event uses) — never re-derived.
+            // COR-053: the live scenario clock's instant captured with the change, else the exercise's scenario now
+            // (engine-runtime/08, CLK-2: the latest post, else the operation's wall clock) — never re-derived. A host
+            // without the resolver keeps the wall clock.
+            var scenarioNow = scope.ServiceProvider.GetService<IScenarioNow>();
+            var scenarioTime = record.ScenarioTime
+                ?? (scenarioNow is null
+                    ? record.WallClock
+                    : await scenarioNow.GetAsync(record.ExerciseId, record.WallClock, CancellationToken.None));
             var exercise = new StaffChangeExercise(
                 record.ExerciseId,
                 facts.OrganizationId,
-                record.ScenarioTime ?? facts.CurrentScenarioTime,
+                scenarioTime,
                 facts.TimeZone);
 
             StaffChangeRecorder.Stage(

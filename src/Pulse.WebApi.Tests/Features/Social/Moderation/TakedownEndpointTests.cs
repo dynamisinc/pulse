@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Social.Moderation;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Behaviour of <c>DELETE /api/staff/posts/{postId}</c> for an authorized controller (demo-polish B6, story 09
@@ -207,10 +208,10 @@ public sealed class TakedownEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task TakeDown_StaleStoredScenarioTimeEarlierThanThePost_IsClampedToThePostsScenarioTime()
+    public async Task TakeDown_NoClock_AnOlderWorldPost_NeverStampsTheTakedownBeforeThePost()
     {
-        // Gate-1 L-2: only the seed writes Exercise.CurrentScenarioTime, so it can lag behind the posts. A
-        // takedown must never be recorded before the post it removed.
+        // Gate-1 L-2 / engine-runtime/08: with no clock the takedown stamps the exercise's latest post, clamped so a
+        // takedown is never recorded before the post it removed.
         var stale = ModerationSeeder.PostCreatedAt.AddDays(-30);
         var exercise = await _seed.SeedExerciseAsync(currentScenarioTime: stale);
         var postId = await _seed.SeedPostAsync(exercise.Id);
@@ -224,7 +225,7 @@ public sealed class TakedownEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         (await _seed.ReadSurvivingPostAsync(postId)).DeletedAt.Should().Be(
             ModerationSeeder.PostCreatedAt,
-            "a stored scenario time earlier than the post is clamped up to the post's own scenario time");
+            "the latest post is the removed post itself, so the takedown is stamped at its scenario time, never earlier");
     }
 
     [RequiresDockerFact]

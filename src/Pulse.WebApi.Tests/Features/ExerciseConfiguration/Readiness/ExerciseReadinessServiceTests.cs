@@ -7,8 +7,10 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
@@ -38,6 +40,15 @@ public sealed class ExerciseReadinessServiceTests
 
     private readonly MsSqlContainerFixture _fixture;
 
+    /// <summary>The 09:00 scenario start every seeded exercise's (stopped-time) clock runs from.</summary>
+    private static readonly DateTimeOffset ScenarioStart = new(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// engine-runtime/08 (CLK-2): the scenario start is the exercise's scenario now, here a started clock that stands
+    /// still (a manual time source), never the retired <c>Exercise.CurrentScenarioTime</c> column.
+    /// </summary>
+    private readonly ExerciseClockService _clock = new(new ManualTimeProvider(new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero)));
+
     public ExerciseReadinessServiceTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     // ---- Shape and the fail-closed scope ----
@@ -66,8 +77,8 @@ public sealed class ExerciseReadinessServiceTests
         // A built exercise exists, so a zero here is the scope closing the door, not an empty table.
         await SeedReadyAsync();
         await using var context = _fixture.CreateContext();
-        var unset = await new ExerciseReadinessService(context, new ExerciseContext { CurrentExerciseId = null }).GetAsync();
-        var empty = await new ExerciseReadinessService(context, new ExerciseContext { CurrentExerciseId = Guid.Empty }).GetAsync();
+        var unset = await new ExerciseReadinessService(context, new ExerciseContext { CurrentExerciseId = null }, TestScenarioNow.Over(context)).GetAsync();
+        var empty = await new ExerciseReadinessService(context, new ExerciseContext { CurrentExerciseId = Guid.Empty }, TestScenarioNow.Over(context)).GetAsync();
 
         unset.Outcome.Should().Be(ExerciseReadinessOutcome.ScopeUnresolved);
         unset.Report.Should().BeNull();
@@ -332,19 +343,15 @@ public sealed class ExerciseReadinessServiceTests
     }
 
     /// <summary>
-    /// The scheduled start is a REAL-WORLD planning date (it does not start the clock); the scenario start is
-    /// <see cref="Exercise.CurrentScenarioTime"/>. A 2026 planning date must not push 2033 scenario-time posts out of
-    /// the opening feed.
+    /// The scheduled start is a REAL-WORLD planning date (it does not start the clock); the scenario start is the
+    /// exercise's scenario now (engine-runtime/08: its running clock). A 2026 planning date must not push 2033
+    /// scenario-time posts out of the opening feed.
     /// </summary>
     [RequiresDockerFact]
     public async Task OpeningFeed_ComparesAgainstTheScenarioStart_NotTheRealWorldScheduledStart()
     {
         var exerciseId = await SeedReadyAsync(post: false);
-        await UpdateExerciseAsync(exerciseId, e =>
-        {
-            e.ScheduledStartAt = new DateTimeOffset(2026, 11, 2, 13, 0, 0, TimeSpan.Zero);
-            e.CurrentScenarioTime = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
-        });
+        await UpdateExerciseAsync(exerciseId, e => e.ScheduledStartAt = new DateTimeOffset(2026, 11, 2, 13, 0, 0, TimeSpan.Zero));
         await AddPostAsync(exerciseId, deleted: false, scenarioTime: new DateTimeOffset(2033, 3, 1, 8, 0, 0, TimeSpan.Zero));
 
         Warning(await ReadAsync(exerciseId), "opening-feed").Status.Should().Be(
@@ -352,14 +359,14 @@ public sealed class ExerciseReadinessServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task OpeningFeed_CountsAnyLiveTopLevelPost_WhenNoScenarioStartIsStored()
+    public async Task OpeningFeed_CountsAnyLiveTopLevelPost_WhenNoClockRuns()
     {
-        var exerciseId = await SeedReadyAsync(post: false);
-        await UpdateExerciseAsync(exerciseId, e => e.CurrentScenarioTime = null);
+        var exerciseId = await SeedReadyAsync(post: false, startClock: false);
         await AddPostAsync(exerciseId, deleted: false, scenarioTime: new DateTimeOffset(2040, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
         Warning(await ReadAsync(exerciseId), "opening-feed").Status.Should().Be(
-            ReadinessItemStatuses.Ok, "with no scenario start stored, any live top-level post counts");
+            ReadinessItemStatuses.Ok,
+            "with no running clock, scenario now is the latest post (engine-runtime/08), so any live top-level post counts");
     }
 
     [RequiresDockerFact]
@@ -502,7 +509,7 @@ public sealed class ExerciseReadinessServiceTests
     {
         var scope = new ExerciseContext { CurrentExerciseId = exerciseId };
         await using var context = _fixture.CreateContext(scope);
-        return await new ExerciseReadinessService(context, scope).GetAsync();
+        return await new ExerciseReadinessService(context, scope, TestScenarioNow.Over(context, _clock)).GetAsync();
     }
 
     private async Task<ExerciseReadinessReport> ReadAsync(Guid exerciseId)
@@ -520,14 +527,19 @@ public sealed class ExerciseReadinessServiceTests
         int accounts = 1,
         bool inject = true,
         bool post = true,
-        bool noise = true)
+        bool noise = true,
+        bool startClock = true)
     {
         var exerciseId = Guid.NewGuid();
+        if (startClock)
+        {
+            _clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        }
+
         await using (var seed = _fixture.CreateContext())
         {
             var exercise = ExerciseLifecycleTestData.ExerciseInState(exerciseId, "build");
-            exercise.ScheduledStartAt = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
-            exercise.CurrentScenarioTime = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+            exercise.ScheduledStartAt = ScenarioStart;
             seed.Exercises.Add(exercise);
 
             if (controller)
@@ -706,7 +718,7 @@ public sealed class ExerciseReadinessServiceTests
         await seed.SaveChangesAsync();
     }
 
-    // Defaults to 08:00, an hour before the seeded 09:00 scenario start (CurrentScenarioTime), so the post is in the
+    // Defaults to 08:00, an hour before the seeded 09:00 scenario start (the started clock), so the post is in the
     // opening feed.
     private async Task AddPostAsync(
         Guid exerciseId,

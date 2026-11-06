@@ -61,7 +61,7 @@ public sealed partial class WeatherZoneService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSession;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly ExerciseFactsReader _exerciseFacts;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WeatherZoneService> _logger;
@@ -70,15 +70,17 @@ public sealed partial class WeatherZoneService
     /// <param name="dbContext">The exercise-scoped persistence context.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001).</param>
     /// <param name="staffSession">The server-side staff session: the only source of the acting human (COR-018).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-053).</param>
-    /// <param name="exerciseFacts">The one exercise-row read (time zone, stored scenario instant).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post, else now; COR-053).
+    /// </param>
+    /// <param name="exerciseFacts">The one exercise-row read (time zone).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public WeatherZoneService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSession,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         ExerciseFactsReader exerciseFacts,
         TimeProvider timeProvider,
         ILogger<WeatherZoneService> logger)
@@ -86,7 +88,7 @@ public sealed partial class WeatherZoneService
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSession);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(exerciseFacts);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -94,7 +96,7 @@ public sealed partial class WeatherZoneService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _staffSession = staffSession;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _exerciseFacts = exerciseFacts;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -478,14 +480,14 @@ public sealed partial class WeatherZoneService
     }
 
     /// <summary>
-    /// The one clock read for an operation: the server wall clock, plus scenario time from the native exercise clock,
-    /// falling back to the persisted scenario instant and finally the wall clock (the OutletService pattern).
+    /// The one clock read for an operation: the server wall clock, plus the exercise's scenario now from
+    /// <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2: the running clock, else the latest post, else the wall clock).
     /// </summary>
     private async Task<WeatherZoneEventTime> TimeForAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
-        var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        var scenario = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var timeZone = facts?.TimeZone is { } zone && !string.IsNullOrWhiteSpace(zone) ? zone : FallbackTimeZone;
         return new WeatherZoneEventTime(now, scenario, timeZone);
     }

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
@@ -130,17 +131,24 @@ public sealed class ExerciseReadinessService
 
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
+    private readonly IScenarioNow _scenarioNow;
 
-    /// <summary>Creates the service over persistence and the resolved scope.</summary>
+    /// <summary>Creates the service over persistence, the resolved scope and the exercise's scenario now.</summary>
     /// <param name="dbContext">The persistence context every count runs through.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope, the ONLY source of "which exercise".</param>
-    public ExerciseReadinessService(PulseDbContext dbContext, IExerciseContext exerciseContext)
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post), the bound of the
+    /// "visible at scenario start" feed check.
+    /// </param>
+    public ExerciseReadinessService(PulseDbContext dbContext, IExerciseContext exerciseContext, IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>Evaluates the resolved exercise's readiness checklist. Fails closed on an unresolved scope.</summary>
@@ -161,7 +169,6 @@ public sealed class ExerciseReadinessService
             {
                 e.Status,
                 e.ScheduledStartAt,
-                e.CurrentScenarioTime,
                 e.TimeZone,
                 e.ComplianceChromeEnabled,
                 e.WatermarkEnabled,
@@ -227,19 +234,19 @@ public sealed class ExerciseReadinessService
             .Select(g => new { Total = g.Count(), NeedsRepair = g.Count(i => i.Status == NeedsRepairStatus) })
             .FirstOrDefaultAsync(cancellationToken);
 
+        // "Visible at scenario start": a live top-level post dated at or before the exercise's scenario now
+        // (engine-runtime/08, CLK-2: the running clock, else the latest post). ScheduledStartAt is a real-world planning
+        // value and is never compared against scenario-time posts. With no running clock the bound is the latest post, so
+        // the check is "any live top-level post"; with no posts there is nothing to find. Warning-tier only; it never
+        // blocks staging.
+        var scenarioNow = await _scenarioNow.FindAsync(exerciseId, cancellationToken);
         var hasFeed = await _dbContext.Posts
             .AsNoTracking()
-            // "Visible at scenario start": a live top-level post dated at or before Exercise.CurrentScenarioTime when
-            // one is stored. ScheduledStartAt is a real-world planning value and is never compared against
-            // scenario-time posts. KNOWN LIMIT: CurrentScenarioTime is a placeholder column that production does not
-            // write today (the engine starts its clock from its own registration), so in practice this falls back to
-            // "any live top-level post". Tighten it when a stored scenario start exists (engine-runtime dependency,
-            // see story 04's Currency check). Warning-tier only; it never blocks staging.
             .AnyAsync(
                 p => p.ExerciseId == exerciseId
                     && p.DeletedAt == null
                     && p.ParentPostId == null
-                    && (exercise.CurrentScenarioTime == null || p.CreatedScenarioTime <= exercise.CurrentScenarioTime),
+                    && (scenarioNow == null || p.CreatedScenarioTime <= scenarioNow),
                 cancellationToken);
 
         var hasNoise = await _dbContext.NoisePosts

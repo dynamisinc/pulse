@@ -140,6 +140,7 @@ public static class PauseTierEndpoints
         PauseTierRegistry registry,
         IExerciseContext exerciseContext,
         PulseDbContext dbContext,
+        IScenarioNow scenarioNow,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -182,7 +183,7 @@ public static class PauseTierEndpoints
         // which is also where the exercise's COR-032 lifecycle state comes from, so the refusal below costs no
         // extra query.
         var logger = loggerFactory.CreateLogger(typeof(PauseTierEndpoints).FullName!);
-        var exercise = await ResolveExerciseSteeringStateAsync(dbContext, scope.Value, logger, cancellationToken);
+        var exercise = await ResolveExerciseSteeringStateAsync(dbContext, scenarioNow, scope.Value, logger, cancellationToken);
 
         // WR-003 (Tom's ruling): a FREEZE outside a running world is REFUSED OUTRIGHT and LOUDLY — nothing is
         // recorded, the clock is never started or frozen, no overlay is published, and the console is told why.
@@ -243,28 +244,23 @@ public static class PauseTierEndpoints
         Results.Conflict(PauseTierRefusalDto.From(result));
 
     /// <summary>
-    /// Resolves — in ONE read of the <see cref="Exercise"/> row — both the scenario start/time zone a
+    /// Resolves — in ONE read of the <see cref="Exercise"/> row, plus the resolver's one post read when no clock is
+    /// running — both the scenario start/time zone a
     /// never-started clock should be started at AND the exercise's COR-032 lifecycle status the WR-003 Freeze
     /// refusal turns on. Server-authoritative, never client input (in particular NOT
     /// <see cref="PauseTierRequest.TimeZone"/>). A missing row yields a <c>null</c> clock start (a Freeze then
     /// fails closed) and a <c>null</c> status (which the lifecycle gate also refuses).
     ///
-    /// <para><b>Start point.</b> <see cref="Exercise.CurrentScenarioTime"/> when configured, otherwise ONE server
-    /// wall-clock read. Note this is NOT identical to <c>EngineContentSeedService</c>, which uses its
-    /// wall-clock <c>now</c> unconditionally for a registration's <c>ScenarioStart</c> — the stored column is
-    /// preferred here because a Freeze may be the FIRST thing that ever starts this exercise's clock.</para>
-    ///
-    /// <para><b>Coupling to watch (COR-050).</b> Because the reaction loop never re-<c>Start</c>s a clock that is
-    /// already frozen (<c>ReactionLoopHost.ShouldStartClock</c>), whichever of "a Freeze" or "the seed's first
-    /// tick" happens FIRST decides the exercise's scenario epoch. Today
-    /// <see cref="Exercise.CurrentScenarioTime"/> is a documented placeholder that is usually null, so both paths
-    /// land on a server wall-clock read and the difference is invisible. Once COR-050 populates that column for
-    /// real, a pre-seed Freeze will anchor the epoch to the stored instant while a seed-first run anchors it to
-    /// <c>now</c> — the two must be reconciled when the native scenario clock lands (B3 follow-up), not left to
-    /// ordering.</para>
+    /// <para><b>Start point (engine-runtime/08, CLK-1).</b> <see cref="IScenarioNow"/>: a cold clock starts at the
+    /// exercise's latest post's scenario time, else at wall-clock now, so a Freeze on a 2033 world stays in 2033. The
+    /// engine content seed starts its registration's clock at the same value, so whichever of "a Freeze" or "the
+    /// seed's first tick" starts the clock first, the epoch is the same "where the world is". A clock that is already
+    /// running is never restarted or moved (<c>PauseTierRegistry</c> starts only a clock that is neither running nor
+    /// frozen); the resolver then answers from the clock without touching the database.</para>
     /// </summary>
     private static async Task<ExerciseSteeringState> ResolveExerciseSteeringStateAsync(
         PulseDbContext dbContext,
+        IScenarioNow scenarioNow,
         Guid exerciseId,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -276,7 +272,7 @@ public static class PauseTierEndpoints
         var row = await dbContext.Exercises
             .AsNoTracking()
             .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => new { exercise.CurrentScenarioTime, exercise.TimeZone, exercise.Status })
+            .Select(exercise => new { exercise.TimeZone, exercise.Status })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (row is null)
@@ -298,9 +294,10 @@ public static class PauseTierEndpoints
             LogTimeZoneFallback(logger, row.TimeZone, exerciseId, ex);
         }
 
-        return new ExerciseSteeringState(
-            new PauseClockStart(row.CurrentScenarioTime ?? DateTimeOffset.UtcNow, timeZone),
-            row.Status);
+        // CLK-1: where the world is (the running clock, else the latest post, else now); used only for a cold clock.
+        var scenarioStart = await scenarioNow.GetAsync(exerciseId, cancellationToken);
+
+        return new ExerciseSteeringState(new PauseClockStart(scenarioStart, timeZone), row.Status);
     }
 
     /// <summary>

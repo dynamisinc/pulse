@@ -11,6 +11,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// End-to-end coverage of the follow graph (<c>profiles-social-graph/07</c>, #370) through the REAL
@@ -731,12 +732,12 @@ public class FollowEndpointTests
             Hostname = world.Host,
             TimeZone = world.TimeZone,
             Status = "active",
-            CurrentScenarioTime = world.ScenarioTime,
         });
         seed.Personas.Add(NewPersona(world.Follower, exerciseId, followerMagnitude));
         seed.Personas.Add(NewPersona(world.Followee, exerciseId, followeeMagnitude));
         seed.Sessions.Add(session);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, world.ScenarioTime); // engine-runtime/08: the world's time
 
         return world;
     }

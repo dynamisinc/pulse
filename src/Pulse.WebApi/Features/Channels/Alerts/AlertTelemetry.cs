@@ -169,7 +169,7 @@ public static class AlertTelemetry
 /// <param name="ScenarioTime">The exercise scenario instant.</param>
 /// <param name="TimeZone">The exercise IANA time zone.</param>
 /// <param name="ScenarioKnown">
-/// False when neither the exercise clock nor the persisted scenario instant was available, so
+/// False when the exercise had no scenario now (no running clock and no posts; engine-runtime/08), so
 /// <paramref name="ScenarioTime"/> is the wall-clock fallback. The expiry sweep never expires against it.
 /// </param>
 public sealed record AlertEventTime(

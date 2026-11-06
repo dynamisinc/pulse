@@ -10,6 +10,7 @@ using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// identity-auth-roles/15 (Gate-1 M-3) — the exercise-bound staff login (<c>{username, secret, exerciseId}</c>) applies
@@ -158,7 +159,7 @@ public sealed class StaffLoginPulsePasswordLockoutTests
         var provider = new PulsePasswordIdentityProvider(
             context,
             new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = [.. allowlist ?? []] })));
-        var service = new StaffLoginService(context, provider, issuer);
+        var service = new StaffLoginService(context, provider, issuer, TestScenarioNow.Over(context));
         return await service.LoginAsync(new StaffLoginRequest { Username = username, Secret = secret, ExerciseId = exerciseId.ToString() });
     }
 

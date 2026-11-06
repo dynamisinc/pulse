@@ -51,12 +51,12 @@ internal static class DayWordTestSupport
             TimeZone = timeZone,
             Status = status,
             Hostname = hostname,
-            CurrentScenarioTime = scenarioTime,
         };
 
         await using var seed = fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return exercise;
     }
 
@@ -162,7 +162,7 @@ internal static class DayWordTestSupport
                 staffUserId is { } id ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = id } : null),
             new ExerciseFactsReader(context),
             hasher ?? new SharedCredentialHasher(),
-            exerciseClock ?? new StubExerciseClock(null),
+            TestScenarioNow.Over(context, exerciseClock ?? new StubExerciseClock(null), timeProvider: clock),
             clock,
             Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }),
             logger ?? NullLogger<DayWordService>.Instance);
@@ -183,7 +183,7 @@ internal static class DayWordTestSupport
             issuer,
             hasher ?? new SharedCredentialHasher(),
             new ExerciseFactsReader(context),
-            exerciseClock ?? new StubExerciseClock(null),
+            TestScenarioNow.Over(context, exerciseClock ?? new StubExerciseClock(null), timeProvider: clock),
             clock,
             Options.Create(new EasyLoginOptions { DayRolloverHour = rolloverHour }),
             logger ?? NullLogger<WordLoginService>.Instance);

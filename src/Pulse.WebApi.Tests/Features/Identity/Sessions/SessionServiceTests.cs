@@ -46,7 +46,8 @@ public sealed class SessionServiceTests
             new ExerciseFactsReader(context),
             Options.Create(easyLogin ?? new EasyLoginOptions()),
             clock ?? TimeProvider.System,
-            NullLogger<SessionService>.Instance);
+            NullLogger<SessionService>.Instance,
+            TestScenarioNow.Over(context));
 
     private static DateTimeOffset Utc(int year, int month, int day, int hour, int minute = 0, int second = 0) =>
         new(year, month, day, hour, minute, second, TimeSpan.Zero);
@@ -65,9 +66,9 @@ public sealed class SessionServiceTests
             Name = $"Exercise {exerciseId:N}",
             TimeZone = timeZone,
             Status = status,
-            CurrentScenarioTime = scenarioTime,
         });
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, scenarioTime); // engine-runtime/08: the world's time is its latest post
     }
 
     private async Task<Session> SeedSessionAsync(
@@ -206,7 +207,7 @@ public sealed class SessionServiceTests
         expired[0].Actor.ParticipantId.Should().Be("acct-1");
         expired[0].Channel.Should().Be("system");
         expired[0].ScenarioTime.Should().Be(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
-            "scenario time is the exercise's stored CurrentScenarioTime (B2 placeholder)");
+            "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
     }
 
     [RequiresDockerFact]
@@ -862,7 +863,7 @@ public sealed class SessionServiceTests
         }
 
         var evt = await GetSingleEventAsync(exerciseId, "session.refreshed");
-        evt.ScenarioTime.Should().Be(scenarioTime, "scenario time is the exercise's stored CurrentScenarioTime");
+        evt.ScenarioTime.Should().Be(scenarioTime, "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
         evt.TimeZone.Should().Be(NewYork);
         evt.Channel.Should().Be("system");
         evt.SchemaVersion.Should().Be("v0");

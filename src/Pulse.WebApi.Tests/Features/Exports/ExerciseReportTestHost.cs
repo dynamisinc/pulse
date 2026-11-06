@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Exports;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -57,6 +58,7 @@ public sealed class ExerciseReportTestHost : IAsyncDisposable
 
         builder.Services.AddPulsePersistence(builder.Configuration);
         builder.Services.AddExerciseScoping();
+        builder.Services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
 
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<StaffAssignmentService>();
@@ -112,6 +114,9 @@ public sealed class ExerciseReportTestHost : IAsyncDisposable
 
         return await client.SendAsync(request);
     }
+
+    /// <summary>The host's services (the singleton exercise clock, for the scenario-now tests).</summary>
+    public IServiceProvider Services => _app.Services;
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();

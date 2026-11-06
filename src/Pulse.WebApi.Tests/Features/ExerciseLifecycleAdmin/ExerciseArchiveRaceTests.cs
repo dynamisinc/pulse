@@ -16,6 +16,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Xunit;
 
 /// <summary>
@@ -67,9 +68,11 @@ public sealed class ExerciseArchiveRaceTests
                     context,
                     scope,
                     staff,
+                    TestScenarioNow.Over(context),
                     new NoOpExerciseLifecycleTransitionObserver(),
                     NullLogger<ExerciseLifecycleService>.Instance,
-                    new ExerciseReadinessService(context, scope)));
+                    new ExerciseReadinessService(context, scope, TestScenarioNow.Over(context))),
+                TestScenarioNow.Over(context));
 
             var result = await service.ArchiveAsync(world.OwnExercise.Id);
 

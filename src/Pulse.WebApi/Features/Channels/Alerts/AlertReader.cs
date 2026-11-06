@@ -38,28 +38,30 @@ public sealed class AlertReader
 
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
 
-    /// <summary>Creates the reader over the scoped persistence, the resolved scope and the exercise clock.</summary>
+    /// <summary>Creates the reader over the scoped persistence, the resolved scope and the exercise's scenario now.</summary>
     /// <param name="dbContext">The exercise-scoped persistence context.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050/053).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post; COR-050/053).
+    /// </param>
     /// <param name="timeProvider">The server wall clock.</param>
     public AlertReader(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
     }
 
@@ -174,8 +176,10 @@ public sealed class AlertReader
     }
 
     /// <summary>
-    /// The one clock read for an operation: server wall clock, plus scenario time from the native exercise clock,
-    /// falling back to the persisted scenario instant and finally the wall clock (the inject queue's rule, COR-053).
+    /// The one clock read for an operation: server wall clock, plus the exercise's scenario now from
+    /// <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2: the running clock, else the latest post), finally the wall
+    /// clock. Scenario time is "known" only when the resolver had an answer (a clock or a post), so expiry is never
+    /// decided against the wall clock (COR-053).
     /// </summary>
     /// <param name="exerciseId">The resolved exercise.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -188,11 +192,13 @@ public sealed class AlertReader
         var row = await _dbContext.Exercises
             .AsNoTracking()
             .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => new { exercise.TimeZone, exercise.CurrentScenarioTime })
+            .Select(exercise => new { exercise.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
-        var known = _exerciseClock.CurrentScenarioTime(exerciseId) ?? row?.CurrentScenarioTime;
+
+        // A missing exercise row has no scenario now of its own: stay unknown rather than read its posts.
+        var known = row is null ? null : await _scenarioNow.FindAsync(exerciseId, cancellationToken);
         var timeZone = string.IsNullOrWhiteSpace(row?.TimeZone) ? FallbackTimeZone : row.TimeZone;
         return new AlertEventTime(now, known ?? now, timeZone, ScenarioKnown: known is not null);
     }

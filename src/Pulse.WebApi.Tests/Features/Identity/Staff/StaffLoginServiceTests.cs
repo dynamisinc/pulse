@@ -12,6 +12,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Integration tests for <see cref="StaffLoginService"/> (story 05, COR-014 / XC-004 / NFR-009) against REAL
@@ -46,12 +47,12 @@ public sealed class StaffLoginServiceTests
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
             Status = "active",
-            CurrentScenarioTime = scenarioTime,
         };
 
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return exercise;
     }
 
@@ -98,7 +99,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -133,7 +134,7 @@ public sealed class StaffLoginServiceTests
         evt.Actor.ActingHumanId.Should().Be(staffUserId.ToString());
         evt.Payload.Should().Contain("success");
         evt.ScenarioTime.Should().Be(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
-            "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
+            "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
         evt.TimeZone.Should().Be("America/Chicago");
 
         // StaffUser identity was refreshed from the provider and LastLoginAt recorded.
@@ -154,7 +155,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -185,7 +186,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -212,7 +213,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -252,7 +253,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), new RecordingSessionIssuer());
+            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -290,7 +291,7 @@ public sealed class StaffLoginServiceTests
 
         var issuer = new RecordingSessionIssuer();
         await using var context = _fixture.CreateContext();
-        var service = new StaffLoginService(context, swapped, issuer);
+        var service = new StaffLoginService(context, swapped, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -323,7 +324,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), new RecordingSessionIssuer());
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -353,7 +354,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), new RecordingSessionIssuer());
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -379,7 +380,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), new RecordingSessionIssuer());
+            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
             await service.LoginAsync(new StaffLoginRequest { Username = "plan", Secret = "pw-123456", ExerciseId = exercise.Id.ToString() });
         }
 
@@ -387,5 +388,87 @@ public sealed class StaffLoginServiceTests
         events.Should().ContainSingle();
         events[0].ScenarioTime.Should().BeOnOrAfter(before,
             "with no stored scenario time the B2 placeholder falls back to the server wall clock");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_WrongSecret_FailureEventScenarioTime_IsResolvedOnlyAfterAuthentication()
+    {
+        // engine-runtime/08 (W-2): no scenario-now resolution (a post read keyed by the BODY-supplied exercise id) runs
+        // before the credential check; the failure event still carries the exercise's scenario now (its latest post).
+        var subject = $"idp|{Guid.NewGuid():N}";
+        var world = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5));
+        var exercise = await SeedExerciseAsync(world);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var provider = new OrderRecordingIdentityProvider(ProviderFor("ctrl", "correct-secret", subject, "Ctrl"));
+            var scenarioNow = new OrderCheckingScenarioNow(TestScenarioNow.Over(context), provider);
+            var service = new StaffLoginService(context, provider, new RecordingSessionIssuer(), scenarioNow);
+
+            var result = await service.LoginAsync(new StaffLoginRequest
+            {
+                Username = "ctrl",
+                Secret = "WRONG-secret",
+                ExerciseId = exercise.Id.ToString(),
+            });
+
+            result.Outcome.Should().Be(StaffLoginOutcome.Rejected);
+            scenarioNow.Calls.Should().Be(1, "scenario now is resolved once per login, shared by its telemetry");
+            scenarioNow.CalledBeforeAuthentication.Should().BeFalse(
+                "an unauthenticated caller must not drive a post read before the credential check");
+        }
+
+        var events = await ReadLoginEventsAsync(exercise.Id, "login");
+        events.Should().ContainSingle().Which.ScenarioTime.Should().Be(
+            world, "the failure event's scenario time comes from the resolver (the latest post), after authentication");
+    }
+
+    /// <summary>Delegates to a real provider and records that authentication has run.</summary>
+    private sealed class OrderRecordingIdentityProvider(IIdentityProvider inner) : IIdentityProvider
+    {
+        public bool Authenticated { get; private set; }
+
+        public async Task<StaffAuthenticationResult> AuthenticateAsync(
+            StaffCredentials credentials, System.Threading.CancellationToken cancellationToken = default)
+        {
+            var result = await inner.AuthenticateAsync(credentials, cancellationToken);
+            Authenticated = true;
+            return result;
+        }
+    }
+
+    /// <summary>Delegates to the real resolver and records whether it was asked before authentication ran.</summary>
+    private sealed class OrderCheckingScenarioNow(
+        Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow inner,
+        OrderRecordingIdentityProvider provider) : Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow
+    {
+        public int Calls { get; private set; }
+
+        public bool CalledBeforeAuthentication { get; private set; }
+
+        public Task<DateTimeOffset?> FindAsync(Guid exerciseId, System.Threading.CancellationToken cancellationToken = default)
+        {
+            Record();
+            return inner.FindAsync(exerciseId, cancellationToken);
+        }
+
+        public Task<DateTimeOffset> GetAsync(
+            Guid exerciseId, DateTimeOffset wallClockNow, System.Threading.CancellationToken cancellationToken = default)
+        {
+            Record();
+            return inner.GetAsync(exerciseId, wallClockNow, cancellationToken);
+        }
+
+        public Task<DateTimeOffset> GetAsync(Guid exerciseId, System.Threading.CancellationToken cancellationToken = default)
+        {
+            Record();
+            return inner.GetAsync(exerciseId, cancellationToken);
+        }
+
+        private void Record()
+        {
+            Calls++;
+            CalledBeforeAuthentication |= !provider.Authenticated;
+        }
     }
 }

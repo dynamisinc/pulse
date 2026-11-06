@@ -14,6 +14,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Xunit;
 
 /// <summary>
@@ -143,15 +144,15 @@ public sealed class ContentPublishServiceTests
     }
 
     [Fact]
-    public async Task WithNoStartedClock_TheExerciseRowsScenarioTime_IsTheFallback_ThenNow()
+    public async Task WithNoStartedClock_TheExercisesLatestPost_IsTheFallback_ThenNow()
     {
         using var harness = FunnelHarness.Create();
         var draft = await harness.CreateAsync();
         var stored = new DateTimeOffset(2033, 9, 4, 6, 30, 0, TimeSpan.Zero);
         using (var seed = harness.InA())
         {
-            (await seed.Db.Exercises.SingleAsync(e => e.Id == harness.ExerciseId)).CurrentScenarioTime = stored;
-            await seed.Db.SaveChangesAsync();
+            // engine-runtime/08 (CLK-2): with no clock, scenario now is where the world is, its latest post.
+            await TestScenarioNow.SeedWorldTimeAsync(seed.Db, harness.ExerciseId, stored);
         }
 
         using (var scope = harness.InA())
@@ -161,7 +162,7 @@ public sealed class ContentPublishServiceTests
 
         (await harness.ItemAsync(draft.Id)).PublishedScenarioTime.Should().Be(stored);
         draft.PublishedScenarioTime.Should().BeNull();
-        (await harness.ItemAsync(draft.Id)).CreatedScenarioTime.Should().Be(FunnelHarness.WallStart, "no clock, no row value: now");
+        (await harness.ItemAsync(draft.Id)).CreatedScenarioTime.Should().Be(FunnelHarness.WallStart, "no clock, no post yet: now");
     }
 
     [Fact]

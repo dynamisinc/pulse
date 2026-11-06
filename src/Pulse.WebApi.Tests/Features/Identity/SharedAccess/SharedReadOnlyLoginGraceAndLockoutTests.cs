@@ -11,6 +11,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story 07 (COR-016 / NFR-009) integration tests for the grace + lockout + decoy behaviour folded into story
@@ -38,12 +39,12 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = "America/Chicago",
             Status = "active",
-            CurrentScenarioTime = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
         };
 
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5))); // engine-runtime/08: the world's time is its latest post
         return exercise.Id;
     }
 
@@ -78,7 +79,7 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
     {
         var scope = ScopeFor(exerciseId);
         await using var context = _fixture.CreateContext(scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = password });
         return result.Outcome;
     }
@@ -163,7 +164,7 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
         evt.Actor.Role.Should().BeNull("a lockout during an anonymous shared login carries no staff role either");
         evt.Target!.EntityType.Should().Be("sharedCredential");
         evt.ScenarioTime.Should().Be(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
-            "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
+            "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
     }
 
     [RequiresDockerFact]
@@ -263,7 +264,7 @@ public sealed class SharedReadOnlyLoginGraceAndLockoutTests
             .Options;
 
         await using var context = new PulseDbContext(options, scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "wrong-password" });
 

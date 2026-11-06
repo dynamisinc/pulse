@@ -18,6 +18,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// demo-feedback story 18 re-review: M-A — a request aborted DURING the overlay publish can never skip the
@@ -60,6 +61,7 @@ public sealed class RequestAbortAndRefreezeTests
             new ExerciseContext { CurrentExerciseId = exerciseId },
             new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = Guid.NewGuid() }),
             new ExerciseFactsReader(db),
+            TestScenarioNow.Over(db, world.Clock),
             new FakeTimeProvider(WallNow));
 
         var state = await service.ResetAsync(request.Token);

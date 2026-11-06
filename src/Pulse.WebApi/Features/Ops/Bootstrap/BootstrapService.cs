@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
@@ -110,6 +111,7 @@ public sealed class BootstrapService
     private readonly ISharedCredentialHasher _sharedCredentialHasher;
     private readonly ParticipantPasswordHasher _participantPasswordHasher;
     private readonly OpsPersonaResolver _personaResolver;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the bootstrap service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context every seed row is written through in one unit of work.</param>
@@ -118,13 +120,15 @@ public sealed class BootstrapService
     /// <param name="sharedCredentialHasher">The slow-KDF hasher the shared password is hashed with (NFR-009).</param>
     /// <param name="participantPasswordHasher">The slow-KDF hasher an optional participant password is hashed with (NFR-009).</param>
     /// <param name="personaResolver">The shared, exercise-confined persona resolver an optional account persona binding is resolved through (story identity-auth-roles/10, COR-001).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public BootstrapService(
         PulseDbContext dbContext,
         IOptions<BootstrapOptions> options,
         IOptions<DynamisIdentityProviderOptions> staffAllowlist,
         ISharedCredentialHasher sharedCredentialHasher,
         ParticipantPasswordHasher participantPasswordHasher,
-        OpsPersonaResolver personaResolver)
+        OpsPersonaResolver personaResolver,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
@@ -132,6 +136,7 @@ public sealed class BootstrapService
         ArgumentNullException.ThrowIfNull(sharedCredentialHasher);
         ArgumentNullException.ThrowIfNull(participantPasswordHasher);
         ArgumentNullException.ThrowIfNull(personaResolver);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _options = options.Value ?? new BootstrapOptions();
@@ -139,6 +144,7 @@ public sealed class BootstrapService
         _sharedCredentialHasher = sharedCredentialHasher;
         _participantPasswordHasher = participantPasswordHasher;
         _personaResolver = personaResolver;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -320,8 +326,14 @@ public sealed class BootstrapService
         }
 
         // Exactly one XC-004 audit event per successful call (COR-001-stamped with the exercise's own id).
+        // engine-runtime/08 (CLK-2): the ops-resolved exercise's scenario now (clock, else latest post, else now). An
+        // exercise created by THIS call is not saved yet, so it has neither a clock nor posts: its scenario now is the
+        // operation's wall-clock read, with no resolver query. A reused exercise resolves through IScenarioNow.
+        var scenarioTime = exerciseCreated
+            ? now
+            : await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildBootstrapTelemetry(
-            exercise, now, exerciseCreated, staffResult, sharedCredentialResult, accountResult));
+            exercise, now, scenarioTime, exerciseCreated, staffResult, sharedCredentialResult, accountResult));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -689,6 +701,7 @@ public sealed class BootstrapService
     private static TelemetryEvent BuildBootstrapTelemetry(
         Exercise exercise,
         DateTimeOffset now,
+        DateTimeOffset scenarioTime,
         bool exerciseCreated,
         BootstrapStaffResult? staff,
         BootstrapSharedCredentialResult? sharedCredential,
@@ -719,7 +732,7 @@ public sealed class BootstrapService
                 ActingHumanId = BootstrapActorId,
             },
             WallClockTime = now,
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = exercise.TimeZone,
             Target = new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exercise.Id.ToString() },
             Payload = payload,

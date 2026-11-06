@@ -17,6 +17,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Social.Follows;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// One self-contained, seeded exercise for the reaction suites: a provisioned host, a reacting persona bound to a
@@ -47,8 +48,8 @@ internal sealed class ReactionWorld
     public required string TimeZone { get; init; }
 
     /// <summary>
-    /// The exercise's persisted <c>CurrentScenarioTime</c> (the clock fallback when no clock is running), or
-    /// <c>null</c> when the world was seeded with none.
+    /// Where the exercise's world is when no clock runs: one extra post at this scenario instant (engine-runtime/08:
+    /// the latest post is the fallback), or <c>null</c> when the world was seeded with none.
     /// </summary>
     public required DateTimeOffset? StoredScenarioTime { get; init; }
 
@@ -119,7 +120,6 @@ internal static class ReactionTestSeed
             Hostname = world.Host,
             TimeZone = world.TimeZone,
             Status = "active",
-            CurrentScenarioTime = world.StoredScenarioTime,
         });
         seed.Personas.Add(NewPersona(world.Persona, exerciseId));
         seed.Personas.Add(NewPersona(world.OtherPersona, exerciseId));
@@ -133,6 +133,7 @@ internal static class ReactionTestSeed
             createdScenarioTime: world.PostScenarioTime));
         seed.Sessions.Add(session);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, world.StoredScenarioTime);
 
         return world;
     }

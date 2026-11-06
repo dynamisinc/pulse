@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Providers;
 
@@ -89,27 +90,32 @@ public sealed partial class OrgAdminSeedService
     private readonly DynamisIdentityProviderOptions _staffAllowlist;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<OrgAdminSeedService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the seeder over its collaborators.</summary>
     /// <param name="dbContext">The persistence context every seeded row is written through in one unit of work.</param>
     /// <param name="staffAllowlist">The configured Phase-1 staff allowlist the seeded identity is resolved from.</param>
     /// <param name="environment">The host environment the non-production gate is evaluated against.</param>
     /// <param name="logger">The logger the refusal / outcome messages are written to (never a secret, NFR-009).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public OrgAdminSeedService(
         PulseDbContext dbContext,
         IOptions<DynamisIdentityProviderOptions> staffAllowlist,
         IHostEnvironment environment,
-        ILogger<OrgAdminSeedService> logger)
+        ILogger<OrgAdminSeedService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(staffAllowlist);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _staffAllowlist = staffAllowlist.Value ?? new DynamisIdentityProviderOptions();
         _environment = environment;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -258,7 +264,9 @@ public sealed partial class OrgAdminSeedService
 
             // Exactly one XC-004 audit event per granted assignment, in the SAME unit of work — minting an
             // administrator is the most privilege-relevant write this codebase performs unattended.
-            _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(exercise, staffUser.Id, now));
+            // engine-runtime/08 (CLK-2): exercise is one of the organization's own exercises, read .InOrganization(...).
+            var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
+            _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(exercise, staffUser.Id, now, scenarioTime));
         }
 
         // ONE SaveChanges: both write guards run here (the staff user carries a non-empty tenant, every
@@ -321,7 +329,8 @@ public sealed partial class OrgAdminSeedService
     /// no staff actor kind, so an unattended server action is <c>actor.kind: 'system'</c> with a fixed acting-id.
     /// The opaque payload records the role granted; it deliberately does NOT record the tenant (XC-002).
     /// </summary>
-    private static TelemetryEvent BuildSeededTelemetry(Exercise exercise, Guid staffUserId, DateTimeOffset now) => new()
+    private static TelemetryEvent BuildSeededTelemetry(
+        Exercise exercise, Guid staffUserId, DateTimeOffset now, DateTimeOffset scenarioTime) => new()
     {
         EventId = Guid.NewGuid().ToString(),
         SchemaVersion = SchemaVersion,
@@ -339,7 +348,7 @@ public sealed partial class OrgAdminSeedService
         // COR-053: no native backend scenario clock until B3, so a server-side event carries the stored
         // scenario instant when there is one and the wall clock otherwise — the same placeholder every other
         // pre-COR-050 staff event uses.
-        ScenarioTime = exercise.CurrentScenarioTime ?? now,
+        ScenarioTime = scenarioTime,
         TimeZone = exercise.TimeZone,
         Target = new TelemetryTarget { EntityType = StaffUserEntityType, EntityId = staffUserId.ToString() },
         Payload = string.Create(

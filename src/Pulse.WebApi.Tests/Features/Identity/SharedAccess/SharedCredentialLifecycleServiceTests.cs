@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story 07 (COR-016 / NFR-009, TIER-2) integration tests for <see cref="SharedCredentialLifecycleService"/>
@@ -33,7 +34,7 @@ public sealed class SharedCredentialLifecycleServiceTests
     private static IExerciseContext ScopeFor(Guid exerciseId) => new ExerciseContext { CurrentExerciseId = exerciseId };
 
     private SharedCredentialLifecycleService NewService(PulseDbContext context, IExerciseContext scope, Guid sessionId, Guid staffUserId) =>
-        new(context, scope, new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId, StaffUserId = staffUserId }), _hasher);
+        new(context, scope, new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId, StaffUserId = staffUserId }), _hasher, TestScenarioNow.Over(context));
 
     private async Task<Guid> SeedExerciseAsync()
     {
@@ -44,12 +45,12 @@ public sealed class SharedCredentialLifecycleServiceTests
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = "America/Chicago",
             Status = "active",
-            CurrentScenarioTime = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
         };
 
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5))); // engine-runtime/08: the world's time is its latest post
         return exercise.Id;
     }
 
@@ -231,7 +232,7 @@ public sealed class SharedCredentialLifecycleServiceTests
         var scope = ScopeFor(exerciseId);
         await using (var context = _fixture.CreateContext(scope))
         {
-            var service = new SharedCredentialLifecycleService(context, scope, new StubCurrentStaffSessionAccessor(null), _hasher);
+            var service = new SharedCredentialLifecycleService(context, scope, new StubCurrentStaffSessionAccessor(null), _hasher, TestScenarioNow.Over(context));
             var result = await service.RotateAsync();
             result.Outcome.Should().Be(SharedCredentialRotateOutcome.Unauthenticated,
                 "rotate is staff-only and fails closed with no authenticated staff session");
@@ -328,7 +329,7 @@ public sealed class SharedCredentialLifecycleServiceTests
         var scope = ScopeFor(exerciseId);
         await using (var context = _fixture.CreateContext(scope))
         {
-            var service = new SharedCredentialLifecycleService(context, scope, new StubCurrentStaffSessionAccessor(null), _hasher);
+            var service = new SharedCredentialLifecycleService(context, scope, new StubCurrentStaffSessionAccessor(null), _hasher, TestScenarioNow.Over(context));
             var result = await service.RevokeAsync();
             result.Outcome.Should().Be(SharedCredentialRevokeOutcome.Unauthenticated);
         }

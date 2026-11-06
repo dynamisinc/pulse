@@ -45,6 +45,7 @@ internal sealed class AlertServiceHarness : IDisposable
             new DbContextOptionsBuilder<PulseDbContext>().UseInMemoryDatabase(databaseName).Options,
             provider.GetRequiredService<IExerciseContext>()));
         services.AddSingleton<IExerciseClock>(Clock);
+        services.AddScoped<IScenarioNow, ScenarioNowResolver>(); // engine-runtime/08: AlertReader's scenario now
         services.AddSingleton<TimeProvider>(Time);
         services.AddSingleton(Broadcaster);
         services.AddScoped<IFeedBroadcaster>(provider => provider.GetRequiredService<RecordingAlertBroadcaster>());

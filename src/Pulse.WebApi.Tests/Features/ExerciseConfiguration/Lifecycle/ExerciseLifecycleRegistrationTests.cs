@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -160,6 +161,7 @@ public sealed class ExerciseLifecycleRegistrationTests
 
         services.AddLogging();
         services.AddExerciseScoping();
+        services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
         services.TryAddScoped<ICurrentStaffSessionAccessor, NullStaffSessionAccessor>();
         services.AddExerciseConfiguration();
         services.AddExerciseLifecycle();

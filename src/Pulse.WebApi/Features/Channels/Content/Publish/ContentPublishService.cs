@@ -87,7 +87,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     private readonly IReadOnlyList<IContentPublishedObserver> _observers;
     private readonly IAlertRaiser? _alertRaiser;
     private readonly IPairedSocialPoster? _pairedPoster;
-    private readonly IExerciseClock? _clock;
+    private readonly IScenarioNow? _scenarioNow;
     private readonly TimeProvider _time;
     private readonly ILogger<ContentPublishService> _logger;
 
@@ -103,7 +103,10 @@ public sealed partial class ContentPublishService : IContentPublishService
     /// <param name="observers">Observers told about committed publishes, revises and retracts; possibly none.</param>
     /// <param name="alertRaiser">The alert source (story 10); absent = an alert option is reported, not raised.</param>
     /// <param name="pairedPoster">The paired Social poster (story 18); absent = reported, not posted.</param>
-    /// <param name="clock">The native exercise clock (COR-053).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post, else now; COR-053).
+    /// Absent = the wall clock.
+    /// </param>
     /// <param name="timeProvider">The wall clock; <see cref="TimeProvider.System"/> when absent.</param>
     /// <param name="logger">Diagnostics for post-commit failures.</param>
     public ContentPublishService(
@@ -118,7 +121,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         IEnumerable<IContentPublishedObserver>? observers = null,
         IAlertRaiser? alertRaiser = null,
         IPairedSocialPoster? pairedPoster = null,
-        IExerciseClock? clock = null,
+        IScenarioNow? scenarioNow = null,
         TimeProvider? timeProvider = null,
         ILogger<ContentPublishService>? logger = null)
     {
@@ -140,7 +143,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         _observers = observers?.ToList() ?? [];
         _alertRaiser = alertRaiser;
         _pairedPoster = pairedPoster;
-        _clock = clock;
+        _scenarioNow = scenarioNow;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ContentPublishService>.Instance;
     }
@@ -667,20 +670,23 @@ public sealed partial class ContentPublishService : IContentPublishService
         return new LoadResult(null, item, descriptor, exerciseId);
     }
 
-    /// <summary>The one clock read an action shares: <c>IExerciseClock ?? exercise.CurrentScenarioTime ?? now</c> (COR-053).</summary>
+    /// <summary>
+    /// The one clock read an action shares: the exercise's scenario now (<see cref="IScenarioNow"/>: clock, else latest
+    /// post, else <c>now</c>; engine-runtime/08, COR-053).
+    /// </summary>
     private async Task<ContentEventTime> ClockAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var now = _time.GetUtcNow();
 
         // org-scope-exempt(ResolvedScope): exerciseId comes from IExerciseContext (Scope()) and is never a request field;
-        // it only supplies the scenario-time fallback and the telemetry time zone.
+        // it only supplies the telemetry time zone.
         var exercise = await _db.Exercises
             .AsNoTracking()
             .Where(candidate => candidate.Id == exerciseId)
-            .Select(candidate => new { candidate.CurrentScenarioTime, candidate.TimeZone })
+            .Select(candidate => new { candidate.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var scenarioTime = _clock?.CurrentScenarioTime(exerciseId) ?? exercise?.CurrentScenarioTime ?? now;
+        var scenarioTime = _scenarioNow is null ? now : await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var timeZone = string.IsNullOrWhiteSpace(exercise?.TimeZone) ? FallbackTimeZone : exercise.TimeZone;
         return new ContentEventTime(now, scenarioTime, timeZone);
     }

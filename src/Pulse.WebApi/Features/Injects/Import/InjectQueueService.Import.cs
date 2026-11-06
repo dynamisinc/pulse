@@ -114,7 +114,7 @@ public sealed partial class InjectQueueService
     {
         var exerciseId = caller.ExerciseId;
         var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
-        var time = TimeFor(exerciseId, facts);
+        var time = await TimeForAsync(exerciseId, facts, cancellationToken);
 
         // ReorderAsync's rule (DF-22 rewrites the order): read the queue token BEFORE the membership, so a create or
         // delete that lands after this read fails the save (and the import is re-planned) instead of being ordered around.

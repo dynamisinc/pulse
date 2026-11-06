@@ -32,7 +32,7 @@ using Pulse.WebApi.Features.Realtime;
 /// </para>
 /// <para>
 /// <b>Scenario time (COR-053), never the wall clock.</b> A RUNNING exercise clock is authoritative and used as is.
-/// Otherwise the exercise's stored <c>CurrentScenarioTime</c>, else the post's own <c>CreatedScenarioTime</c>, clamped
+/// Otherwise the exercise's latest post (<see cref="IScenarioNow"/>), else the post's own <c>CreatedScenarioTime</c>, clamped
 /// to be no earlier than the post (the same order the takedown uses). Clearing a pin is additionally never stamped
 /// earlier than the pin it ends. The wall clock is used only for the telemetry envelope.
 /// </para>
@@ -64,6 +64,7 @@ public sealed partial class PinService
     private readonly IExerciseClock _exerciseClock;
     private readonly IFeedBroadcaster _feedBroadcaster;
     private readonly ILogger<PinService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over its persistence, scope, clock, fan-out and logging collaborators.</summary>
     /// <param name="dbContext">The persistence context. Its central exercise filter scopes every post read and update.</param>
@@ -72,13 +73,15 @@ public sealed partial class PinService
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
     /// <param name="feedBroadcaster">The real-time fan-out that carries <c>PostPinChanged</c>.</param>
     /// <param name="logger">Operational log (the pin record and push failures).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public PinService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IOrganizationContext organizationContext,
         IExerciseClock exerciseClock,
         IFeedBroadcaster feedBroadcaster,
-        ILogger<PinService> logger)
+        ILogger<PinService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -86,6 +89,7 @@ public sealed partial class PinService
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(feedBroadcaster);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -93,6 +97,7 @@ public sealed partial class PinService
         _exerciseClock = exerciseClock;
         _feedBroadcaster = feedBroadcaster;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -154,8 +159,11 @@ public sealed partial class PinService
         // 4. One wall-clock read (telemetry only) and one scenario instant shared by the row and its event.
         var now = DateTimeOffset.UtcNow;
         var exercise = await ReadExerciseAsync(exerciseId, cancellationToken);
+        // A running clock is used as is; otherwise the exercise's latest post (IScenarioNow, engine-runtime/08), clamped.
         var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
-            ?? Later(exercise?.CurrentScenarioTime ?? post.CreatedScenarioTime, post.CreatedScenarioTime);
+            ?? Later(
+                await _scenarioNow.FindAsync(exerciseId, cancellationToken) ?? post.CreatedScenarioTime,
+                post.CreatedScenarioTime);
         if (!pin && post.PinnedForAllAt is { } pinnedAt)
         {
             scenarioTime = Later(scenarioTime, pinnedAt);
@@ -244,7 +252,7 @@ public sealed partial class PinService
                 cancellationToken);
 
     /// <summary>
-    /// The exercise's stored scenario instant and time zone, bounded to the caller's resolved tenant. Exercise is not
+    /// The exercise's time zone, bounded to the caller's resolved tenant. Exercise is not
     /// <see cref="IExerciseScoped"/> (it IS the scope), so the id comes from <see cref="IExerciseContext"/> only.
     /// </summary>
     private Task<ExerciseTime?> ReadExerciseAsync(Guid exerciseId, CancellationToken cancellationToken) =>
@@ -252,7 +260,7 @@ public sealed partial class PinService
             .AsNoTracking()
             .InOrganization(_organizationContext.CurrentOrganizationId)
             .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => new ExerciseTime(exercise.CurrentScenarioTime, exercise.TimeZone))
+            .Select(exercise => new ExerciseTime(exercise.TimeZone))
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>The later of two scenario instants.</summary>
@@ -304,8 +312,8 @@ public sealed partial class PinService
         Message = "PostPinChanged broadcast failed for post {PostId} in exercise {ExerciseId}. The pin is committed; clients see it on their next read.")]
     private partial void LogPinChangedBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
 
-    /// <summary>The exercise's stored scenario instant and time zone.</summary>
-    private sealed record ExerciseTime(DateTimeOffset? CurrentScenarioTime, string TimeZone);
+    /// <summary>The exercise's time zone.</summary>
+    private sealed record ExerciseTime(string TimeZone);
 }
 
 /// <summary>What an exercise pin call did. <see cref="PinEndpoints"/> maps each value to an HTTP status.</summary>

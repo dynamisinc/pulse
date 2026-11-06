@@ -129,9 +129,8 @@ public sealed class ReportExerciseDto
     public required bool SpansMultipleDays { get; init; }
 
     /// <summary>
-    /// "Now" in scenario time, <c>yyyy-MM-dd HH:mm</c> in the exercise zone: the live scenario clock, else the persisted
-    /// <c>Exercise.CurrentScenarioTime</c> (a placeholder that is usually unset), taking the latest post instead when
-    /// that is later. For a finished exercise with no clock this is its last post. The page's default end of the
+    /// "Now" in scenario time, <c>yyyy-MM-dd HH:mm</c> in the exercise zone: the live (or rehydrated) scenario clock,
+    /// taking the latest post instead when that is later (engine-runtime/08). For a finished exercise with no clock this is its last post. The page's default end of the
     /// window. <c>null</c> when the exercise has neither a scenario time nor posts.
     /// </summary>
     [JsonPropertyName("scenarioNow")]

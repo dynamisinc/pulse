@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.Social.Threads;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Social.Reactions;
 using static Pulse.WebApi.Tests.Features.Social.Reactions.ReactionTestSeed;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The live engagement push (demo-feedback story 14, DF-17 / DF-18) against real SQL: <c>ReactionService</c> and
@@ -247,7 +248,8 @@ public sealed class PostEngagementChangedPushTests
             new ExerciseClockService(TimeProvider.System),
             new PostEngagementReader(context, exerciseContext),
             broadcaster,
-            logger ?? NullLogger<ReactionService>.Instance);
+            logger ?? NullLogger<ReactionService>.Instance,
+            TestScenarioNow.Over(context));
     }
 
     private static PostTakedownService CreateTakedownService(
@@ -257,10 +259,10 @@ public sealed class PostEngagementChangedPushTests
         return new PostTakedownService(
             context,
             exerciseContext,
-            new OrganizationContext { CurrentOrganizationId = Organization.DefaultOrganizationId },
             new ExerciseClockService(TimeProvider.System),
             broadcaster,
             logger,
+            TestScenarioNow.Over(context),
             new PostEngagementReader(context, exerciseContext));
     }
 

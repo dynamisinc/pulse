@@ -61,7 +61,7 @@ internal sealed class WeatherZoneHarness : IDisposable
             new StubCurrentStaffSessionAccessor(staffUserId is { } staff
                 ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staff }
                 : null),
-            new StubExerciseClock(ScenarioNow),
+            TestScenarioNow.Over(db, new StubExerciseClock(ScenarioNow), Time),
             new ExerciseFactsReader(db),
             Time,
             NullLogger<WeatherZoneService>.Instance);

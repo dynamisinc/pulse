@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.RateLimits;
@@ -56,6 +57,9 @@ public static class AccountEndpoints
         services.AddSingleton<ParticipantPasswordHasher>();
 
         // Scoped to match the PulseDbContext unit of work.
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<ParticipantLoginService>();
         services.AddScoped<AccountProvisioningService>();
 

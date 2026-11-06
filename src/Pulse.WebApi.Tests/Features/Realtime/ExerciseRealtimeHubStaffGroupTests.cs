@@ -20,6 +20,7 @@ using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 using SignalRHttpContextFeature = Microsoft.AspNetCore.Http.Connections.Features.IHttpContextFeature;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The staff-verification half of <see cref="ExerciseRealtimeHub"/>'s role-scoped group rule (demo-polish B5,
@@ -242,7 +243,8 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
             var service = new StaffAssignmentService(
                 context,
                 new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = staff.SessionId, StaffUserId = staff.StaffUserId }),
-                new SessionConnectionRevoker(registry, hubContext.Object));
+                new SessionConnectionRevoker(registry, hubContext.Object),
+                TestScenarioNow.Over(context));
 
             var switched = await service.SetActiveExerciseAsync(exerciseB);
             switched.Outcome.Should().Be(SetActiveExerciseOutcome.Ok);

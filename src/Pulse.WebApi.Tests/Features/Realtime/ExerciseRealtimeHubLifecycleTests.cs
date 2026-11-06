@@ -26,6 +26,7 @@ using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 
@@ -167,10 +168,11 @@ public sealed class ExerciseRealtimeHubLifecycleTests
             context,
             scope,
             new StubCurrentStaffSessionAccessor(null),
+            TestScenarioNow.Over(context),
             // #390 (merged with #375): this test pins the FEED send gate; the overlay push is #651's to test.
             new NoOpExerciseLifecycleTransitionObserver(),
             NullLogger<ExerciseLifecycleService>.Instance,
-            new ExerciseReadinessService(context, scope)); // EndEx is never readiness-gated (story 04).
+            new ExerciseReadinessService(context, scope, TestScenarioNow.Over(context))); // EndEx is never readiness-gated (story 04).
 
         var result = await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = "completed" });
         result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "live → completed is an allowed EndEx transition");

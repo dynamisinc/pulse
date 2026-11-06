@@ -68,7 +68,7 @@ public sealed partial class InjectQueueService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSession;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly PauseTierRegistry _pauseTiers;
     private readonly IInjectPostPublisher _publisher;
     private readonly IBurstJitterSource _jitter;
@@ -80,7 +80,7 @@ public sealed partial class InjectQueueService
     /// <param name="dbContext">The exercise-scoped persistence context.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001).</param>
     /// <param name="staffSession">The server-side staff session — the only source of the acting human (COR-018).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050/053).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="pauseTiers">The in-memory tiered-pause state (IQ-5).</param>
     /// <param name="publisher">The one post ingest funnel (IQ-2), behind its publish seam.</param>
     /// <param name="jitter">The burst jitter source (IQ-4).</param>
@@ -91,7 +91,7 @@ public sealed partial class InjectQueueService
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSession,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         PauseTierRegistry pauseTiers,
         IInjectPostPublisher publisher,
         IBurstJitterSource jitter,
@@ -102,7 +102,7 @@ public sealed partial class InjectQueueService
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSession);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(pauseTiers);
         ArgumentNullException.ThrowIfNull(publisher);
         ArgumentNullException.ThrowIfNull(jitter);
@@ -113,7 +113,7 @@ public sealed partial class InjectQueueService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _staffSession = staffSession;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _pauseTiers = pauseTiers;
         _publisher = publisher;
         _jitter = jitter;
@@ -195,7 +195,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Invalid<InjectItemDto>(referenceError);
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         var item = new InjectItem
         {
             Id = Guid.NewGuid(),
@@ -314,7 +314,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(rewritesHistory, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         ApplyItemFields(item, draft);
         ApplyChildren(item, draft, time.WallClock);
 
@@ -380,7 +380,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(notDeletable, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         item.DeletedAt = time.WallClock;
         await BumpQueueAsync(caller.ExerciseId, cancellationToken);
         if (await TrySaveAsync(item, InjectActions.Delete, caller.StaffUserId, time, cancellationToken))
@@ -406,7 +406,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(freshRefusal, await ProjectAsync(fresh, facts, cancellationToken));
         }
 
-        time = TimeFor(caller.ExerciseId, facts);
+        time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         fresh.DeletedAt = time.WallClock;
         await BumpQueueAsync(caller.ExerciseId, cancellationToken);
         return await TrySaveAsync(fresh, InjectActions.Delete, caller.StaffUserId, time, cancellationToken)
@@ -463,7 +463,7 @@ public sealed partial class InjectQueueService
         WriteQueueOrder(ids.Select(id => byId[id]).ToList());
 
         var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         _dbContext.TelemetryEvents.Add(InjectTelemetry.ForReorder(caller.ExerciseId, caller.StaffUserId, time));
 
         try
@@ -568,7 +568,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(parentRefusal, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         var children = InjectTransitions.LiveChildren(item);
 
         if (!InjectTransitions.HasStarted(item))
@@ -652,7 +652,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(parentRefusal, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         var failed = InjectTransitions.LiveChildren(item)
             .Where(post => post.Status == InjectPostStatuses.Failed)
             .ToList();
@@ -745,7 +745,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        var time = TimeFor(caller.ExerciseId, facts);
+        var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
         if (InjectTransitions.MarkFired(item, caller.StaffUserId, time.ScenarioTime) is { } refusal)
         {
             return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
@@ -808,7 +808,7 @@ public sealed partial class InjectQueueService
         }
 
         var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
-        var time = TimeFor(exerciseId, facts);
+        var time = await TimeForAsync(exerciseId, facts, cancellationToken);
         var parents = await ReadExternalParentsAsync(item, cancellationToken);
         var driver = item.DriverHumanId ?? item.FiredByHumanId ?? item.CreatedByHumanId;
 
@@ -1244,7 +1244,8 @@ public sealed partial class InjectQueueService
                     return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
                 }
 
-                if (await TrySaveAsync(item, action, caller.StaffUserId, TimeFor(caller.ExerciseId, facts), cancellationToken))
+                var time = await TimeForAsync(caller.ExerciseId, facts, cancellationToken);
+                if (await TrySaveAsync(item, action, caller.StaffUserId, time, cancellationToken))
                 {
                     saved = item;
                     savedFacts = facts;
@@ -1603,8 +1604,8 @@ public sealed partial class InjectQueueService
     }
 
     /// <summary>
-    /// The exercise row facts this slice needs: the tenant (to bound the staff roster), the time zone (XC-008) and
-    /// the persisted scenario fallback (COR-053). ONE read site for the whole slice.
+    /// The exercise row facts this slice needs: the tenant (to bound the staff roster) and the time zone (XC-008). ONE
+    /// read site for the whole slice.
     /// </summary>
     private async Task<ExerciseFacts> ReadExerciseFactsAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
@@ -1614,21 +1615,21 @@ public sealed partial class InjectQueueService
         var row = await _dbContext.Exercises
             .AsNoTracking()
             .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => new { exercise.OrganizationId, exercise.TimeZone, exercise.CurrentScenarioTime })
+            .Select(exercise => new { exercise.OrganizationId, exercise.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
 
         var timeZone = string.IsNullOrWhiteSpace(row?.TimeZone) ? FallbackTimeZone : row.TimeZone;
-        return new ExerciseFacts(row?.OrganizationId, timeZone, row?.CurrentScenarioTime);
+        return new ExerciseFacts(row?.OrganizationId, timeZone);
     }
 
     /// <summary>
-    /// The one clock read for an operation: server wall clock, plus scenario time from the native exercise clock,
-    /// falling back to the persisted scenario instant and finally the wall clock (the FollowService pattern, COR-053).
+    /// The one clock read for an operation: server wall clock, plus scenario time from <see cref="IScenarioNow"/>
+    /// (engine-runtime/08, CLK-2: the running clock, else the exercise's latest post, else the wall clock; COR-053).
     /// </summary>
-    private InjectEventTime TimeFor(Guid exerciseId, ExerciseFacts facts)
+    private async Task<InjectEventTime> TimeForAsync(Guid exerciseId, ExerciseFacts facts, CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
-        var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime ?? now;
+        var scenario = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         return new InjectEventTime(now, scenario, facts.TimeZone);
     }
 
@@ -1818,7 +1819,7 @@ public sealed partial class InjectQueueService
     private sealed record Caller(Guid ExerciseId, Guid StaffUserId);
 
     /// <summary>The exercise-row facts the slice reads once per operation.</summary>
-    private sealed record ExerciseFacts(Guid? OrganizationId, string TimeZone, DateTimeOffset? StoredScenarioTime);
+    private sealed record ExerciseFacts(Guid? OrganizationId, string TimeZone);
 
     /// <summary>One staff user on the exercise roster.</summary>
     private sealed record RosterEntry(Guid StaffUserId, string DisplayName, string Role);

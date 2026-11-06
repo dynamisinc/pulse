@@ -97,7 +97,10 @@ internal sealed class EditCaller
 /// </summary>
 internal sealed class PostEditTestHost : IAsyncDisposable
 {
-    /// <summary>The stored <c>Exercise.CurrentScenarioTime</c> every seeded exercise carries (the edit's scenario fallback).</summary>
+    /// <summary>
+    /// Where every seeded exercise's world is: the scenario instant of its latest post (engine-runtime/08, the edit's
+    /// scenario fallback when no clock runs). Later than <see cref="PostScenarioTime"/>.
+    /// </summary>
     public static readonly DateTimeOffset StoredScenarioTime = new(2033, 9, 4, 13, 20, 0, TimeSpan.Zero);
 
     /// <summary>The scenario instant seeded posts are created at.</summary>
@@ -246,7 +249,7 @@ internal sealed class PostEditTestHost : IAsyncDisposable
         return new PulseDbContext(options, new ExerciseContext { CurrentExerciseId = exerciseId });
     }
 
-    /// <summary>Seeds an exercise in <paramref name="status"/> with the stored scenario time.</summary>
+    /// <summary>Seeds an exercise in <paramref name="status"/>, its world at <see cref="StoredScenarioTime"/> (one post there).</summary>
     public async Task<Guid> SeedExerciseAsync(string status = "live", bool withStoredScenarioTime = true)
     {
         var id = Guid.NewGuid();
@@ -259,9 +262,9 @@ internal sealed class PostEditTestHost : IAsyncDisposable
             Hostname = $"edit-{id:N}.example.com",
             TimeZone = "UTC",
             Status = status,
-            CurrentScenarioTime = withStoredScenarioTime ? StoredScenarioTime : null,
         });
         await db.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(db, id, withStoredScenarioTime ? StoredScenarioTime : null);
         return id;
     }
 

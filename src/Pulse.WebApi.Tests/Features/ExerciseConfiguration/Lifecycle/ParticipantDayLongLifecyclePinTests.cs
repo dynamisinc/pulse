@@ -16,6 +16,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// <b>Easy-login story 06 lifecycle pin (EL-11), as amended by the one-rule ruling (Tom, 2026-10-19).</b> A day-long
@@ -152,7 +153,8 @@ public sealed class ParticipantDayLongLifecyclePinTests
         new ExerciseFactsReader(context),
         Options.Create(new EasyLoginOptions()),
         TimeProvider.System,
-        NullLogger<SessionService>.Instance);
+        NullLogger<SessionService>.Instance,
+        TestScenarioNow.Over(context));
 
     private static SessionIssueRequest ParticipantRequest(Guid exerciseId, Guid accountId)
     {

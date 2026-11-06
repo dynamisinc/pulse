@@ -4,6 +4,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -19,9 +20,9 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <remarks>
 /// <para>
 /// <b>Server-authoritative &amp; fail-closed.</b> Wall-clock is the server clock (one read per operation, shared
-/// by the entity mutation and its telemetry). Scenario time is the exercise's stored
-/// <see cref="Exercise.CurrentScenarioTime"/> (a documented B2 placeholder until the COR-050 backend clock lands
-/// in B3). Scope comes ONLY from <see cref="IExerciseContext.CurrentExerciseId"/>; a null/empty scope, no staff
+/// by the entity mutation and its telemetry). Scenario time is
+/// the exercise's scenario now from <see cref="Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow"/> (engine-runtime/08:
+/// the running clock, else the latest post, else the wall clock). Scope comes ONLY from <see cref="IExerciseContext.CurrentExerciseId"/>; a null/empty scope, no staff
 /// session, or a staff session whose bound exercise disagrees with the resolved scope all fail closed (the
 /// endpoint 401s). The new password is generated server-side, returned to staff exactly ONCE, and only ever
 /// persisted hashed (never logged, never stored in the clear — NFR-009).
@@ -52,27 +53,32 @@ public sealed class SharedCredentialLifecycleService
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
     private readonly ISharedCredentialHasher _hasher;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the lifecycle service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the credential mutation, session termination, and telemetry are written through.</param>
     /// <param name="exerciseContext">The server-authoritative active-exercise scope (COR-001) — the sole scoping source.</param>
     /// <param name="currentStaffSession">The cross-wave accessor that identifies the authenticated staff caller (staff-only gate).</param>
     /// <param name="hasher">The slow-KDF hasher a rotation hashes the fresh password with (NFR-009).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public SharedCredentialLifecycleService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor currentStaffSession,
-        ISharedCredentialHasher hasher)
+        ISharedCredentialHasher hasher,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
         ArgumentNullException.ThrowIfNull(hasher);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _currentStaffSession = currentStaffSession;
         _hasher = hasher;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -134,7 +140,8 @@ public sealed class SharedCredentialLifecycleService
             ? $"{{\"graceExpiresAt\":\"{grace.ToString("O", CultureInfo.InvariantCulture)}\"}}"
             : "{\"graceExpiresAt\":null}";
 
-        _dbContext.TelemetryEvents.Add(BuildLifecycleTelemetry(context, RotatedEventType, credential.Id, now, payload));
+        var scenarioTime = await _scenarioNow.GetAsync(context.ExerciseId, now, cancellationToken);
+        _dbContext.TelemetryEvents.Add(BuildLifecycleTelemetry(context, RotatedEventType, credential.Id, now, scenarioTime, payload));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return SharedCredentialRotateResult.Rotated(newPassword, graceExpiresAt);
@@ -190,7 +197,8 @@ public sealed class SharedCredentialLifecycleService
 
         var payload = $"{{\"terminatedSessions\":{readOnlySessions.Count.ToString(CultureInfo.InvariantCulture)}}}";
 
-        _dbContext.TelemetryEvents.Add(BuildLifecycleTelemetry(context, RevokedEventType, credential.Id, now, payload));
+        var scenarioTime = await _scenarioNow.GetAsync(context.ExerciseId, now, cancellationToken);
+        _dbContext.TelemetryEvents.Add(BuildLifecycleTelemetry(context, RevokedEventType, credential.Id, now, scenarioTime, payload));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return SharedCredentialRevokeResult.Revoked(readOnlySessions.Count);
@@ -260,6 +268,7 @@ public sealed class SharedCredentialLifecycleService
         string eventType,
         Guid credentialId,
         DateTimeOffset now,
+        DateTimeOffset scenarioTime,
         string payload) => new()
     {
         EventId = Guid.NewGuid().ToString(),
@@ -274,7 +283,7 @@ public sealed class SharedCredentialLifecycleService
             ActingHumanId = context.StaffUserId.ToString(),
         },
         WallClockTime = now,
-        ScenarioTime = context.Exercise.CurrentScenarioTime ?? now,
+        ScenarioTime = scenarioTime,
         TimeZone = context.Exercise.TimeZone,
         Target = new TelemetryTarget { EntityType = SharedCredentialEntityType, EntityId = credentialId.ToString() },
         Payload = payload,

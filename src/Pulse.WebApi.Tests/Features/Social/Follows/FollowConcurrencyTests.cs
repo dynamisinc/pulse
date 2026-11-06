@@ -13,6 +13,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The concurrent double-submit fold (<c>profiles-social-graph/07</c>, Gate-1 WR-001) — the case a
@@ -164,7 +165,7 @@ public class FollowConcurrencyTests
             ExerciseId = world.Exercise,
             ActingHumanId = "human-race",
         }),
-        new ExerciseClockService(TimeProvider.System));
+        TestScenarioNow.Over(context));
 
     private async Task<SeededPair> SeedAsync()
     {

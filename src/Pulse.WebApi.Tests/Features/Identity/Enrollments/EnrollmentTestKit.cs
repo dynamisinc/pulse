@@ -18,6 +18,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Real-SQL seeding and service construction for the identity-auth-roles/16 enrollment suites. Fresh GUIDs per call;
@@ -173,7 +174,7 @@ public sealed class EnrollmentTestKit
         var accessor = new FixedStaffSessionAccessor(callerSessionId, callerPersonId);
         var caller = new StaffCallerContext(context, accessor, organizationContext);
         var service = new EnrollmentService(
-            context, caller, exerciseContext, TimeProvider.System, swamped ?? Swamped, revoker ?? Revoker);
+            context, caller, exerciseContext, TimeProvider.System, swamped ?? Swamped, revoker ?? Revoker, TestScenarioNow.Over(context));
         return (service, context);
     }
 

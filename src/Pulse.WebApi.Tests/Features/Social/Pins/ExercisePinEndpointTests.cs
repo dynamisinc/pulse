@@ -123,7 +123,7 @@ public sealed class ExercisePinEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task Pin_ClockNotRunning_StampsTheStoredScenarioTime_NeverTheWallClock()
+    public async Task Pin_ClockNotRunning_StampsTheWorldsLatestPost_NeverTheWallClock()
     {
         var stored = new DateTimeOffset(2033, 9, 4, 15, 30, 0, TimeSpan.FromHours(-5));
         var exercise = await _seed.Sessions.SeedExerciseAsync(currentScenarioTime: stored);

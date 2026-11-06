@@ -56,7 +56,8 @@ public sealed class JoinLoginServiceTests
             new ExerciseContext { CurrentExerciseId = scope },
             issuer,
             new ExerciseFactsReader(context),
-            new ManualTimeProvider(now ?? Now));
+            new ManualTimeProvider(now ?? Now),
+            TestScenarioNow.Over(context));
 
     private PulseDbContext ScopedContext(Guid? exerciseId) =>
         _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseId });
