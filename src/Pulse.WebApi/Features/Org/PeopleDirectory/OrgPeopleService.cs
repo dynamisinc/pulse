@@ -286,8 +286,13 @@ public sealed partial class OrgPeopleService
                     person.DisabledAt = now;
                     revokedSessionIds = await PersonSessionRevoker.StageRevokeAsync(
                         _dbContext, person.Id, PersonSessionScope.All, now, cancellationToken);
+
+                    // #668 review W-001: a disable is often the answer to a compromised account or a leaked link. Void
+                    // every outstanding reset / invite link now, so a later Enable never revives one issued before it.
+                    var voided = await CredentialTokenService.StageCredentialChangeInvalidationAsync(
+                        _dbContext, CredentialSubject.ForPerson(person.Id), tenant, now, cancellationToken);
                     auditKind = DisabledKind;
-                    payload = Payload(caller.Role, revokedSessionIds.Count);
+                    payload = Payload(caller.Role, revokedSessionIds.Count, tokensVoided: voided);
                 }
             }
             else if (person.DisabledAt is not null)
