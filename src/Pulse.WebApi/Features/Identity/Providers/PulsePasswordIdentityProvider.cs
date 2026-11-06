@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Identity.Providers;
 
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -33,22 +32,26 @@ using Pulse.WebApi.Data.Entities;
 /// </remarks>
 public sealed class PulsePasswordIdentityProvider : IIdentityProvider
 {
-    private static readonly Person HashSubject = new() { DisplayName = string.Empty };
-
     private readonly PulseDbContext _dbContext;
     private readonly DynamisIdentityProvider _fallback;
-    private readonly PasswordHasher<Person> _hasher = new();
+    private readonly StaffPasswordVerifier _verifier;
 
     /// <summary>Creates the chained provider.</summary>
     /// <param name="dbContext">The persistence context the person and staff facet are read through.</param>
     /// <param name="fallback">The break-glass allowlist provider tried for people without a Pulse password.</param>
-    public PulsePasswordIdentityProvider(PulseDbContext dbContext, DynamisIdentityProvider fallback)
+    /// <param name="verifier">
+    /// The request's counted slow-hash seam (#602 M-2): the SAME instance the login funnel pads from, so the funnel knows
+    /// how many PBKDF2 verifications this provider performed.
+    /// </param>
+    public PulsePasswordIdentityProvider(PulseDbContext dbContext, DynamisIdentityProvider fallback, StaffPasswordVerifier verifier)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(fallback);
+        ArgumentNullException.ThrowIfNull(verifier);
 
         _dbContext = dbContext;
         _fallback = fallback;
+        _verifier = verifier;
     }
 
     /// <inheritdoc />
@@ -131,7 +134,7 @@ public sealed class PulsePasswordIdentityProvider : IIdentityProvider
         Guid organizationId,
         CancellationToken cancellationToken)
     {
-        if (!Verify(passwordHash, secret) || person.DisabledAt is not null)
+        if (!_verifier.Verify(passwordHash, secret) || person.DisabledAt is not null)
         {
             return Rejected();
         }
@@ -175,18 +178,5 @@ public sealed class PulsePasswordIdentityProvider : IIdentityProvider
                 .AsNoTracking()
                 .InOrganization(facet.OrganizationId)
                 .AnyAsync(p => p.Id == facet.Id && p.PasswordHash != null && p.PasswordHash != string.Empty, cancellationToken);
-    }
-
-    private bool Verify(string storedHash, string providedPassword)
-    {
-        try
-        {
-            return _hasher.VerifyHashedPassword(HashSubject, storedHash, providedPassword) != PasswordVerificationResult.Failed;
-        }
-        catch (FormatException)
-        {
-            // A malformed stored hash fails closed rather than throwing.
-            return false;
-        }
     }
 }

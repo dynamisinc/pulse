@@ -98,7 +98,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer);
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -154,7 +154,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer);
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -185,7 +185,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer);
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -212,7 +212,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), issuer);
+            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer);
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -252,7 +252,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), new RecordingSessionIssuer());
+            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer());
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -290,7 +290,7 @@ public sealed class StaffLoginServiceTests
 
         var issuer = new RecordingSessionIssuer();
         await using var context = _fixture.CreateContext();
-        var service = new StaffLoginService(context, swapped, issuer);
+        var service = new StaffLoginService(context, swapped, TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer);
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -323,7 +323,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), new RecordingSessionIssuer());
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer());
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -353,7 +353,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), new RecordingSessionIssuer());
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer());
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -379,7 +379,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), new RecordingSessionIssuer());
+            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer());
             await service.LoginAsync(new StaffLoginRequest { Username = "plan", Secret = "pw-123456", ExerciseId = exercise.Id.ToString() });
         }
 

@@ -309,6 +309,8 @@ public sealed class BootstrapServiceTests
             var loginService = new StaffLoginService(
                 loginContext,
                 new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = allowlist })),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer());
 
             var login = await loginService.LoginAsync(new StaffLoginRequest
@@ -327,6 +329,8 @@ public sealed class BootstrapServiceTests
             var loginService = new StaffLoginService(
                 loginContext,
                 new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = allowlist })),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer());
 
             var login = await loginService.LoginAsync(new StaffLoginRequest
