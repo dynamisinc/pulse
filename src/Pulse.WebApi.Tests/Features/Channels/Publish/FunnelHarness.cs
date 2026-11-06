@@ -78,6 +78,9 @@ internal sealed class FunnelHarness : IDisposable
 
     public FailingSaveInterceptor Saves { get; } = new();
 
+    /// <summary>The root scope factory, for a background caller (the scheduler, story 05) that opens its own scopes.</summary>
+    public IServiceScopeFactory ScopeFactory => _root.GetRequiredService<IServiceScopeFactory>();
+
     public static FunnelHarness Create(
         Action<IServiceCollection>? configure = null, bool withAlertRaiser = true, bool withPairedPoster = true)
     {

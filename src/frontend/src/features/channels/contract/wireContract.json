@@ -68,7 +68,7 @@
       "id", "channelId", "kind", "outlet", "slug", "permalink", "state", "headline", "dek", "kicker", "category",
       "hero", "publishedScenarioTime", "updatedScenarioTime", "featured",
       "byline", "bodyHtml", "media", "revisions", "pairedPostId", "alertId", "payload",
-      "status", "origin", "actingHumanId", "scheduledScenarioTime", "publishedWallClock", "background", "featuredRank",
+      "status", "origin", "actingHumanId", "scheduledScenarioTime", "lastError", "publishedWallClock", "background", "featuredRank",
       "injectId", "externalSource", "externalRef", "revisionCount", "revisionLog", "version"
     ],
     "ContentMediaWriteRequest": ["mediaId", "role", "alt"],
@@ -114,6 +114,7 @@
     "externalSource",
     "publishedWallClock",
     "scheduledScenarioTime",
+    "lastError",
     "revisionLog",
     "revisionCount"
   ]

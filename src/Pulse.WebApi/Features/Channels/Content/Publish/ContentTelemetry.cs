@@ -15,7 +15,9 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// <b>Types.</b> publish and restore → <c>content_published</c>, except a participant-origin publish of a
 /// <c>release</c>, which is the existing <c>press_release</c> instead (never both); revise and feature (story 07) →
 /// <c>content_revised</c>;
-/// retract and soft delete → <c>content_retracted</c>; schedule and unschedule → <see cref="ContentScheduled"/>.
+/// retract and soft delete → <c>content_retracted</c>; schedule and unschedule → <see cref="ContentScheduled"/>; a
+/// scheduled publish the funnel refused (story 05) → <c>content_schedule_failed</c>, with the refusal in
+/// <c>payload.error</c>.
 /// <c>payload.action</c> names the action, so restore/publish and retract/delete stay distinguishable.
 /// </para>
 /// <para>
@@ -63,6 +65,7 @@ public static class ContentTelemetry
             ContentTransitions.Revise or ContentPublishService.FeatureAction => ChannelTelemetryEventTypes.ContentRevised,
             ContentTransitions.Retract or ContentPublishService.DeleteAction => ChannelTelemetryEventTypes.ContentRetracted,
             ContentTransitions.Schedule or ContentTransitions.Unschedule => ContentScheduled,
+            ContentPublishService.ScheduleFailedAction => ChannelTelemetryEventTypes.ContentScheduleFailed,
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, "The action emits no event."),
         };
     }
@@ -74,6 +77,7 @@ public static class ContentTelemetry
     /// <param name="time">The one clock read shared with the state change.</param>
     /// <param name="revisionKind">The revision kind for a revise, else null.</param>
     /// <param name="gateNote">The gates' audit note for a publish, else null.</param>
+    /// <param name="error">Why a scheduled publish was refused (staff-facing), else null.</param>
     /// <returns>The telemetry row to add to the same unit of work.</returns>
     public static TelemetryEvent Build(
         string action,
@@ -81,7 +85,8 @@ public static class ContentTelemetry
         ContentCaller caller,
         ContentEventTime time,
         string? revisionKind = null,
-        string? gateNote = null)
+        string? gateNote = null,
+        string? error = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(caller);
@@ -113,7 +118,7 @@ public static class ContentTelemetry
             TimeZone = time.TimeZone,
             Target = new TelemetryTarget { EntityType = EntityType, EntityId = item.Id.ToString() },
             Payload = JsonSerializer.Serialize(
-                new ContentEventPayload(action, item.Kind, item.Status, revisionKind, gateNote), PayloadOptions),
+                new ContentEventPayload(action, item.Kind, item.Status, revisionKind, gateNote, error), PayloadOptions),
             EmittedAt = time.WallClock,
         };
     }
@@ -138,7 +143,8 @@ public static class ContentTelemetry
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("status")] string Status,
         [property: JsonPropertyName("revisionKind")] string? RevisionKind,
-        [property: JsonPropertyName("gateNote")] string? GateNote);
+        [property: JsonPropertyName("gateNote")] string? GateNote,
+        [property: JsonPropertyName("error")] string? Error);
 }
 
 /// <summary>

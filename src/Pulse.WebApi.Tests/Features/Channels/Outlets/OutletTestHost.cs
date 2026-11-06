@@ -109,7 +109,16 @@ internal sealed class OutletTestHost : IAsyncDisposable
 
         var app = builder.Build();
         app.MapChannels();
-        await app.StartAsync();
+        try
+        {
+            await app.StartAsync();
+        }
+        catch
+        {
+            // A host that fails to start must not leak its started hosted services into the rest of the run.
+            await app.DisposeAsync();
+            throw;
+        }
 
         return new OutletTestHost(app, caller, connectionString, saves, time);
     }

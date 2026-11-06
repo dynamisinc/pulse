@@ -8,7 +8,10 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.BackgroundWork;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
+using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Review;
@@ -79,6 +82,23 @@ public sealed class IdleBackgroundWorkCompositionRootTests
         Field(scope.ServiceProvider.GetRequiredService<InjectQueueService>(), "_runnerSignal").Should().BeSameAs(
             signal, "Fire, Retry and Release must wake the runner");
 
+        SweepSignals(factory).Should().Contain(signal);
+    }
+
+    [Fact]
+    public void ProgramCs_TheContentScheduler_ItsProducer_TheClockAndTheSafetySweep_ShareOneSignal()
+    {
+        using var factory = new WiringProbeFactory();
+        var signal = factory.Services.GetRequiredService<ContentScheduleSignal>();
+
+        Field(Hosted<ContentScheduleRunner>(factory), "_signal").Should().BeSameAs(signal, "the sleeping runner waits on it");
+
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+        Field(scope.ServiceProvider.GetRequiredService<IContentPublishService>(), "_scheduleSignal").Should().BeSameAs(
+            signal, "a schedule must wake the runner (the parameter is optional, so only this proves DI supplies it)");
+
+        ClockObserverSignals(factory).Should().Contain(signal, "a clock that starts, jumps or unfreezes can make an item due");
         SweepSignals(factory).Should().Contain(signal);
     }
 

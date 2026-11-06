@@ -523,6 +523,13 @@ public sealed record ChannelContentStaffDto
     [JsonPropertyName("scheduledScenarioTime")]
     public string? ScheduledScenarioTime { get; init; }
 
+    /// <summary>
+    /// Why the last scheduled publish was refused (story 05; the item went back to <c>draft</c>), or null. Cleared by
+    /// the next schedule or publish. Staff-only.
+    /// </summary>
+    [JsonPropertyName("lastError")]
+    public string? LastError { get; init; }
+
     /// <summary>The wall-clock publish instant, or null. Staff-only; never shown in-fiction.</summary>
     [JsonPropertyName("publishedWallClock")]
     public string? PublishedWallClock { get; init; }

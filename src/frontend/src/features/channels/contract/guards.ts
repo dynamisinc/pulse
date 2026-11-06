@@ -283,6 +283,7 @@ export function isChannelContentStaffDto(value: unknown): value is ChannelConten
     isContentOrigin(c.origin) &&
     isNonEmptyString(c.actingHumanId) &&
     isNullableIsoScenarioTime(c.scheduledScenarioTime) &&
+    isNullableString(c.lastError) &&
     isNullableString(c.publishedWallClock) &&
     typeof c.background === 'boolean' &&
     isNullableNumber(c.featuredRank) &&
