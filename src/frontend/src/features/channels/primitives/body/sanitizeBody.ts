@@ -11,9 +11,9 @@
  * server's `ISanitizerProfileRegistry` (story 04): `BODY_ALLOWED_TAGS` /
  * `BODY_ALLOWED_ATTRIBUTES` are exported so a parity test can compare them.
  * Deliberately absent: `<img>` / `<video>` / `<iframe>` (body media goes through
- * `ContentMedia`, which carries the EXERCISE bands), `style` / `class` (skins style the
- * body; authors do not), every `on*` handler, and any URL scheme but https, http, mailto,
- * tel and host-relative paths.
+ * `ContentMedia`, which carries the EXERCISE bands), `style` and every `class` but
+ * the pull-quote marker (skins style the body; authors do not), every `on*` handler,
+ * and any URL scheme but https, http, mailto, tel and host-relative paths.
  *
  * LINKS: every `<a>` gets `rel="noopener noreferrer"`. A host-relative href (`/news/...`,
  * an in-sim permalink, COR-008) is marked `data-insim-link` so `SanitizedBody` routes it
@@ -28,11 +28,26 @@ export const PULSE_POST_TAG = 'pulse-post'
 /** Marks an in-sim (host-relative) link for client-side routing. */
 export const INSIM_LINK_ATTR = 'data-insim-link'
 
+/**
+ * The one author class the body keeps (news story 01 `article-rich`, story 06): it marks a
+ * pull quote, and only on a `<blockquote>`. Every other class (and `class` on every other
+ * element) is still stripped: skins style the body, authors do not.
+ */
+export const PULL_QUOTE_CLASS = 'pull-quote'
+
+/**
+ * Places an inline image / video from `item.media` (news story 01 `figure[data-media-id]`,
+ * story 06). Kept on a `<figure>` only; `SanitizedBody` hands the id to `renderInlineMedia`.
+ */
+export const MEDIA_ID_ATTR = 'data-media-id'
+
 export const BODY_ALLOWED_TAGS: readonly string[] = [
   // rich-basic
   'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'small', 'mark',
   'a', 'ul', 'ol', 'li', 'blockquote', 'h2', 'h3', 'h4', 'code', 'pre', 'span',
   'figure', 'figcaption',
+  // article-rich (news 01 / 06): a pull quote's optional attribution
+  'cite',
   // rich-tables
   'table', 'caption', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
   // the embed placeholder
@@ -41,7 +56,13 @@ export const BODY_ALLOWED_TAGS: readonly string[] = [
 
 export const BODY_ALLOWED_ATTRIBUTES: readonly string[] = [
   'href', 'title', 'lang', 'dir', 'colspan', 'rowspan', 'scope', 'data-id',
+  // Element-scoped (see the hooks below): `class` only as `pull-quote` on a blockquote,
+  // `data-media-id` only on a figure.
+  'class', MEDIA_ID_ATTR,
 ]
+
+/** An opaque media id: what `data-media-id` may hold (anything else is dropped). */
+const MEDIA_ID = /^[A-Za-z0-9_-]{1,64}$/
 
 /** https, http, mailto, tel, or a host-relative path / fragment / query. Nothing else. */
 const ALLOWED_URI = /^(?:(?:https?|mailto|tel):|[/#?])/i
@@ -82,6 +103,17 @@ const ownNotes = new WeakSet<Node>()
 purifier.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'href' && !ALLOWED_URI.test(data.attrValue.replace(URI_WHITESPACE, ''))) {
     data.keepAttr = false
+  }
+  // `class` survives only as EXACTLY the pull-quote marker on a blockquote (the server's
+  // article-rich rule: any other value is dropped, not normalised).
+  if (data.attrName === 'class') {
+    if (node.nodeName !== 'BLOCKQUOTE' || data.attrValue !== PULL_QUOTE_CLASS) {
+      data.keepAttr = false
+    }
+  }
+  if (data.attrName === MEDIA_ID_ATTR) {
+    if (node.nodeName !== 'FIGURE' || !MEDIA_ID.test(data.attrValue.trim())) data.keepAttr = false
+    else data.attrValue = data.attrValue.trim()
   }
   // The new-tab notes this module appends are visited by the same pass; keep THEIR marker
   // (an author-written one is not in the set, so it is stripped like any other attribute).

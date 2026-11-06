@@ -33,7 +33,8 @@ public sealed record PairedPostOptions
 
 /// <summary>
 /// The alert half of <see cref="PublishOptions"/>, and the shape of a descriptor's
-/// <see cref="IContentKindDescriptor.DefaultAlertMapping"/> suggestion. The funnel fills the rest of the
+/// <see cref="IContentKindDescriptor.DefaultAlertMapping"/> / <see cref="IContentKindDescriptor.SuggestAlert"/> suggestion
+/// (a publish dialog asks <c>SuggestAlert(item)</c>, which may depend on the item). The funnel fills the rest of the
 /// <see cref="AlertRaise"/> (href = the permalink, source channel and content id = the item's).
 /// </summary>
 public sealed record PublishAlertOptions

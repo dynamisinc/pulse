@@ -145,7 +145,7 @@ public class EngineReviewItemIsolationTests
         }
 
         await using var readA = _fixture.CreateContext(ScopeFor(exerciseA));
-        var store = new EngineReviewStore(readA);
+        var store = new EngineReviewStore(readA, new EngineReviewTickSignal());
 
         (await store.FindAsync(draftB)).Should().BeNull(
             "an IDOR by exercise B's real draft id, from an exercise-A scope, must fail closed");
@@ -179,12 +179,12 @@ public class EngineReviewItemIsolationTests
 
         await using (var writeContext = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            var store = new EngineReviewStore(writeContext);
+            var store = new EngineReviewStore(writeContext, new EngineReviewTickSignal());
             await store.EnqueueAsync(NewReviewItem(draftId, exerciseId));
         }
 
         await using var readContext = _fixture.CreateContext(ScopeFor(exerciseId));
-        var queue = await new EngineReviewStore(readContext).GetQueueAsync();
+        var queue = await new EngineReviewStore(readContext, new EngineReviewTickSignal()).GetQueueAsync();
 
         var item = queue.Should().ContainSingle().Subject;
         item.DraftId.Should().Be(draftId);
@@ -212,7 +212,7 @@ public class EngineReviewItemIsolationTests
         // From exercise A's scope, mutating A's own item succeeds; mutating B's fails closed (not visible).
         await using (var writeA = _fixture.CreateContext(ScopeFor(exerciseA)))
         {
-            var storeA = new EngineReviewStore(writeA);
+            var storeA = new EngineReviewStore(writeA, new EngineReviewTickSignal());
             (await storeA.UpdateDispositionAsync(draftA, DraftDisposition.Published, ControllerDecision.Approved))
                 .Should().BeTrue("the caller's own review item must be updatable");
             (await storeA.UpdateDispositionAsync(draftB, DraftDisposition.Vetoed))

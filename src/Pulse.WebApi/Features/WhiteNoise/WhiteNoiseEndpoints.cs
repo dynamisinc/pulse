@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.BackgroundWork;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
@@ -65,6 +66,7 @@ public static class WhiteNoiseEndpoints
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<INoiseJitterSource, CryptoNoiseJitterSource>();
         services.TryAddSingleton(new WhiteNoisePacerOptions());
+        services.AddWakeSignal<WhiteNoisePacerSignal>(wakeOnClockChange: true);
         services.TryAddSingleton<NoiseStateThrottle>();
         services.TryAddSingleton<INoiseBroadcaster, NoiseBroadcaster>();
         services.TryAddScoped<ExerciseFactsReader>();
