@@ -13,7 +13,10 @@
  *    `--pulse-skin-on-player-tint` (F13 picks black or white, always >= 4.5:1 on the
  *    tint). The row is OPAQUE, so chrome-over-poster contrast never depends on the
  *    footage (the >= 3:1 floor, NFR-001). No other token reaches the player.
- *  - NOT COLOUR-ONLY: every toggle has an icon swap, an accessible name and `aria-pressed`.
+ *  - NOT COLOUR-ONLY: Play / Pause swaps its NAME and icon (a pressed "Play" would read
+ *    as the opposite of the state); Mute and Captions keep a stable name + `aria-pressed`.
+ *  - SCRUB: while the thumb is dragged it shows the drag position, so `timeupdate`s from
+ *    the playing video never pull it back mid-drag.
  *  - 44px targets on a coarse pointer (CSS). One row, so the EXERCISE chip and bands
  *    above it are never covered.
  *
@@ -21,7 +24,8 @@
  * Participant world: CSS Module + FontAwesome, no COBRA, no MUI.
  */
 
-import type { ChangeEvent } from 'react'
+import { useState } from 'react'
+import type { CSSProperties, ChangeEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faClosedCaptioning,
@@ -46,13 +50,22 @@ export const PLAYER_CONTROLS_LABEL = 'Video controls'
 export function PlayerControls({ api }: PlayerControlsProps) {
   const { duration } = api
   const max = duration !== undefined && duration > 0 ? duration : 0
-  const value = Math.min(api.currentTime, max)
-  const elapsed = formatDuration(api.currentTime)
+  // The drag position while a pointer holds the thumb; `null` otherwise.
+  const [dragValue, setDragValue] = useState<number | null>(null)
+  const shownTime = dragValue ?? api.currentTime
+  const value = Math.min(shownTime, max)
+  const elapsed = formatDuration(shownTime)
   const total = duration !== undefined ? formatDuration(duration) : '--:--'
 
   const handleScrub = (event: ChangeEvent<HTMLInputElement>) => {
-    api.seekTo(Number(event.currentTarget.value))
+    const seconds = Number(event.currentTarget.value)
+    if (dragValue !== null) setDragValue(seconds)
+    api.seekTo(seconds)
   }
+  const endDrag = () => setDragValue(null)
+  const scrubStyle = {
+    '--news-scrub-fill': `${max > 0 ? (value / max) * 100 : 0}%`,
+  } as CSSProperties
 
   return (
     <div
@@ -64,8 +77,7 @@ export function PlayerControls({ api }: PlayerControlsProps) {
       <button
         type="button"
         className={styles.button}
-        aria-label="Play"
-        aria-pressed={api.playing}
+        aria-label={api.playing ? 'Pause' : 'Play'}
         data-testid="broadcast-play"
         onClick={api.togglePlay}
       >
@@ -75,6 +87,7 @@ export function PlayerControls({ api }: PlayerControlsProps) {
       <input
         type="range"
         className={styles.scrub}
+        style={scrubStyle}
         min={0}
         max={max}
         step="any"
@@ -84,13 +97,19 @@ export function PlayerControls({ api }: PlayerControlsProps) {
         aria-valuetext={`${elapsed} of ${total}`}
         data-testid="broadcast-scrub"
         onChange={handleScrub}
+        onPointerDown={() => setDragValue(api.currentTime)}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onBlur={endDrag}
       />
 
       <span className={styles.time} data-testid="broadcast-time">
         <span>{elapsed}</span>
-        <span aria-hidden="true"> / </span>
-        <span className={styles.srOnly}> of </span>
-        <span>{total}</span>
+        <span className={styles.total}>
+          <span aria-hidden="true"> / </span>
+          <span className={styles.srOnly}> of </span>
+          <span>{total}</span>
+        </span>
       </span>
 
       <button

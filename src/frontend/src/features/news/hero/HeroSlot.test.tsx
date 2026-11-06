@@ -159,7 +159,7 @@ describe('Hero slot: broadcast player (NWS-014)', () => {
   it('has one labelled control group: play, scrub, elapsed/total, mute, fullscreen', () => {
     renderHero(heroVideo())
     const group = screen.getByRole('group', { name: 'Video controls' })
-    expect(within(group).getByRole('button', { name: 'Play' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(group).getByRole('button', { name: 'Play' })).not.toHaveAttribute('aria-pressed')
     expect(within(group).getByRole('slider', { name: 'Seek' })).toHaveAttribute(
       'aria-valuetext', '0:00 of 1:30',
     )
@@ -190,13 +190,14 @@ describe('Hero slot: broadcast player (NWS-014)', () => {
   it('plays and pauses from the keyboard and the button (no sound autoplay)', async () => {
     const user = userEvent.setup()
     renderHero(heroVideo())
-    const button = screen.getByRole('button', { name: 'Play' })
+    const button = screen.getByTestId('broadcast-play')
     await user.click(button)
     expect(play).toHaveBeenCalledTimes(1)
-    expect(button).toHaveAttribute('aria-pressed', 'true')
+    // The NAME carries the state (a pressed "Play" would read as the opposite).
+    expect(button).toHaveAccessibleName('Pause')
     screen.getByTestId('video-player').focus()
     await user.keyboard(' ')
-    expect(button).toHaveAttribute('aria-pressed', 'false')
+    expect(button).toHaveAccessibleName('Play')
   })
 
   it('scrubbing seeks the video', () => {
@@ -224,6 +225,61 @@ describe('Hero slot: broadcast player (NWS-014)', () => {
       { type: 'progress', pct: 50 },
       { type: 'progress', pct: 100 },
     ])
+  })
+
+  it('a failed URL that is re-minted does not report play / milestones again', async () => {
+    const events: PlayProgressEvent[] = []
+    const user = userEvent.setup()
+    const tokens = skin()
+    const ui = (url: string) => (
+      <SkinScope scopeId="news-test" tokens={tokens}>
+        <HeroSlot
+          item={{ hero: heroVideo({ url }) }}
+          skin={tokens}
+          onPlayProgress={event => events.push(event)}
+        />
+      </SkinScope>
+    )
+    const { rerender } = render(ui('/media/hero-vid-1?sig=one'))
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    let video = screen.getByTestId('video-player').querySelector('video') as HTMLVideoElement
+    video.currentTime = 46
+    fireEvent.timeUpdate(video)
+    fireEvent.error(video)
+    // The control row is gone while the video is unplayable.
+    expect(screen.queryByTestId('broadcast-controls')).toBeNull()
+    rerender(ui('/media/hero-vid-1?sig=two'))
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    video = screen.getByTestId('video-player').querySelector('video') as HTMLVideoElement
+    video.currentTime = 46
+    fireEvent.timeUpdate(video)
+    expect(events).toEqual([{ type: 'play' }, { type: 'progress', pct: 50 }])
+  })
+
+  it('the picture ends above the control row (captions / lower-thirds never behind it)', () => {
+    const css = readSrcFile('features/news/hero/BroadcastPlayer.module.css')
+    const rule = /\.frame\.frame > video\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(rule).toMatch(/height:\s*calc\(100% - var\(--news-player-controls-h, 44px\)\)/)
+  })
+
+  it('an unplayable video shows no footage, so no chip or bands (as F14 / Social)', () => {
+    renderHero(heroVideo())
+    fireEvent.error(screen.getByTestId('video-player').querySelector('video') as HTMLVideoElement)
+    expect(screen.getByTestId('video-unplayable')).toBeInTheDocument()
+    expect(screen.queryByTestId('watermark-slot')).toBeNull()
+    expect(screen.queryByTestId('exercise-bands')).toBeNull()
+  })
+})
+
+describe('Hero slot: no news stylesheet reaches the chip', () => {
+  it('no hero CSS targets the watermark slot, its chip or its data attributes', () => {
+    for (const file of ['HeroSlot.module.css', 'BroadcastPlayer.module.css', 'PlayerControls.module.css']) {
+      const css = readSrcFile(`features/news/hero/${file}`).replace(/\/\*[\s\S]*?\*\//g, '')
+      expect(css, file).not.toMatch(/watermark|\.slot\b|\.chip\b|\.reserved\b|\.clearControls\b/i)
+      // The chip box positions the slot; it never sets visibility, opacity, colour or size.
+      const box = /\.chipBox\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+      expect(box, file).not.toMatch(/visibility|opacity|color|display|transform|font/)
+    }
   })
 })
 

@@ -29,13 +29,13 @@
  * Participant world: CSS Module + FontAwesome, no COBRA, no MUI.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { VideoPlayer } from '@/core/media/player'
 import type { PlayerControlsApi } from '@/core/media/player'
 import { WatermarkSlot } from '@/features/channels'
 import type { ContentMediaDto } from '@/features/channels'
-import { reachedMilestones } from './heroModel'
-import type { PlayProgressEvent } from './heroModel'
+import { createProgressTracker } from './heroModel'
+import type { PlayProgressEvent, ProgressTracker } from './heroModel'
 import { PlayerControls } from './PlayerControls'
 import styles from './BroadcastPlayer.module.css'
 
@@ -56,6 +56,10 @@ export function BroadcastPlayer({
   onPlayProgress,
   onRequestModal,
 }: BroadcastPlayerProps) {
+  // What has been reported for this media. Held HERE, not in the control row: the row
+  // unmounts while a failed URL is re-minted, and a retry must not report again.
+  // (HeroSlot keys this component by media id, so a new item starts fresh.)
+  const [tracker] = useState(createProgressTracker)
   return (
     <div className={styles.root} data-testid="broadcast-player">
       <VideoPlayer
@@ -78,7 +82,11 @@ export function BroadcastPlayer({
           </div>
         }
         renderControls={api => (
-          <ProgressReportingControls api={api} onPlayProgress={onPlayProgress} />
+          <ProgressReportingControls
+            api={api}
+            tracker={tracker}
+            onPlayProgress={onPlayProgress}
+          />
         )}
       />
     </div>
@@ -87,31 +95,23 @@ export function BroadcastPlayer({
 
 function ProgressReportingControls({
   api,
+  tracker,
   onPlayProgress,
 }: {
   readonly api: PlayerControlsApi
+  readonly tracker: ProgressTracker
   readonly onPlayProgress: ((event: PlayProgressEvent) => void) | undefined
 }) {
-  // What has been reported for this mount (HeroSlot keys the player by media id).
-  const progress = useRef({ played: false, reported: new Set<number>() })
   const latestCallback = useRef(onPlayProgress)
   useEffect(() => {
     latestCallback.current = onPlayProgress
-  })
+  }, [onPlayProgress])
   const { playing, currentTime, duration } = api
   useEffect(() => {
-    const report = (event: PlayProgressEvent) => latestCallback.current?.(event)
-    const state = progress.current
-    if (playing && !state.played) {
-      state.played = true
-      report({ type: 'play' })
+    for (const event of tracker.observe(playing, currentTime, duration)) {
+      latestCallback.current?.(event)
     }
-    if (!state.played) return
-    for (const pct of reachedMilestones(currentTime, duration, state.reported)) {
-      state.reported.add(pct)
-      report({ type: 'progress', pct })
-    }
-  }, [playing, currentTime, duration])
+  }, [tracker, playing, currentTime, duration])
 
   return <PlayerControls api={api} />
 }

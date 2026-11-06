@@ -12,6 +12,10 @@
  *     centre: Play / Pause
  *   </div>
  *
+ *  HOST CONTROLS (opt-in, news story 05): with `renderControls` set, the native controls,
+ *  the top row and the centre button are NOT drawn; the host's own row (from
+ *  `PlayerControlsApi`) renders inside the wrapper instead. Everything below still holds.
+ *
  * BEHAVIOUR (the ACs)
  *  - NEVER autoplays. `preload="metadata"` only; with a poster the poster is
  *    shown, with none the URL gets `#t=0.1` so Safari paints a first frame.
@@ -69,8 +73,9 @@
  *    swaps the frame for "This video can't be played in this browser" plus the
  *    alt text — never a blank box. A URL the allow-list rejects
  *    (`safeMediaUrl.ts`) renders the alt-text placeholder instead.
- *  - DP-12: there is NO caption track this push (an NFR-001 / WCAG 1.2.2 gap
- *    flagged in the contract); the alt text is the only text alternative.
+ *  - DP-12: the contract carries NO caption track (an NFR-001 / WCAG 1.2.2 gap flagged in
+ *    the contract); the alt text is the only text alternative. A host control row can
+ *    toggle IN-BAND captions tracks when a video happens to expose them (rare for MP4).
  *
  * STACKING: the post card's open-the-thread overlay (`z-index: 1`) covers the
  * media; `PostMediaSlot` lifts this player to `z-index: 2` and the wrapper stops
@@ -232,14 +237,16 @@ export function VideoPlayer({
       openInModal()
     }
     video.addEventListener('webkitbeginfullscreen', handleBeginFullscreen)
-    // Captions toggle (host control row): follow the tracks the video exposes.
-    const tracks: TextTrackList | undefined = video.textTracks ?? undefined
+    // Captions toggle (host control row only; Social pays nothing): follow the video's tracks.
+    const tracks: TextTrackList | undefined = customControls
+      ? video.textTracks ?? undefined
+      : undefined
     const syncTracks = () => {
       const found = captionTracks(video)
       setCaptionsAvailable(found.length > 0)
       setCaptionsOn(found.some(track => track.mode === 'showing'))
     }
-    syncTracks()
+    if (customControls) syncTracks()
     if (typeof tracks?.addEventListener === 'function') {
       tracks.addEventListener('addtrack', syncTracks)
       tracks.addEventListener('removetrack', syncTracks)
@@ -254,7 +261,7 @@ export function VideoPlayer({
       }
       releasePlayback(video)
     }
-  }, [openInModal])
+  }, [openInModal, customControls])
 
   // The shell overlay takes over the screen: pause whatever is playing, and — belt and braces
   // beside the shell's own `useLeaveFullscreenWhileActive` — leave fullscreen if THIS player's
@@ -321,9 +328,10 @@ export function VideoPlayer({
     const found = captionTracks(videoRef.current)
     if (found.length === 0) return
     const turnOn = !found.some(track => track.mode === 'showing')
-    // On: show the first track only. Off: hide them all.
+    // On: show the first track only (the contract carries no language / default yet).
+    // Off: `hidden`, not `disabled`, so cues stay loaded for the next toggle.
     found.forEach((track, index) => {
-      track.mode = turnOn && index === 0 ? 'showing' : 'disabled'
+      track.mode = turnOn && index === 0 ? 'showing' : 'hidden'
     })
     setCaptionsOn(turnOn)
   }, [])
@@ -576,7 +584,12 @@ export function VideoPlayer({
   )
 }
 
-/** Renders a host's control row (`renderControls`) from the player's state and actions. */
+/**
+ * Renders a host's control row (`renderControls`) from the player's state and actions.
+ * A component boundary on purpose: the host row may use hooks, and calling the render
+ * prop inline would run them as the PLAYER's hooks (and trips the React compiler's
+ * "refs during render" rule, since the actions close over the player's refs).
+ */
 function HostControls({
   render,
   api,

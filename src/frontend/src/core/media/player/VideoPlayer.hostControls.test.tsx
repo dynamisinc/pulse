@@ -95,6 +95,23 @@ describe('VideoPlayer renderControls', () => {
     expect(screen.getByTestId('video-player')).toContainElement(screen.getByTestId('host-row'))
   })
 
+  it('passes className and describedBy to the wrapper', () => {
+    render(
+      <>
+        <p id="cap">The caption</p>
+        <VideoPlayer
+          media={MEDIA}
+          className="host-frame"
+          describedBy="cap"
+          renderControls={() => null}
+        />
+      </>,
+    )
+    const wrapper = screen.getByTestId('video-player')
+    expect(wrapper.className).toMatch(/host-frame/)
+    expect(wrapper).toHaveAccessibleDescription('The caption')
+  })
+
   it('without it, the native controls stay (Social unchanged)', () => {
     render(<VideoPlayer media={MEDIA} />)
     const video = screen.getByTestId('video-player').querySelector('video') as HTMLVideoElement
@@ -154,7 +171,7 @@ describe('VideoPlayer renderControls', () => {
       expect(tracks[0]?.mode).toBe('hidden')
       expect(latest?.captionsOn).toBe(true)
       act(() => latest?.toggleCaptions())
-      expect(tracks[1]?.mode).toBe('disabled')
+      expect(tracks[1]?.mode).toBe('hidden')
     } finally {
       if (original) Object.defineProperty(HTMLMediaElement.prototype, 'textTracks', original)
       else Reflect.deleteProperty(HTMLMediaElement.prototype, 'textTracks')

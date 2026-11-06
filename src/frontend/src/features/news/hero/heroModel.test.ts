@@ -3,7 +3,28 @@
  */
 import { describe, expect, it } from 'vitest'
 import { CAPTION_STYLES, CROP_AGGRESSIONS } from '@/features/channels'
-import { CAPTION_STYLE_CLASS, CROP_BOX_RATIO, croppedHeroMedia, reachedMilestones } from './heroModel'
+import {
+  CAPTION_STYLE_CLASS,
+  CROP_BOX_RATIO,
+  createProgressTracker,
+  croppedHeroMedia,
+  reachedMilestones,
+} from './heroModel'
+
+describe('createProgressTracker', () => {
+  it('reports nothing before a real play (a paused scrub to the end is silent)', () => {
+    expect(createProgressTracker().observe(false, 90, 90)).toEqual([])
+  })
+
+  it('reports play once, then each milestone once', () => {
+    const tracker = createProgressTracker()
+    expect(tracker.observe(true, 0, 90)).toEqual([{ type: 'play' }])
+    expect(tracker.observe(true, 50, 90)).toEqual([{ type: 'progress', pct: 50 }])
+    expect(tracker.observe(false, 50, 90)).toEqual([])
+    expect(tracker.observe(true, 0, 90)).toEqual([])
+    expect(tracker.observe(true, 90, 90)).toEqual([{ type: 'progress', pct: 100 }])
+  })
+})
 import { heroImage } from './heroTestUtils'
 
 describe('croppedHeroMedia (CSS crop only; the source is never altered)', () => {

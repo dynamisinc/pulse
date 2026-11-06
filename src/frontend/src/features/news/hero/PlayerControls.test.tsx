@@ -43,7 +43,7 @@ describe('PlayerControls', () => {
     const user = userEvent.setup()
     const controls = api({ playing: true, muted: true, fullscreen: true, captionsAvailable: true })
     render(<PlayerControls api={controls} />)
-    await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Mute' }))
     await user.click(screen.getByRole('button', { name: 'Captions' }))
     await user.click(screen.getByRole('button', { name: 'Exit full screen' }))
@@ -51,7 +51,8 @@ describe('PlayerControls', () => {
     expect(controls.toggleMute).toHaveBeenCalledTimes(1)
     expect(controls.toggleCaptions).toHaveBeenCalledTimes(1)
     expect(controls.toggleFullscreen).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: 'Play' })).toHaveAttribute('aria-pressed', 'true')
+    // Play / Pause carries its state in the name, not aria-pressed.
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toHaveAttribute('aria-pressed')
     expect(screen.getByRole('button', { name: 'Mute' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Captions' })).toHaveAttribute('aria-pressed', 'false')
   })
@@ -61,6 +62,20 @@ describe('PlayerControls', () => {
     expect(screen.queryByRole('button', { name: 'Captions' })).toBeNull()
     rerender(<PlayerControls api={api({ captionsAvailable: true, captionsOn: true })} />)
     expect(screen.getByRole('button', { name: 'Captions' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('while dragged, the thumb shows the drag position, not the lagging video time', () => {
+    const controls = api({ currentTime: 12 })
+    const { rerender } = render(<PlayerControls api={controls} />)
+    const scrub = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.pointerDown(scrub)
+    fireEvent.change(scrub, { target: { value: '60' } })
+    // A timeupdate from the playing video arrives mid-drag.
+    rerender(<PlayerControls api={{ ...controls, currentTime: 13 }} />)
+    expect(scrub).toHaveValue('60')
+    fireEvent.pointerUp(scrub)
+    rerender(<PlayerControls api={{ ...controls, currentTime: 60.2 }} />)
+    expect(scrub).toHaveValue('60.2')
   })
 
   it('the scrub seeks; it is disabled until the duration is known', () => {

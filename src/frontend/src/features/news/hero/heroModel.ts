@@ -67,3 +67,37 @@ export function reachedMilestones(
   const pct = currentTime >= duration - 0.5 ? 100 : (currentTime / duration) * 100
   return PROGRESS_MILESTONES.filter(milestone => pct >= milestone && !reported.has(milestone))
 }
+
+/** Remembers what has been reported for one media item (see `createProgressTracker`). */
+export interface ProgressTracker {
+  /** The events newly due for this playback state; each is returned once only. */
+  readonly observe: (
+    playing: boolean,
+    currentTime: number,
+    duration: number | undefined,
+  ) => PlayProgressEvent[]
+}
+
+/**
+ * The once-per-item play / 50% / 100% bookkeeping. Nothing is due before the first real
+ * play (a poster render, metadata load or a scrub while paused reports nothing).
+ */
+export function createProgressTracker(): ProgressTracker {
+  let played = false
+  const reported = new Set<number>()
+  return {
+    observe(playing, currentTime, duration) {
+      const due: PlayProgressEvent[] = []
+      if (playing && !played) {
+        played = true
+        due.push({ type: 'play' })
+      }
+      if (!played) return due
+      for (const pct of reachedMilestones(currentTime, duration, reported)) {
+        reported.add(pct)
+        due.push({ type: 'progress', pct })
+      }
+      return due
+    },
+  }
+}
