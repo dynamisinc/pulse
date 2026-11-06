@@ -33,10 +33,16 @@
  * interactive affordances (`affordancesAvailable(variant)`), a writable session and a bound
  * persona. Otherwise (a read-only / observer session, a persona-less one) the call returns
  * `false` and opens nothing: there is no composer to open (COR-015 / D1-011).
+ *
+ * AN ENDED EXERCISE (read-only review). Opening also asks the participant write seam
+ * (`useCanWrite`): after EndEx the call returns `false` and opens nothing. A dialog that was
+ * ALREADY open at EndEx stays mounted, like the nav rail's: `ComposeModal` keeps a draft
+ * readable with Post off and says why, and closes itself when the draft is empty (W-1).
  */
 
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useSession } from '@/core/auth'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 import {
   affordancesAvailable,
   useShellContext,
@@ -82,20 +88,23 @@ export function useComposeWithLink(): UseComposeWithLinkResult {
   const session = useSession()
   const canCompose =
     affordancesAvailable(variant) && !session.isReadOnly && session.personaId !== undefined
+  // Opening a NEW draft also needs the exercise not to have ended (see the module header).
+  const canWrite = useCanWrite()
+  const canOpen = canCompose && canWrite
 
   // The open draft's permalink; `undefined` = closed.
   const [permalink, setPermalink] = useState<string | undefined>(undefined)
 
   const openComposerWithLink = useCallback(
     (link: string): boolean => {
-      if (!canCompose || !isHostRelativePermalink(link)) return false
+      if (!canOpen || !isHostRelativePermalink(link)) return false
       // Already open: the draft is the author's now (`initialText` is read once), so a
       // second link is refused rather than silently dropped or replacing their text.
       if (permalink !== undefined) return false
       setPermalink(link)
       return true
     },
-    [canCompose, permalink],
+    [canOpen, permalink],
   )
   const close = useCallback(() => setPermalink(undefined), [])
 

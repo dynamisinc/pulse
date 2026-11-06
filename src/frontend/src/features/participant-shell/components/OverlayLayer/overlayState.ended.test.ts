@@ -35,6 +35,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HubConnectionState } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeEventHandler } from '@/core/realtime/connection'
+import { reportIfWriteRefused } from '@/core/services/writeRefusal'
+import { runSessionResets } from '@/core/auth/sessionReset'
 import { liveOverlayStateStore } from './overlayState'
 
 const getMock = vi.fn()
@@ -155,16 +157,113 @@ describe('liveOverlayStateStore — ended (read-only review)', () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
-  it('a 403 refetch clears ended back to the default', async () => {
+  it('a 403 refetch clears the overlay but keeps ended LATCHED (F-2: completed -> archived)', async () => {
+    resolveGet(wireState({ state: 'pause', ended: true, sequence: 3 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
+
+    getMock.mockRejectedValue(httpError(403, 'get'))
+    connection.setState(HubConnectionState.Connected)
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot()).toMatchObject({ state: 'none', ended: true })
+  })
+
+  it('an ended: false push after ended keeps ended latched (F-2)', async () => {
+    resolveGet(wireState({ ended: true, sequence: 3 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+
+    connection.push(wireState({ ended: false, sequence: 4 }))
+
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
+  })
+
+  it('the latch is per exercise: binding a different exercise starts fresh', async () => {
+    liveOverlayStateStore.bindExercise('exercise-a')
     resolveGet(wireState({ ended: true, sequence: 3 }))
     liveOverlayStateStore.ensureStarted(connection)
     await flush()
     expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
 
-    getMock.mockRejectedValue(Object.assign(new Error('403'), { isAxiosError: true, response: { status: 403 } }))
-    connection.setState(HubConnectionState.Connected)
+    liveOverlayStateStore.bindExercise('exercise-b')
+    connection.push(wireState({ ended: false, sequence: 4 }))
+
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+  })
+
+  it('re-binding the SAME exercise keeps the latch', async () => {
+    liveOverlayStateStore.bindExercise('exercise-a')
+    resolveGet(wireState({ ended: true, sequence: 3 }))
+    liveOverlayStateStore.ensureStarted(connection)
     await flush()
+
+    liveOverlayStateStore.bindExercise('exercise-a')
+    connection.push(wireState({ ended: false, sequence: 4 }))
+
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
+  })
+
+  it('a session reset drops the latch (the new identity re-learns from its GET)', async () => {
+    resolveGet(wireState({ ended: true, sequence: 3 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+
+    runSessionResets()
 
     expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
   })
 })
+
+describe('liveOverlayStateStore — a refused write re-learns ended (F-4)', () => {
+  it('a 403 on a WRITE re-GETs the overlay, so a tab that missed the EndEx push learns ended', async () => {
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+    const getsBefore = getMock.mock.calls.length
+
+    // EndEx happened, but this tab's push was lost. The next write is refused.
+    resolveGet(wireState({ ended: true, sequence: 0 }))
+    reportIfWriteRefused(httpError(403, 'post'))
+    await flush()
+
+    expect(getMock.mock.calls.length).toBe(getsBefore + 1)
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
+  })
+
+  it.each([['delete'], ['put'], ['patch']])('a 403 on %s re-GETs too', async method => {
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    const getsBefore = getMock.mock.calls.length
+
+    reportIfWriteRefused(httpError(403, method))
+    await flush()
+
+    expect(getMock.mock.calls.length).toBe(getsBefore + 1)
+  })
+
+  it('ignores a 403 on a READ, a non-403 write failure, and a store that is not running', async () => {
+    reportIfWriteRefused(httpError(403, 'post'))
+    expect(getMock).not.toHaveBeenCalled()
+
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    const getsBefore = getMock.mock.calls.length
+
+    reportIfWriteRefused(httpError(403, 'get'))
+    reportIfWriteRefused(httpError(500, 'post'))
+    reportIfWriteRefused(new Error('network'))
+    await flush()
+
+    expect(getMock.mock.calls.length).toBe(getsBefore)
+  })
+})
+
+function httpError(status: number, method: string) {
+  return Object.assign(new Error(String(status)), {
+    isAxiosError: true,
+    response: { status },
+    config: { method },
+  })
+}

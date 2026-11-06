@@ -27,7 +27,8 @@ public sealed class LifecycleProjectionTests
     [InlineData("staged", "full")]
     [InlineData("live", "full")]
     [InlineData("paused", "readOnly")]
-    [InlineData("completed", "readOnly")]
+    [InlineData("completed", "full")]
+    [InlineData("complete", "full")]
     [InlineData("archived", "readOnly")]
     public async Task ShellVariantProjection_MapsEachLifecycleStateOntoItsVariant(string status, string expected)
     {
@@ -58,6 +59,28 @@ public sealed class LifecycleProjectionTests
             "the variant must agree with AC7: a Staged world whose ambient content runs needs a live stream to show it");
         staged.ParticipantWritesAccepted.Should().BeTrue(
             "and a Staged world that accepts participant writes needs the composer the 'full' variant carries");
+    }
+
+    /// <summary>
+    /// <b>Tom's ruling (ended read-only review F-1) — pinned so nobody "tidies" Completed back to <c>readOnly</c>.</b>
+    /// After EndEx participants keep reading: <c>affordancesAvailable('readOnly')</c> would hide Notifications,
+    /// the Following / Pinned tabs and the explore stream after a cold load. Writes are NOT the variant's job in
+    /// <c>completed</c>: the lifecycle refuses them, and the overlay's <c>ended</c> flag hides the client controls.
+    /// </summary>
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("complete")]
+    public async Task ShellVariantProjection_Completed_IsFull_SoTheReadsSurviveEndEx(string status)
+    {
+        LifecycleShellVariantProjection.VariantFor(status).Should().Be(
+            ShellVariants.Full, "the ended review keeps every read affordance; only 'full' grants them");
+
+        ExerciseLifecycleStates.BehaviourOf(status).ParticipantWritesAccepted.Should().BeFalse(
+            "a 'full' completed shell is safe only because the lifecycle still refuses participant writes");
+
+        var overlay = await new LifecycleOverlayStateProjection(new NoSteeringOverlaySource())
+            .ProjectAsync(SourceIn(status));
+        overlay.Ended.Should().BeTrue("the client hides its write controls from the 'ended' flag (useCanWrite)");
     }
 
     /// <summary>Every emitted variant is inside the frozen client union — a coined value blanks the shell.</summary>

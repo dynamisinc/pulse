@@ -243,7 +243,8 @@ build/completed/archived exercise" is an *assumption*, not an invariant (nothing
 | `staged` | `full` | **decision 1.** `full` is the only variant `affordancesAvailable()` grants, and Staged's ambient world is meant to stream and be posted into (its own AC7 hooks say `AmbientWorldRuns` and `ParticipantWritesAccepted`) |
 | `live` | `full` | the interactive shell. Staged shares it; what Live adds is the clock and scenario content, neither of which is a shell-variant concern |
 | `paused` | `readOnly` | the holding page covers the shell; nothing beneath it may be authored |
-| `completed` / `archived` | `readOnly` | the run is over; a staff reader sees a frozen world |
+| `completed` | `full` | ended read-only review F-1 (Tom): participants keep reading after EndEx, including notifications and the Following / Pinned tabs, which `readOnly` hides. Writes stay refused by the lifecycle gate (403) and hidden client-side by the overlay's `ended` flag (`useCanWrite`) |
+| `archived` | `readOnly` | the run is closed out; a staff reader sees a frozen world |
 | anything unrecognized | `readOnly` | fail closed, the same direction the frontend's own default already uses |
 
 `kiosk` is never produced by the lifecycle — it is an unattended-display concern, not a lifecycle one.

@@ -72,6 +72,7 @@ import axios, {
 } from 'axios'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { api, endRefreshCooldown } from './api'
+import { onWriteRefused } from './writeRefusal'
 import {
   setTokens,
   rotateTokens,
@@ -1592,5 +1593,37 @@ describe('mock-mode no-op', () => {
 
     expect(response.data).toEqual({ canned: true })
     expect(getAccessToken()).toBeNull()
+  })
+})
+
+describe('response interceptor — refused writes are reported (ended review F-4)', () => {
+  it('reports a 403 on a write to the listeners, and still rejects with it', async () => {
+    const listener = vi.fn()
+    const remove = onWriteRefused(listener)
+    const adapter: AxiosAdapter = config => rejectStatus(config, 403)
+
+    try {
+      await expect(api.post('/posts', { text: 'x' }, { adapter })).rejects.toMatchObject({
+        response: { status: 403 },
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      remove()
+    }
+  })
+
+  it('does not report a 403 on a read, or a non-403 write failure', async () => {
+    const listener = vi.fn()
+    const remove = onWriteRefused(listener)
+
+    try {
+      await expect(api.get('/feed', { adapter: config => rejectStatus(config, 403) })).rejects.toBeTruthy()
+      await expect(
+        api.post('/posts', {}, { adapter: config => rejectStatus(config, 500) }),
+      ).rejects.toBeTruthy()
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      remove()
+    }
   })
 })

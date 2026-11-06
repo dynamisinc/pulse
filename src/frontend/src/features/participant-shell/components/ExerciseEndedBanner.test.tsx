@@ -7,6 +7,7 @@
  * are asserted structurally instead.)
  */
 import { act, render, screen } from '@testing-library/react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComplianceChrome, TOP_BANNER_HEIGHT } from './ComplianceChrome'
 import { EXERCISE_ENDED_BANNER_TEXT } from './ExerciseEndedBanner'
@@ -85,6 +86,20 @@ describe('ExerciseEndedBanner', () => {
     expect(region).toHaveTextContent(ENDED_TEXT)
     // The visible band is not itself a live region, so the text is not announced twice.
     expect(screen.getByTestId('pulse-exercise-ended-banner')).not.toHaveAttribute('role')
+  })
+
+  it('cold load already ended: the live region is born EMPTY and filled after mount', () => {
+    // The first render (before any effect runs) must not carry the text: a live region created
+    // with its content is not announced reliably. A static render runs no effects, so it is
+    // exactly that first render.
+    const firstRender = document.createElement('div')
+    firstRender.innerHTML = renderToStaticMarkup(<Chrome />)
+    expect(
+      firstRender.querySelector('[data-testid="pulse-exercise-ended-announcer"]'),
+    ).toBeEmptyDOMElement()
+
+    render(<Chrome />)
+    expect(screen.getByTestId('pulse-exercise-ended-announcer')).toHaveTextContent(ENDED_TEXT)
   })
 
   it('keeps the (empty) live region even with chrome off', () => {

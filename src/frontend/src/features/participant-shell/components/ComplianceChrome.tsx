@@ -76,7 +76,7 @@
  * styling only, never Cadence/COBRA.
  */
 
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useCssMediaQuery } from '@/core/hooks/useCssMediaQuery'
 import {
   SHELL_CHROME_BOTTOM_VAR,
@@ -251,6 +251,14 @@ export function ComplianceChrome() {
   // inset so everything pinned below shifts down.
   const ended = useExerciseEndedFlag()
   const [endedTop, setEndedTop] = useState(config.enabled ? TOP_BANNER_HEIGHT : NO_CHROME_HEIGHT)
+  // W-2 / cold load: the announcer's text is filled only AFTER the (empty) live region has been
+  // committed and painted. On a cold load into a completed exercise `ended` is already true on
+  // the first render (the scope seed), and a live region born with its text is not announced
+  // reliably. A passive effect runs after paint, so the region exists empty first.
+  const [announcerMounted, setAnnouncerMounted] = useState(false)
+  useEffect(() => {
+    setAnnouncerMounted(true)
+  }, [])
 
   // Publish the inset contract on :root so ShellLayout's content region
   // (a sibling subtree, not a descendant of this component) insets
@@ -325,7 +333,7 @@ export function ComplianceChrome() {
       style={visuallyHiddenStyle}
       data-testid="pulse-exercise-ended-announcer"
     >
-      {ended ? EXERCISE_ENDED_BANNER_TEXT : ''}
+      {announcerMounted && ended ? EXERCISE_ENDED_BANNER_TEXT : ''}
     </div>
   )
 

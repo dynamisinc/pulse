@@ -348,8 +348,13 @@ public static class LifecycleOverlayComposer
 ///   and scenario content add, and neither is a shell-variant concern.</item>
 ///   <item><c>paused</c> → <c>readOnly</c>: the holding page covers the shell; nothing beneath it may be
 ///   authored.</item>
-///   <item><c>completed</c> / <c>archived</c> → <c>readOnly</c>: the run is over; a staff reader sees a
-///   frozen world.</item>
+///   <item><c>completed</c> (and legacy <c>complete</c>) → <c>full</c> (<b>Tom's ruling, ended read-only
+///   review F-1</b> — DO NOT "tidy" this back to <c>readOnly</c>): after EndEx participants keep READING the
+///   world, and <c>affordancesAvailable('readOnly')</c> would hide Notifications, the Following / Pinned tabs
+///   and the explore stream on a cold load. The variant is not the write gate here: writes in
+///   <c>completed</c> are refused by <see cref="ExerciseLifecycleGatingMiddleware"/>, and the client hides
+///   its write controls from the overlay's additive <c>ended</c> flag (<c>useCanWrite</c>).</item>
+///   <item><c>archived</c> → <c>readOnly</c>: the run is closed out; a staff reader sees a frozen world.</item>
 ///   <item>anything unrecognized → <c>readOnly</c>, the fail-closed direction the frontend's own default
 ///   already uses.</item>
 /// </list>
@@ -374,6 +379,10 @@ public sealed class LifecycleShellVariantProjection : IShellVariantProjection
             // Staged shares Live's variant on purpose (decision 1): 'full' is the only variant
             // affordancesAvailable() grants, and Staged's ambient world is meant to stream and be posted into.
             ExerciseLifecycleStates.Staged or ExerciseLifecycleStates.Live => ShellVariants.Full,
+
+            // Completed is 'full' on purpose (ended read-only review F-1): the reads stay available after
+            // EndEx; the lifecycle gate refuses writes and the client's useCanWrite (the 'ended' flag) hides them.
+            ExerciseLifecycleStates.Completed => ShellVariants.Full,
 
             _ => ShellVariants.ReadOnly,
         };
