@@ -188,7 +188,9 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/21: +1 for PasswordResetService — a by-id read of the person's OWN organization's name
         // (token.OrganizationId, stamped by the server at issue) for the password policy's context words. Still a
         // by-known-id lookup, never an enumeration.
-        ["TenantRoot"] = 2,
+        // #602 L-5: +1 for BootstrapService.SlugTakenAsync — an EXISTENCE probe (AnyAsync, no row returned) by the unique
+        // slug, so a re-created default organization takes the backfill's -2/-3 suffix instead of tripping the index.
+        ["TenantRoot"] = 3,
     };
 
     [Fact]
