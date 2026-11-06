@@ -120,11 +120,7 @@
   font-size: 0.8125rem;
 }
 
-/* ---- centered-nameplate: centred over a double rule ------------------------------------ */
-.root[data-masthead='centered-nameplate'] .band {
-  border-bottom: max(3px, calc(var(--pulse-skin-rule-weight, 1px) * 3)) double
-    var(--pulse-skin-text, #1c1c1c);
-}
+/* ---- centered-nameplate: centred (its double rule is below) ----------------------------- */
 
 .root[data-masthead='centered-nameplate'] .well {
   text-align: center;
@@ -177,6 +173,7 @@
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: -0.01em;
+  max-width: calc(100% - 8px);
   transform: rotate(-1.5deg);
 }
 
@@ -192,5 +189,19 @@
 
 .root[data-masthead='tabloid-flag'] .band {
   border-bottom: max(2px, calc(var(--pulse-skin-rule-weight, 1px) * 2)) solid
+    var(--pulse-skin-text, #1c1c1c);
+}
+
+/* ---- skin refinements on any variant ------------------------------------------------------ */
+
+/* The skin's own band fill (ext.news.mastheadFill); text is the derived on-fill colour. */
+.root[data-fill='true'] .band {
+  background: var(--pulse-skin-ext-news-masthead-fill, var(--pulse-skin-accent, #1f4e79));
+  color: var(--news-masthead-on-fill, var(--pulse-skin-on-accent, #ffffff));
+}
+
+/* A double rule under the nameplate (always for centered-nameplate; ext.news.mastheadDoubleRule). */
+.root[data-double-rule='true'] .band {
+  border-bottom: max(3px, calc(var(--pulse-skin-rule-weight, 1px) * 3)) double
     var(--pulse-skin-text, #1c1c1c);
 }

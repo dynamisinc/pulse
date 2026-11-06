@@ -36,8 +36,32 @@ export function liveChipLabel(tokens: OutletSkinTokens): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+/**
+ * The skin's masthead band fill (`ext.news.mastheadFill`, already AA-checked
+ * by F13 at 3:1 on bg), or `null` to draw the variant's own band.
+ */
+export function mastheadFill(tokens: OutletSkinTokens): string | null {
+  const value = tokens.ext?.news?.mastheadFill
+  return typeof value === 'string' && HEX.test(value) ? value : null
+}
+
+/**
+ * Whether the nameplate sits over a double rule: always for the centred
+ * nameplate, and for any variant whose skin sets `ext.news.mastheadDoubleRule`.
+ */
+export function mastheadDoubleRule(
+  tokens: OutletSkinTokens,
+  variant: NewsMastheadVariant,
+): boolean {
+  return variant === 'centered-nameplate' || tokens.ext?.news?.mastheadDoubleRule === true
+}
+
 /** Which nav entry is the current page; `undefined` on an article page. */
-export type SectionNavCurrent = { readonly kind: 'home' } | { readonly kind: 'section'; readonly category: string }
+export type SectionNavCurrent =
+  | { readonly kind: 'home' }
+  | { readonly kind: 'section'; readonly category: string }
 
 /** `/news/{outlet}`: the outlet home (story 15). */
 export function newsHomePath(outletSlug: string): string {

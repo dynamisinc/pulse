@@ -11,6 +11,9 @@
  *   wire-strip          left-aligned strip, kicker-family tagline
  *   tabloid-flag        loud flag on the breaking fill
  *
+ * `ext.news.mastheadFill` (a band colour) and `ext.news.mastheadDoubleRule`
+ * refine any variant; text on the fill is black or white via F13's `onColor`.
+ *
  * A fifth outlet is a token file: nothing here names a skin key.
  *
  * No platform chrome (D3-P4): the only words drawn are the outlet's own (name,
@@ -29,21 +32,24 @@
  * World: participant. No COBRA, no default MUI look; FontAwesome only.
  */
 
+import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
-import { useSkin, type OutletDto, type OutletSkinTokens } from '@/features/channels'
+import { onColor, useSkin, type OutletDto } from '@/features/channels'
 import '../skins/newsExtension'
-import { liveChipLabel, mastheadVariant, newsHomePath, type SectionNavCurrent } from './mastheadModel'
+import {
+  liveChipLabel,
+  mastheadDoubleRule,
+  mastheadFill,
+  mastheadVariant,
+  newsHomePath,
+  type SectionNavCurrent,
+} from './mastheadModel'
 import { SectionNav } from './SectionNav'
 import styles from './OutletMasthead.module.css'
 
 export interface OutletMastheadProps {
   /** The outlet (F03 registry). Only display fields are read. */
   readonly outlet: Pick<OutletDto, 'slug' | 'name' | 'tagline' | 'logo' | 'categories'>
-  /**
-   * The finalized skin tokens to draw from; defaults to the enclosing scope's.
-   * Pass `useSkin().tokens` (or a test token file) to be explicit.
-   */
-  readonly skin?: OutletSkinTokens
   /** `'h1'` on the outlet home only; `'p'` (default) on article and section pages. */
   readonly nameAs?: 'h1' | 'p'
   /** The page's opt-in for the skin's live chip (shown only if the skin declares one). */
@@ -55,27 +61,48 @@ export interface OutletMastheadProps {
 /** The skin-driven outlet masthead with its section nav. */
 export function OutletMasthead({
   outlet,
-  skin,
   nameAs = 'p',
   showLiveChip = false,
   current,
 }: OutletMastheadProps) {
-  const scope = useSkin()
-  const tokens = skin ?? scope.tokens
+  // The skin is the enclosing scope's, never a prop: the variant and the CSS
+  // custom properties it draws with must come from the same tokens.
+  const { tokens } = useSkin()
   const variant = mastheadVariant(tokens)
   const chip = showLiveChip ? liveChipLabel(tokens) : null
+  const fill = mastheadFill(tokens)
+  const doubleRule = mastheadDoubleRule(tokens, variant)
+  // Text on the skin's band fill is black or white, whichever is AA (F13 `onColor`).
+  const fillStyle = fill === null
+    ? undefined
+    : ({ '--news-masthead-on-fill': onColor(fill) } as CSSProperties)
   const NameTag = nameAs
   const tagline = outlet.tagline?.trim() ?? ''
 
   return (
-    <section className={styles.root} data-masthead={variant} aria-label={outlet.name}>
+    <section
+      className={styles.root}
+      data-masthead={variant}
+      data-fill={fill === null ? 'false' : 'true'}
+      data-double-rule={doubleRule ? 'true' : 'false'}
+      style={fillStyle}
+      aria-label={outlet.name}
+    >
       <div className={styles.band}>
         <div className={styles.well}>
           <div className={styles.nameRow}>
             <NameTag className={styles.name}>
               <Link to={newsHomePath(outlet.slug)} className={styles.nameLink}>
                 {outlet.logo
-                  ? <img className={styles.logo} src={outlet.logo.url} alt={outlet.name} />
+                  ? (
+                    <img
+                      className={styles.logo}
+                      src={outlet.logo.url}
+                      alt={outlet.name}
+                      width={outlet.logo.width ?? undefined}
+                      height={outlet.logo.height ?? undefined}
+                    />
+                  )
                   : outlet.name}
               </Link>
             </NameTag>

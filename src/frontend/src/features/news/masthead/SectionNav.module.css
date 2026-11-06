@@ -6,14 +6,18 @@
  * text and link colours are the AA-floored pairs.
  */
 
+/* Full-bleed, so the bottom rule spans the band; the entries sit in the 1140px well. */
 .nav {
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  border-bottom: var(--pulse-skin-rule-weight, 1px) solid var(--pulse-skin-rule, #c9ced4);
+}
+
+.well {
   position: relative;
   max-width: 1140px;
   margin: 0 auto;
   padding: 0 16px;
   box-sizing: border-box;
-  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
-  border-bottom: var(--pulse-skin-rule-weight, 1px) solid var(--pulse-skin-rule, #c9ced4);
 }
 
 /* The "Sections" disclosure: mobile only. */
@@ -96,10 +100,17 @@
   outline-offset: 2px;
 }
 
-/* Coarse pointer: ≥44px targets. */
+/* Coarse pointer: ≥44px targets (the hook's flag, and the media query for first paint). */
 .nav[data-coarse='true'] .toggle,
 .nav[data-coarse='true'] .link {
   min-height: 44px;
+}
+
+@media (pointer: coarse) {
+  .toggle,
+  .link {
+    min-height: 44px;
+  }
 }
 
 /* ≥768px: the list is always shown as a row; the disclosure is gone. */
@@ -124,24 +135,21 @@
   }
 }
 
-/* ≥1024px: one row within the 1140px well. */
+/* ≥1024px: one row within the 1140px well. An outlet with more entries than fit scrolls
+   the ROW sideways (never the page, never a clipped label). */
 @media (min-width: 1024px) {
   .list,
   .list[data-open='false'] {
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .item {
-    flex: 0 1 auto;
+    flex: none;
   }
 
-  .link {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Inset so the row's overflow clip never hides the ring. */
+  /* Inset so the row's scroll clip never hides the ring. */
   .link:focus-visible {
     outline-offset: -3px;
   }

@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronDown } from '@fortawesome/free-solid-svg-icons'
 import type { OutletDto } from '@/features/channels'
@@ -51,6 +51,7 @@ function navEntries(
     href: newsHomePath(outlet.slug),
     isCurrent: current?.kind === 'home',
   }
+  const currentCategory = current?.kind === 'section' ? current.category.trim() : null
   const seen = new Set<string>()
   const sections: NavEntry[] = []
   for (const category of outlet.categories) {
@@ -61,21 +62,24 @@ function navEntries(
       key: `section:${label}`,
       label,
       href: newsSectionPath(outlet.slug, label),
-      isCurrent: current?.kind === 'section' && current.category === label,
+      isCurrent: currentCategory === label,
     })
   }
   return [home, ...sections]
 }
 
+/** Whether the always-shown row layout (≥768px, see the stylesheet) applies. */
+function isWideViewport(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches
+}
+
 /** The outlet's section nav with a mobile "Sections" disclosure. */
 export function SectionNav({ outlet, current }: SectionNavProps) {
-  // The disclosure is open FOR one current entry, so a route change (a new
-  // current entry) closes it without an effect.
-  const currentKey = current === undefined
-    ? ''
-    : current.kind === 'home' ? 'home' : `section:${current.category}`
-  const [openFor, setOpenFor] = useState<string | null>(null)
-  const open = openFor === currentKey
+  // The disclosure is open FOR one location, so ANY navigation (a nav link,
+  // an article link, the back button) closes it without an effect.
+  const location = useLocation()
+  const [openAt, setOpenAt] = useState<string | null>(null)
+  const open = openAt === location.key
   const listId = useId()
   const toggleRef = useRef<HTMLButtonElement>(null)
   const coarse = useCoarsePointer()
@@ -83,8 +87,9 @@ export function SectionNav({ outlet, current }: SectionNavProps) {
   const entries = navEntries(outlet, current)
 
   const close = useCallback((returnFocus: boolean) => {
-    setOpenFor(null)
-    if (returnFocus) toggleRef.current?.focus()
+    setOpenAt(null)
+    // From 768px the toggle is not displayed; focus stays where it is.
+    if (returnFocus && !isWideViewport()) toggleRef.current?.focus()
   }, [])
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -102,31 +107,36 @@ export function SectionNav({ outlet, current }: SectionNavProps) {
       data-reduced-motion={reducedMotion ? 'true' : 'false'}
       onKeyDown={onKeyDown}
     >
-      <button
-        ref={toggleRef}
-        type="button"
-        className={styles.toggle}
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpenFor(open ? null : currentKey)}
-      >
-        <span>Sections</span>
-        <FontAwesomeIcon icon={faChevronDown} className={styles.chevron} aria-hidden="true" />
-      </button>
-      <ul id={listId} className={styles.list} data-open={open ? 'true' : 'false'}>
-        {entries.map(entry => (
-          <li key={entry.key} className={styles.item}>
-            <Link
-              to={entry.href}
-              className={styles.link}
-              aria-current={entry.isCurrent ? 'page' : undefined}
-              onClick={() => close(false)}
-            >
-              {entry.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <div className={styles.well}>
+        <button
+          ref={toggleRef}
+          type="button"
+          className={styles.toggle}
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpenAt(open ? null : location.key)}
+        >
+          <span>Sections</span>
+          <FontAwesomeIcon icon={faChevronDown} className={styles.chevron} aria-hidden="true" />
+        </button>
+        {/* role="list": `list-style: none` drops list semantics in Safari/VoiceOver. */}
+        <ul id={listId} role="list" className={styles.list} data-open={open ? 'true' : 'false'}>
+          {entries.map(entry => (
+            <li key={entry.key} className={styles.item}>
+              <Link
+                to={entry.href}
+                className={styles.link}
+                aria-current={entry.isCurrent ? 'page' : undefined}
+                // Following the current entry stays on this page and hides the link
+                // with the list, so focus goes back to the toggle.
+                onClick={() => close(entry.isCurrent)}
+              >
+                {entry.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     </nav>
   )
 }

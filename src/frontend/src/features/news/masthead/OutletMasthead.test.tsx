@@ -5,7 +5,7 @@
  */
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { Link, MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NEUTRAL_SKIN_TOKENS,
@@ -129,6 +129,31 @@ describe('OutletMasthead: one component, skin-selected variants (NWS-002)', () =
     expect(screen.getByRole('region', { name: 'Harbor Gazette' })).toBeInTheDocument()
   })
 
+  it('draws the skin\'s band fill with an AA on-fill text colour', () => {
+    const { container, unmount } = renderMasthead({
+      tokens: variantTokens('tv-bar', { mastheadFill: '#0f2749' }),
+    })
+    const root = masthead(container)
+    expect(root.dataset.fill).toBe('true')
+    expect(root.style.getPropertyValue('--news-masthead-on-fill')).toBe('#ffffff')
+    unmount()
+    const plain = renderMasthead({ tokens: variantTokens('tv-bar') })
+    expect(masthead(plain.container).dataset.fill).toBe('false')
+  })
+
+  it('draws a double rule for the centred nameplate or when the skin asks', () => {
+    const cases: Array<[NewsMastheadVariant, Record<string, boolean>, string]> = [
+      ['centered-nameplate', {}, 'true'],
+      ['wire-strip', {}, 'false'],
+      ['wire-strip', { mastheadDoubleRule: true }, 'true'],
+    ]
+    for (const [variant, news, expected] of cases) {
+      const { container, unmount } = renderMasthead({ tokens: variantTokens(variant, news) })
+      expect(masthead(container).dataset.doubleRule, variant).toBe(expected)
+      unmount()
+    }
+  })
+
   it('falls back to the plain nameplate when the skin declares no masthead', () => {
     const { container } = renderMasthead({ tokens: NEUTRAL_SKIN_TOKENS })
     expect(masthead(container).dataset.masthead).toBe('centered-nameplate')
@@ -220,6 +245,16 @@ describe('SectionNav: category nav (NWS-003, NFR-001)', () => {
     expect(css).toMatch(/\.link:focus-visible\s*\{[^}]*outline:\s*3px solid/)
   })
 
+  it('matches the current section on the trimmed category', () => {
+    renderMasthead({ current: { kind: 'section', category: ' Local ' } })
+    expect(screen.getByRole('link', { name: 'Local' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('keeps list semantics on the unstyled list', () => {
+    renderMasthead()
+    expect(within(screen.getByRole('navigation')).getByRole('list')).toBeInTheDocument()
+  })
+
   it('skips blank and duplicate categories', () => {
     renderMasthead({ outlet: { ...OUTLET, categories: ['Local', ' ', 'Local', 'Sports'] } })
     const links = within(screen.getByRole('navigation')).getAllByRole('link')
@@ -268,6 +303,33 @@ describe('SectionNav: mobile-first disclosure', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('closes on ANY navigation, including one from outside the nav', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/news/metro-desk-9']}>
+        <SkinScope scopeId="outlet-metro-desk-9" tokens={variantTokens('tv-bar')}>
+          <OutletMasthead outlet={OUTLET} />
+          <Link to="/news/metro-desk-9/some-article">Elsewhere</Link>
+        </SkinScope>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: 'Sections' })
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(screen.getByRole('link', { name: 'Elsewhere' }))
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('returns focus to the toggle when the current entry is followed', async () => {
+    const user = userEvent.setup()
+    renderMasthead({ current: { kind: 'home' } })
+    const toggle = screen.getByRole('button', { name: 'Sections' })
+    await user.click(toggle)
+    await user.click(screen.getByRole('link', { name: 'Home' }))
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveFocus()
+  })
+
   it('flags coarse pointers for 44px targets and honours reduced motion', () => {
     ctl.coarse = true
     ctl.reducedMotion = true
@@ -295,8 +357,12 @@ describe('SectionNav: mobile-first disclosure', () => {
 describe('OutletMasthead: no platform chrome (D3-P4)', () => {
   const PLATFORM_WORDS = /exercise|preview|sponsored|\blive\b|breaking/i
 
-  it.each(VARIANTS)('%s draws no platform-authored words', variant => {
-    const { container } = renderMasthead({ tokens: variantTokens(variant), showLiveChip: true })
+  it.each(VARIANTS)('%s draws no platform words, only the skin chip word', variant => {
+    const { container } = renderMasthead({
+      tokens: variantTokens(variant, { liveChip: 'ON AIR' }),
+      showLiveChip: true,
+    })
+    expect(screen.getByText('ON AIR')).toBeInTheDocument()
     expect(masthead(container).textContent).not.toMatch(PLATFORM_WORDS)
   })
 
@@ -366,7 +432,7 @@ describe('OutletMasthead: two worlds', () => {
 })
 
 describe('OutletMasthead: accessibility (NFR-001)', () => {
-  it.each(VARIANTS)('%s has no serious or critical axe findings', async variant => {
+  it.each(VARIANTS)('%s: no serious/critical axe findings (contrast: F13 floor)', async variant => {
     const { container } = renderMasthead({
       tokens: variantTokens(variant, { liveChip: 'LIVE' }),
       showLiveChip: true,
