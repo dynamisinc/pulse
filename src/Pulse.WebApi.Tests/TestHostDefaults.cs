@@ -13,7 +13,8 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <see cref="StaffSignInTimingOptions"/>'s own non-zero defaults (750 ms org, 350 ms exercise-bound). Leaving them on
 /// would add up to 0.75 s to every staff login in a suite of thousands of tests. The floor itself is proven
 /// deterministically by <c>StaffSignInFloorTests</c> on an injected <see cref="TimeProvider"/>. The default-bound
-/// production values are pinned by <c>StaffSignInTimingOptionsTests</c>. Funnels a test builds directly take
+/// production values are pinned by
+/// <c>StaffSignInFloorTests.DefaultBoundOptions_YieldTheNonZeroProductionFloors</c>. Funnels a test builds directly take
 /// <c>TestSignInTiming.NoFloor</c>.
 /// </remarks>
 internal static class TestHostDefaults
