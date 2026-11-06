@@ -153,7 +153,7 @@ function SetPasswordBody() {
     <InputAdornment position="end">
       {/* COBRA has no icon button; staffShell uses raw MUI IconButton the same way. */}
       <IconButton
-        aria-label={reveal ? 'Hide passwords' : 'Show passwords'}
+        aria-label="Show passwords"
         aria-pressed={reveal}
         onClick={() => setReveal(value => !value)}
         edge="end"
