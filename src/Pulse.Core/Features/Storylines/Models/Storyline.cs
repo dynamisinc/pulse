@@ -22,6 +22,15 @@ public sealed class Storyline
     internal const double MinSentiment = -1.0;
     internal const double MaxSentiment = 1.0;
 
+    // Restore bounds for the persisted scenario-minute fields (engine-runtime story 07, S1). A real exercise clock reads
+    // 0…a few thousand minutes; the band only has to be wide enough never to reject a legal row and narrow enough that
+    // Tick's arithmetic over restored values cannot overflow. With every restored minute ≤ int.MaxValue / 4 (≈1,021
+    // years) and a clock reading in the same band, `minute - LastTickScenarioMinute` ≤ int.MaxValue / 4 + 1,440 and
+    // `MinutesSinceLastOfficialResponse += elapsed` ≤ int.MaxValue / 2 + 1,440 — both well inside int. The lower bound
+    // for LastTickScenarioMinute allows one day of pre-StartEx (negative) clock readings, which Tick stores as-is.
+    internal const int MaxRestorableScenarioMinute = int.MaxValue / 4;
+    internal const int MinRestorableLastTickScenarioMinute = -1440;
+
     // Fraction of intensity a matched official response sheds immediately (§6.2), before ongoing decay.
     private const double ResponseBendDownFactor = 0.25;
 
@@ -400,8 +409,135 @@ public sealed class Storyline
         LastEngineReactionScenarioMinute = Math.Max(LastEngineReactionScenarioMinute ?? scenarioMinute, scenarioMinute);
     }
 
+    /// <summary>
+    /// Copies the storyline's mutable runtime state into an immutable <see cref="StorylineRuntimeSnapshot"/> for the
+    /// write-through store (engine-runtime story 07, inventory row 9; written at the end of a tick that changed it, Q6).
+    /// A pure read: no event, no mutation.
+    /// </summary>
+    /// <returns>The runtime snapshot.</returns>
+    public StorylineRuntimeSnapshot ToSnapshot() =>
+        new(
+            ExerciseId,
+            Id,
+            Phase,
+            Intensity,
+            Sentiment,
+            TargetIntensity,
+            MinutesSinceLastOfficialResponse,
+            PhaseEnteredScenarioMinute,
+            LastTickScenarioMinute,
+            LastEngineReactionScenarioMinute,
+            CurveName);
+
+    /// <summary>
+    /// Applies a persisted runtime <paramref name="snapshot"/> onto this storyline at startup (engine-runtime story 07,
+    /// inventory row 9) — the storyline having been rebuilt with <see cref="Create"/> and the persisted id. Restores
+    /// phase, intensity, sentiment, target, silence clock, tick baselines, last engine reaction and curve exactly, so
+    /// <c>ToSnapshot()</c> afterwards equals <paramref name="snapshot"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Validated before anything is applied</b> (all-or-nothing): a throw leaves the storyline unchanged. The
+    /// rehydrator catches it, logs an Error naming the exercise, and fails closed (Q7). The phase is restored directly
+    /// rather than replayed through <see cref="Transition"/>: the persisted phase was reached legally before the
+    /// restart, and replaying would emit <c>storyline.state_changed</c> events for transitions that did not happen now.</para>
+    /// <para><b>No event.</b> A restore is not a storyline transition or a steering action; nothing is returned to log.</para>
+    /// </remarks>
+    /// <param name="snapshot">The persisted runtime state for THIS storyline.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="ArgumentException">The snapshot belongs to another storyline or exercise, has an undefined phase, or a blank curve name.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A value is outside its canonical range (intensity/target 0–100, sentiment −1…+1,
+    /// a minute field outside its restore band — silence / phase-entered / reaction 0…<c>int.MaxValue / 4</c>, last tick
+    /// −1,440…<c>int.MaxValue / 4</c>). A last engine reaction later than <c>Max(0, LastTickScenarioMinute)</c> is clamped
+    /// to it, as <see cref="Tick"/> does, not rejected.</exception>
+    internal void Restore(StorylineRuntimeSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.ExerciseId != ExerciseId || snapshot.StorylineId != Id)
+        {
+            throw new ArgumentException(
+                "A storyline snapshot can only be restored onto the same storyline of the same exercise (COR-001).",
+                nameof(snapshot));
+        }
+
+        if (!Enum.IsDefined(snapshot.Phase))
+        {
+            throw new ArgumentException($"'{(int)snapshot.Phase}' is not a defined storyline phase.", nameof(snapshot));
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.CurveName))
+        {
+            throw new ArgumentException("A storyline snapshot needs an escalation curve name (ADP-010).", nameof(snapshot));
+        }
+
+        ThrowIfOutOfRange(snapshot.Intensity, MinIntensity, MaxIntensity, nameof(snapshot.Intensity));
+        if (snapshot.TargetIntensity is int target)
+        {
+            ThrowIfOutOfRange(target, MinIntensity, MaxIntensity, nameof(snapshot.TargetIntensity));
+        }
+
+        if (double.IsNaN(snapshot.Sentiment) || snapshot.Sentiment < MinSentiment || snapshot.Sentiment > MaxSentiment)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(snapshot), snapshot.Sentiment, $"Sentiment must be within {MinSentiment}…{MaxSentiment}.");
+        }
+
+        ThrowIfOutOfRange(
+            snapshot.MinutesSinceLastOfficialResponse,
+            0,
+            MaxRestorableScenarioMinute,
+            nameof(snapshot.MinutesSinceLastOfficialResponse));
+        ThrowIfOutOfRange(
+            snapshot.PhaseEnteredScenarioMinute, 0, MaxRestorableScenarioMinute, nameof(snapshot.PhaseEnteredScenarioMinute));
+
+        // LastTickScenarioMinute may be negative (Tick stores a pre-StartEx clock reading) but is bounded so Tick's
+        // `minute - LastTickScenarioMinute` cannot overflow (an int.MinValue row would otherwise wrap).
+        ThrowIfOutOfRange(
+            snapshot.LastTickScenarioMinute,
+            MinRestorableLastTickScenarioMinute,
+            MaxRestorableScenarioMinute,
+            nameof(snapshot.LastTickScenarioMinute));
+
+        if (snapshot.LastEngineReactionScenarioMinute is int reaction)
+        {
+            ThrowIfOutOfRange(reaction, 0, MaxRestorableScenarioMinute, nameof(snapshot.LastEngineReactionScenarioMinute));
+        }
+
+        // A reaction marker ahead of LastTick is CLAMPED back to Max(0, LastTick), exactly as Tick clamps it after a
+        // rewind — not rejected. A healthy exercise can leave one: the driver records the reaction at the minute it read
+        // BEFORE Tick, so a runtime reset racing the tick ends it with reaction > LastTick until the next Tick self-heals
+        // it. Failing a restore on that transient state would fail a healthy exercise closed. A marker further ahead
+        // would otherwise suppress the reaction-cadence gate for minutes that never happened.
+        var restoredReaction = snapshot.LastEngineReactionScenarioMinute is int marker
+            ? Math.Min(marker, Math.Max(0, snapshot.LastTickScenarioMinute))
+            : (int?)null;
+
+        // PhaseEnteredScenarioMinute is deliberately NOT ordered against LastTickScenarioMinute: a clock restart (DF-28
+        // runtime reset, IExerciseClock.Start) followed by a Tick legally leaves PhaseEntered > LastTick (Tick rewinds
+        // LastTick without a transition), as does a pre-StartEx negative tick after Seed(0). PhaseEntered only feeds the
+        // clamped MinutesInPhase display, so a range bound is all it needs. Whether LastTick is ahead of / far behind the
+        // CURRENT clock needs the clock, which Restore does not have: that clamp belongs to the S4 rehydrator.
+        Phase = snapshot.Phase;
+        Intensity = snapshot.Intensity;
+        Sentiment = snapshot.Sentiment;
+        TargetIntensity = snapshot.TargetIntensity;
+        MinutesSinceLastOfficialResponse = snapshot.MinutesSinceLastOfficialResponse;
+        PhaseEnteredScenarioMinute = snapshot.PhaseEnteredScenarioMinute;
+        LastTickScenarioMinute = snapshot.LastTickScenarioMinute;
+        LastEngineReactionScenarioMinute = restoredReaction;
+        CurveName = snapshot.CurveName.Trim();
+    }
+
     /// <summary>Scenario minutes the storyline has spent in its current phase, given the current scenario minute.</summary>
     public int MinutesInPhase(int currentScenarioMinute) => Math.Max(0, currentScenarioMinute - PhaseEnteredScenarioMinute);
+
+    private static void ThrowIfOutOfRange(int value, int min, int max, string field)
+    {
+        if (value < min || value > max)
+        {
+            throw new ArgumentOutOfRangeException(field, value, $"{field} must be within {min}…{max}.");
+        }
+    }
 
     private static string FormatTarget(int? target) => target?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
 

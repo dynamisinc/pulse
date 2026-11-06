@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.BackgroundWork;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 
@@ -59,7 +60,7 @@ public static class InjectEndpoints
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IBurstJitterSource, CryptoBurstJitterSource>();
-        services.TryAddSingleton<InjectRunnerSignal>();
+        services.AddWakeSignal<InjectRunnerSignal>(wakeOnClockChange: false);
         services.TryAddSingleton(new InjectBurstRunnerOptions());
         services.TryAddScoped<IInjectPostPublisher, FunnelInjectPostPublisher>();
         services.TryAddScoped<InjectQueueService>();
