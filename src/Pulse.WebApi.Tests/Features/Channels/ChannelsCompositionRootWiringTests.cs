@@ -116,11 +116,12 @@ public sealed class ChannelsCompositionRootWiringTests
     public void AKindNamingAnUnregisteredProfile_FailsHostStart()
     {
         using var factory = new WiringProbeFactory(services =>
-            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("article", "news", "article-rich")));
+            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("probe_kind", "news", "no-such-profile")));
 
         var start = () => factory.Services;
 
-        start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
+        // news 01 now ships `article` + `article-rich`, so the probe uses a kind and profile no channel registers.
+        start.Should().Throw<InvalidOperationException>().WithMessage("*no-such-profile*not registered*");
     }
 
     [Theory]
