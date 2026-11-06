@@ -181,7 +181,7 @@ public sealed partial class PasswordResetService
 
             person.PasswordHash = Hasher.HashPassword(person, newPassword);
             person.PasswordChangedAt = now;
-            StaffSignInLockout.RecordSuccess(person);
+            await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
 
             // The credential-change rule (§3.3): every outstanding token of BOTH purposes and every unconsumed org choice
             // verified against the old password are void from this commit on.
