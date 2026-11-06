@@ -12,6 +12,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// exercise-isolation/11 AC3 (Tier-2, COR-010) — the CUSTOMER-tenant bound on the two staff SERVICES, proved
@@ -52,7 +53,8 @@ public sealed class StaffOrganizationBoundaryTests
             {
                 SessionId = Guid.NewGuid(),
                 StaffUserId = world.StaffUserId,
-            }));
+            }),
+            scenarioNow: TestScenarioNow.Over(context));
 
         var assignments = await service.GetAssignmentsAsync();
 
@@ -76,7 +78,8 @@ public sealed class StaffOrganizationBoundaryTests
             {
                 SessionId = sessionId,
                 StaffUserId = world.StaffUserId,
-            }));
+            }),
+            scenarioNow: TestScenarioNow.Over(context));
 
         var refused = await service.SetActiveExerciseAsync(world.OtherCustomerExercise.Id);
 
@@ -118,7 +121,8 @@ public sealed class StaffOrganizationBoundaryTests
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
                 TestSignInTiming.NoFloor,
-                issuer);
+                issuer,
+                TestScenarioNow.Over(context));
 
             var refused = await service.LoginAsync(new StaffLoginRequest
             {
@@ -145,7 +149,8 @@ public sealed class StaffOrganizationBoundaryTests
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
                 TestSignInTiming.NoFloor,
-                issuer);
+                issuer,
+                TestScenarioNow.Over(context));
 
             var allowed = await service.LoginAsync(new StaffLoginRequest
             {
@@ -176,7 +181,8 @@ public sealed class StaffOrganizationBoundaryTests
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
                 TestSignInTiming.NoFloor,
-                new RecordingSessionIssuer());
+                new RecordingSessionIssuer(),
+                TestScenarioNow.Over(context));
 
             await service.LoginAsync(new StaffLoginRequest
             {
@@ -211,7 +217,8 @@ public sealed class StaffOrganizationBoundaryTests
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
                 TestSignInTiming.NoFloor,
-                new RecordingSessionIssuer());
+                new RecordingSessionIssuer(),
+                TestScenarioNow.Over(context));
 
             await service.LoginAsync(new StaffLoginRequest
             {

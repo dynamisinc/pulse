@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
 
@@ -104,26 +105,30 @@ public sealed class ExerciseLifecycleServiceTests
         telemetry.Target.EntityId.Should().Be(exerciseId.ToString());
         telemetry.TimeZone.Should().Be("UTC");
         telemetry.WallClockTime.Should().BeOnOrAfter(before, "wall clock is the SERVER clock, never client input");
-        telemetry.ScenarioTime.Should().Be(telemetry.WallClockTime, "no scenario instant is persisted on this row yet");
+        telemetry.ScenarioTime.Should().Be(telemetry.WallClockTime, "no clock runs and the exercise has no posts");
 
         using var payload = JsonDocument.Parse(telemetry.Payload!);
         payload.RootElement.GetProperty("from").GetString().Should().Be("live");
         payload.RootElement.GetProperty("to").GetString().Should().Be("paused");
     }
 
-    /// <summary>The persisted scenario instant is round-tripped, never re-derived from the server clock.</summary>
+    /// <summary>
+    /// engine-runtime/08 (CLK-2): with no running clock the event stamps the exercise's scenario now, its latest post,
+    /// never the server clock and never another exercise's later post.
+    /// </summary>
     [RequiresDockerFact]
-    public async Task TransitionAsync_StampsThePersistedScenarioInstant_RatherThanTheServerClock()
+    public async Task TransitionAsync_StampsTheExercisesScenarioNow_ItsLatestPost_RatherThanTheServerClock()
     {
         var exerciseId = Guid.NewGuid();
         var scenarioNow = new DateTimeOffset(2033, 3, 1, 9, 30, 0, TimeSpan.Zero);
 
         await using (var seed = _fixture.CreateContext())
         {
-            var exercise = ExerciseLifecycleTestData.ExerciseInState(exerciseId, "live");
-            exercise.CurrentScenarioTime = scenarioNow;
-            seed.Exercises.Add(exercise);
+            seed.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, "live"));
             await seed.SaveChangesAsync();
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, scenarioNow.AddHours(-1));
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, scenarioNow);
+            await TestScenarioNow.SeedWorldTimeAsync(seed, Guid.NewGuid(), scenarioNow.AddYears(1));
         }
 
         await TransitionAsync(exerciseId, "completed");
@@ -134,7 +139,7 @@ public sealed class ExerciseLifecycleServiceTests
             .AsNoTracking()
             .SingleAsync(e => e.ExerciseId == exerciseId);
 
-        telemetry.ScenarioTime.Should().Be(scenarioNow, "scenario time is the exercise's persisted instant (COR-053)");
+        telemetry.ScenarioTime.Should().Be(scenarioNow, "scenario time is where the exercise's world is (COR-053, CLK-2)");
     }
 
     /// <summary>A legacy row transitions as its canonical equivalent and HEALS to the COR-032 literal.</summary>
@@ -413,9 +418,10 @@ public sealed class ExerciseLifecycleServiceTests
             context,
             exerciseContext,
             staff,
+            TestScenarioNow.Over(context),
             new NoOpExerciseLifecycleTransitionObserver(),
             NullLogger<ExerciseLifecycleService>.Instance,
-            new ExerciseReadinessService(context, exerciseContext));
+            new ExerciseReadinessService(context, exerciseContext, TestScenarioNow.Over(context)));
 
     private async Task<ExerciseLifecycleResult> TransitionAsync(
         Guid exerciseId,

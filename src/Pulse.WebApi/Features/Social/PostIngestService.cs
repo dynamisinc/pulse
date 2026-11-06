@@ -93,6 +93,18 @@ public sealed partial class PostIngestService
     /// <summary>The most images one post may carry.</summary>
     private const int MaxImagesPerPost = 4;
 
+    /// <summary>
+    /// How far, in years either side of the server's now, a client <c>scenarioTime</c> may sit (review CR-001). Wide
+    /// enough for any exercise world in use (worlds are set in the near past or near future — tests and seeds use
+    /// 2026–2033), yet it keeps every stored instant ~7,000 years inside <see cref="DateTimeOffset"/>'s range, so no post
+    /// can later push a clock started from it (or any <c>start + elapsed</c> arithmetic) into overflow.
+    /// </summary>
+    public const int ScenarioTimeWindowYears = 100;
+
+    /// <summary>The 400 for a <c>scenarioTime</c> outside <see cref="ScenarioTimeWindowYears"/> of the server's now.</summary>
+    public static readonly string ScenarioTimeOutOfRangeMessage =
+        $"scenarioTime must be within {ScenarioTimeWindowYears} years of the current date.";
+
     /// <summary>The largest seeded engagement baseline a staff write may set, per count.</summary>
     private const int MaxEngagementBaseline = 1_000_000;
 
@@ -287,6 +299,10 @@ public sealed partial class PostIngestService
             return PostIngestResult.Invalid("injectId is required when origin is 'inject'.");
         }
 
+        // One server clock read shared by the scenario-time window check, the persisted ingest instant and the
+        // telemetry timestamps.
+        var now = DateTimeOffset.UtcNow;
+
         if (!DateTimeOffset.TryParse(
                 request.ScenarioTime,
                 CultureInfo.InvariantCulture,
@@ -294,6 +310,17 @@ public sealed partial class PostIngestService
                 out var clientScenarioTime))
         {
             return PostIngestResult.Invalid("scenarioTime must be an ISO-8601 instant.");
+        }
+
+        // Review CR-001: a parseable instant is not a sane one. With no clock running, a participant's post keeps the
+        // client value (ResolveScenarioTime), so an instant near DateTimeOffset.MaxValue would be stored, and anything
+        // that later does start + elapsed from it would overflow. Refused as a 400 like the parse failure above, for
+        // EVERY origin and clock state: the value is required and validated for every caller, and a staff or engine
+        // post's time still feeds the world's scenario now (IScenarioNow). The window is checked against the server's
+        // wall clock (the one bound a client cannot move).
+        if (!IsWithinScenarioTimeWindow(clientScenarioTime, now))
+        {
+            return PostIngestResult.Invalid(ScenarioTimeOutOfRangeMessage);
         }
 
         // fix/noise-new-posts-clock: ONE clock, the server's. The client value is still required and validated above
@@ -349,8 +376,6 @@ public sealed partial class PostIngestService
         var telemetryActingHumanId = string.IsNullOrEmpty(actingHumanId) ? null : actingHumanId;
         var injectId = string.IsNullOrEmpty(request.InjectId) ? null : request.InjectId;
 
-        // One server clock read shared by the persisted ingest instant and the telemetry timestamps.
-        var now = DateTimeOffset.UtcNow;
 
         // 4. Build the post. ExerciseId is STAMPED from the resolved scope (never the client body); CreatedWallClock
         //    is the SERVER clock (never client); the three provenance columns come from the server-derived
@@ -468,6 +493,18 @@ public sealed partial class PostIngestService
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
     }
+
+    /// <summary>
+    /// Whether <paramref name="scenarioTime"/> lies within <see cref="ScenarioTimeWindowYears"/> years either side of
+    /// <paramref name="serverNow"/> (review CR-001). Overflow-safe for any <see cref="DateTimeOffset"/>: the bounds are
+    /// derived from the server's now, never from the client value.
+    /// </summary>
+    /// <param name="scenarioTime">The parsed client instant.</param>
+    /// <param name="serverNow">The server's wall-clock now.</param>
+    /// <returns><c>true</c> when the instant is inside the window.</returns>
+    internal static bool IsWithinScenarioTimeWindow(DateTimeOffset scenarioTime, DateTimeOffset serverNow) =>
+        scenarioTime >= serverNow.AddYears(-ScenarioTimeWindowYears)
+        && scenarioTime <= serverNow.AddYears(ScenarioTimeWindowYears);
 
     /// <summary>
     /// The scenario instant a post is stamped with (fix/noise-new-posts-clock): the exercise clock's

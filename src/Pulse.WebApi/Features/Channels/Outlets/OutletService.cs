@@ -78,7 +78,7 @@ public sealed partial class OutletService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSession;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly ExerciseFactsReader _exerciseFacts;
     private readonly IChannelEnablement _channelGate;
     private readonly ISkinOverridesValidator _skinValidator;
@@ -91,8 +91,10 @@ public sealed partial class OutletService
     /// <param name="dbContext">The exercise-scoped persistence context.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001).</param>
     /// <param name="staffSession">The server-side staff session: the only source of the acting human (COR-018).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-053).</param>
-    /// <param name="exerciseFacts">The one exercise-row read (time zone, stored scenario instant).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post, else now; COR-053).
+    /// </param>
+    /// <param name="exerciseFacts">The one exercise-row read (time zone).</param>
     /// <param name="channelGate">The channel enablement gate (story 08): the resolved exercise's enabled channels.</param>
     /// <param name="skinValidator">The FC-3b skin-overrides validator.</param>
     /// <param name="defaults">The "add default outlets" catalog.</param>
@@ -103,7 +105,7 @@ public sealed partial class OutletService
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSession,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         ExerciseFactsReader exerciseFacts,
         IChannelEnablement channelGate,
         ISkinOverridesValidator skinValidator,
@@ -115,7 +117,7 @@ public sealed partial class OutletService
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSession);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(exerciseFacts);
         ArgumentNullException.ThrowIfNull(channelGate);
         ArgumentNullException.ThrowIfNull(skinValidator);
@@ -127,7 +129,7 @@ public sealed partial class OutletService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _staffSession = staffSession;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _exerciseFacts = exerciseFacts;
         _channelGate = channelGate;
         _skinValidator = skinValidator;
@@ -980,14 +982,14 @@ public sealed partial class OutletService
     }
 
     /// <summary>
-    /// The one clock read for an operation: the server wall clock, plus scenario time from the native exercise clock,
-    /// falling back to the persisted scenario instant and finally the wall clock (the InjectQueueService pattern).
+    /// The one clock read for an operation: the server wall clock, plus the exercise's scenario now from
+    /// <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2: the running clock, else the latest post, else the wall clock).
     /// </summary>
     private async Task<OutletEventTime> TimeForAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
-        var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        var scenario = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var timeZone = facts?.TimeZone is { } zone && !string.IsNullOrWhiteSpace(zone) ? zone : FallbackTimeZone;
         return new OutletEventTime(now, scenario, timeZone);
     }

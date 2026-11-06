@@ -74,7 +74,7 @@ public sealed class LinkCardService
     private readonly JoinUrlBuilder _joinUrlBuilder;
     private readonly QrSvgRenderer _qrRenderer;
     private readonly IOptions<EasyLoginOptions> _options;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates the service over its collaborators.</summary>
@@ -87,7 +87,7 @@ public sealed class LinkCardService
     /// <param name="joinUrlBuilder">Tells whether a join base is configured at all.</param>
     /// <param name="qrRenderer">Renders the QR data URI.</param>
     /// <param name="options">The easy-login options (<see cref="EasyLoginOptions.MaxCardsPerRequest"/>).</param>
-    /// <param name="exerciseClock">The native exercise clock, for the event's scenario time.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="timeProvider">The server wall clock (read once per request).</param>
     public LinkCardService(
         PulseDbContext dbContext,
@@ -99,7 +99,7 @@ public sealed class LinkCardService
         JoinUrlBuilder joinUrlBuilder,
         QrSvgRenderer qrRenderer,
         IOptions<EasyLoginOptions> options,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -111,7 +111,7 @@ public sealed class LinkCardService
         ArgumentNullException.ThrowIfNull(joinUrlBuilder);
         ArgumentNullException.ThrowIfNull(qrRenderer);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContext = dbContext;
@@ -123,7 +123,7 @@ public sealed class LinkCardService
         _joinUrlBuilder = joinUrlBuilder;
         _qrRenderer = qrRenderer;
         _options = options;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
     }
 
@@ -258,7 +258,7 @@ public sealed class LinkCardService
         }
 
         // XC-004: one event per request, same unit of work, one wall-clock read. Count only (no URL, token or name).
-        var time = EasyLoginEventTime.For(exerciseId, facts, _exerciseClock, _timeProvider.GetUtcNow());
+        var time = await EasyLoginEventTime.ForAsync(exerciseId, facts, _scenarioNow, _timeProvider.GetUtcNow(), cancellationToken);
         _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.RosterCardsGenerated(
             exerciseId,
             new EasyLoginStaffActor(staff.StaffUserId, role),

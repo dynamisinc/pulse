@@ -6,7 +6,6 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
-using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -47,9 +46,8 @@ public sealed class StaffContentService
     private readonly IContentPublishService _funnel;
     private readonly IContentFeaturing _featuring;
     private readonly ContentProjector _projector;
-    private readonly ExerciseFactsReader _exerciseFacts;
     private readonly TimeProvider _time;
-    private readonly IExerciseClock? _clock;
+    private readonly IScenarioNow? _scenarioNow;
     private readonly IReadOnlyList<IContentKindDescriptor> _descriptors;
 
     /// <summary>Creates the service.</summary>
@@ -59,9 +57,11 @@ public sealed class StaffContentService
     /// <param name="funnel">The publish funnel.</param>
     /// <param name="featuring">The funnel's featured-slot half.</param>
     /// <param name="projector">The funnel's staff projection.</param>
-    /// <param name="exerciseFacts">The exercise-row read (the stored scenario instant).</param>
     /// <param name="time">The wall clock.</param>
-    /// <param name="clock">The native exercise clock (COR-053).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post, else now; COR-053).
+    /// Absent = the wall clock.
+    /// </param>
     /// <param name="descriptors">The registered content kinds (the preview's participant payload projection).</param>
     public StaffContentService(
         PulseDbContext db,
@@ -70,9 +70,8 @@ public sealed class StaffContentService
         IContentPublishService funnel,
         IContentFeaturing featuring,
         ContentProjector projector,
-        ExerciseFactsReader exerciseFacts,
         TimeProvider time,
-        IExerciseClock? clock = null,
+        IScenarioNow? scenarioNow = null,
         IEnumerable<IContentKindDescriptor>? descriptors = null)
     {
         ArgumentNullException.ThrowIfNull(db);
@@ -81,7 +80,6 @@ public sealed class StaffContentService
         ArgumentNullException.ThrowIfNull(funnel);
         ArgumentNullException.ThrowIfNull(featuring);
         ArgumentNullException.ThrowIfNull(projector);
-        ArgumentNullException.ThrowIfNull(exerciseFacts);
         ArgumentNullException.ThrowIfNull(time);
 
         _db = db;
@@ -90,9 +88,8 @@ public sealed class StaffContentService
         _funnel = funnel;
         _featuring = featuring;
         _projector = projector;
-        _exerciseFacts = exerciseFacts;
         _time = time;
-        _clock = clock;
+        _scenarioNow = scenarioNow;
         _descriptors = descriptors?.ToList() ?? [];
     }
 
@@ -432,11 +429,15 @@ public sealed class StaffContentService
                 new ContentCaller { Origin = ChannelVocabulary.OriginController, ActingHumanId = staff.StaffUserId.ToString() });
     }
 
-    /// <summary>The funnel's clock read: <c>IExerciseClock ?? exercise.CurrentScenarioTime ?? now</c> (COR-053).</summary>
-    private async Task<DateTimeOffset> ScenarioNowAsync(Guid exerciseId, CancellationToken cancellationToken) =>
-        _clock?.CurrentScenarioTime(exerciseId)
-        ?? (await _exerciseFacts.GetAsync(exerciseId, cancellationToken))?.StoredScenarioTime
-        ?? _time.GetUtcNow();
+    /// <summary>
+    /// The funnel's clock read: the exercise's scenario now (<see cref="IScenarioNow"/>: the running clock, else the
+    /// latest post, else the wall clock; engine-runtime/08, COR-053). The wall clock when no resolver is composed.
+    /// </summary>
+    private async Task<DateTimeOffset> ScenarioNowAsync(Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var now = _time.GetUtcNow();
+        return _scenarioNow is null ? now : await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
+    }
 
     private sealed record StaffCaller(Guid ExerciseId, ContentCaller Content);
 }

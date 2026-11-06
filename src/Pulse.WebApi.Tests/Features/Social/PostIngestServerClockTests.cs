@@ -190,6 +190,71 @@ public sealed class PostIngestServerClockTests
         result.Outcome.Should().Be(PostIngestOutcome.Invalid, "scenarioTime stays required and validated (compatibility)");
     }
 
+    [Theory]
+    [InlineData("participant", false)]
+    [InlineData("participant", true)]
+    [InlineData("controller-as-persona", false)]
+    [InlineData("noise", false)]
+    public async Task AnOverflowingScenarioTime_IsRefusedAt400_AndNothingIsWritten(string origin, bool clockStarted)
+    {
+        // Review CR-001: 9999-12-31 parses, but stored on a cold clock it would become the world's time; refused like a
+        // parse failure, for every origin and clock state.
+        var world = World.Create();
+        if (clockStarted)
+        {
+            world.Clock.Start(world.ExerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        }
+
+        var result = await world.Service.IngestAsync(
+            new CreatePostRequest { Text = "hello", ScenarioTime = "9999-12-31T23:59:59Z", TimeZone = "UTC" },
+            World.Attribution(origin));
+
+        result.Outcome.Should().Be(PostIngestOutcome.Invalid);
+        result.ValidationError.Should().Be(PostIngestService.ScenarioTimeOutOfRangeMessage);
+        (await world.Db.Posts.IgnoreQueryFilters().CountAsync()).Should().Be(0, "a refusal writes nothing");
+        (await world.Db.TelemetryEvents.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        world.Broadcaster.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheScenarioTimeWindow_IsAHundredYearsEitherSideOfTheServersNow_AndOverflowSafe()
+    {
+        var serverNow = new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+
+        PostIngestService.IsWithinScenarioTimeWindow(serverNow.AddYears(100), serverNow).Should().BeTrue();
+        PostIngestService.IsWithinScenarioTimeWindow(serverNow.AddYears(-100), serverNow).Should().BeTrue();
+        PostIngestService.IsWithinScenarioTimeWindow(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-4)), serverNow)
+            .Should().BeTrue("a near-future exercise world is well inside the window");
+        PostIngestService.IsWithinScenarioTimeWindow(serverNow.AddYears(100).AddTicks(1), serverNow).Should().BeFalse();
+        PostIngestService.IsWithinScenarioTimeWindow(serverNow.AddYears(-100).AddTicks(-1), serverNow).Should().BeFalse();
+        PostIngestService.IsWithinScenarioTimeWindow(DateTimeOffset.MaxValue, serverNow).Should().BeFalse();
+        PostIngestService.IsWithinScenarioTimeWindow(DateTimeOffset.MinValue, serverNow).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OnAColdClock_AParticipantPostDatedLaterThanTheWorld_NeverMovesTheScenarioNow_OrTheClockStartedFromIt()
+    {
+        // Review CR-001: the frontend mock clock sends wall new Date(), so a familiarisation post in a past-dated world
+        // carries a LATER instant than the world. It keeps its own stamp (no clock runs), but the seed / cold-freeze
+        // start reads IScenarioNow — and that must still be where the staff-authored world is.
+        var world = World.Create();
+        var worldTime = DateTimeOffset.Parse(ClientScenarioTime, System.Globalization.CultureInfo.InvariantCulture);
+        (await world.IngestAsync("controller-as-persona", backdate: null)).CreatedScenarioTime.Should().Be(worldTime);
+
+        var participantLater = await world.Service.IngestAsync(
+            new CreatePostRequest { Text = "first!", ScenarioTime = "2027-03-01T09:00:00Z", TimeZone = "UTC" },
+            World.Attribution("participant"));
+        participantLater.Outcome.Should().Be(PostIngestOutcome.Created);
+
+        var resolver = new ScenarioNowResolver(world.Db, world.Clock, world.Time);
+        var scenarioNow = await resolver.GetAsync(world.ExerciseId, WallStart);
+        scenarioNow.Should().Be(worldTime, "the participant's later client instant is not where the world is");
+
+        // What the engine content seed and a cold-clock Freeze do with it (CLK-1): start the clock there.
+        world.Clock.Start(world.ExerciseId, scenarioNow, TimeZoneInfo.Utc);
+        world.Clock.CurrentScenarioTime(world.ExerciseId).Should().Be(worldTime);
+    }
+
     /// <summary>One exercise, an in-memory database, a hand-advanced clock and the ingest funnel over them.</summary>
     internal sealed class World
     {

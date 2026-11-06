@@ -90,6 +90,7 @@ internal sealed class FunnelHarness : IDisposable
         services.AddLogging();
         services.AddSingleton<TimeProvider>(time);
         services.AddSingleton<IExerciseClock>(clock);
+        services.AddScoped<IScenarioNow, ScenarioNowResolver>();
         services.AddScoped<ExerciseContext>();
         services.AddScoped<IExerciseContext>(provider => provider.GetRequiredService<ExerciseContext>());
         services.AddScoped<IOrganizationContext>(_ => new OrganizationContext { CurrentOrganizationId = OrganizationId });

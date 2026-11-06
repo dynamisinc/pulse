@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -92,6 +93,9 @@ public static class EngineContentSeedEndpoints
         // Scoped to match the PulseDbContext unit of work the persona writes + the single audit event commit
         // through together.
         services.AddScoped<PersonaCastSeeder>();
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<EngineContentSeedService>();
 
         // Per-IP fixed-window limiter (NFR-009). A rare ops action, so a modest window is ample; this only

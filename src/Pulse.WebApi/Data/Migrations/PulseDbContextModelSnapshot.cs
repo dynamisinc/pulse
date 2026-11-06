@@ -1702,6 +1702,8 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasIndex("ParentPostId");
 
+                    b.HasIndex("ExerciseId", "CreatedScenarioTime");
+
                     b.HasIndex("ExerciseId", "PinnedForAllAt")
                         .HasFilter("[PinnedForAllAt] IS NOT NULL");
 

@@ -5,7 +5,7 @@ using Pulse.WebApi.Data;
 
 /// <summary>
 /// The ONE read of the <c>Exercises</c> table for the whole easy-login feature (EL-17, gotcha 3). Stories 02 to 06
-/// take the exercise name, time zone, lifecycle status, tenant and stored scenario instant from here instead of
+/// take the exercise name, time zone, lifecycle status and tenant from here instead of
 /// adding reads of their own, so the pinned <c>org-scope-exempt(ResolvedScope)</c> inventory in
 /// <c>OrganizationScopeSweepTests</c> moves by exactly one for the feature. Scoped, matching the
 /// <see cref="PulseDbContext"/> unit of work.
@@ -59,15 +59,13 @@ public sealed class ExerciseFactsReader
                 exercise.TimeZone,
                 exercise.Status,
                 exercise.OrganizationId,
-                exercise.CurrentScenarioTime,
                 exercise.ParticipantName,
             })
             .FirstOrDefaultAsync(cancellationToken);
 
         return row is null
             ? null
-            : new ExerciseFacts(
-                row.Name, row.TimeZone, row.Status, row.OrganizationId, row.CurrentScenarioTime, row.ParticipantName);
+            : new ExerciseFacts(row.Name, row.TimeZone, row.Status, row.OrganizationId, row.ParticipantName);
     }
 }
 
@@ -82,15 +80,17 @@ public sealed class ExerciseFactsReader
 /// <param name="TimeZone">The stored IANA zone id, verbatim (resolve it with <see cref="ExerciseDay.ResolveTimeZone"/>; blank or unknown means UTC).</param>
 /// <param name="Status">The stored lifecycle status, verbatim (the <c>ExerciseLifecycleStates</c> vocabulary).</param>
 /// <param name="OrganizationId">The owning customer tenant, for an <c>.InOrganization(...)</c>-bounded staff read.</param>
-/// <param name="StoredScenarioTime">The persisted scenario instant, the telemetry fallback after the live exercise clock.</param>
 /// <param name="ParticipantName">
 /// The participant-facing exercise name (exercise-build-golive/09, §8.4), or <c>null</c> when unset: the card sheet's
 /// <c>exerciseName</c> and the link email's subject. There is NO fallback to <paramref name="Name"/>.
 /// </param>
+/// <remarks>
+/// engine-runtime/08 (CLK-2): the record no longer carries a stored scenario instant. Telemetry scenario time comes from
+/// <c>IScenarioNow</c> (clock, else the exercise's latest staff/engine post, else now).
+/// </remarks>
 public sealed record ExerciseFacts(
     string Name,
     string TimeZone,
     string Status,
     Guid OrganizationId,
-    DateTimeOffset? StoredScenarioTime,
     string? ParticipantName);

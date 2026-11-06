@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story identity-auth-roles/10 (Tier-2) integration tests for <see cref="ParticipantPersonaBindingService"/> — the guarded
@@ -41,7 +42,7 @@ public sealed class ParticipantPersonaBindingServiceTests
     private static string NewHostname() => $"uat-{Guid.NewGuid():N}.example.com";
 
     private static ParticipantPersonaBindingService NewService(PulseDbContext context, string? secret = Secret) =>
-        new(context, Options.Create(new BootstrapOptions { Secret = secret ?? string.Empty }), new OpsPersonaResolver(context));
+        new(context, Options.Create(new BootstrapOptions { Secret = secret ?? string.Empty }), new OpsPersonaResolver(context), TestScenarioNow.Over(context));
 
     /// <summary>
     /// Seeds a host-bound exercise plus one UNBOUND participant account and two personas — the exact state a live
@@ -138,7 +139,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         await using (var loginContext = _fixture.CreateContext(ScopeFor(seeded.ExerciseId)))
         {
             var login = new ParticipantLoginService(
-                loginContext, ScopeFor(seeded.ExerciseId), issuer, _participantHasher);
+                loginContext, ScopeFor(seeded.ExerciseId), issuer, _participantHasher, TestScenarioNow.Over(loginContext));
             var result = await login.LoginAsync(
                 new ParticipantLoginRequest { Username = seeded.Username, Password = Password });
 

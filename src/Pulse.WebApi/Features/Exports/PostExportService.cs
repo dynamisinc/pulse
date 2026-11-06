@@ -140,16 +140,16 @@ public sealed class PostExportService
     private readonly ExerciseFactsReader _exerciseFacts;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
     private readonly TimeProvider _timeProvider;
-    private readonly IExerciseClock? _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request's persistence context.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope, the only source of "which exercise".</param>
     /// <param name="engagementReader">The real like/repost/reply counts.</param>
-    /// <param name="exerciseFacts">The exercise's name, time zone, tenant and stored scenario time.</param>
+    /// <param name="exerciseFacts">The exercise's name, time zone and tenant.</param>
     /// <param name="currentStaffSession">The acting staff human, for the telemetry actor.</param>
     /// <param name="timeProvider">The server clock (file name and telemetry wall clock).</param>
-    /// <param name="exerciseClock">The live scenario clock, when the host runs one (telemetry scenario time).</param>
+    /// <param name="scenarioNow">The telemetry scenario time (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public PostExportService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -157,7 +157,7 @@ public sealed class PostExportService
         ExerciseFactsReader exerciseFacts,
         ICurrentStaffSessionAccessor currentStaffSession,
         TimeProvider timeProvider,
-        IExerciseClock? exerciseClock = null)
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -165,6 +165,7 @@ public sealed class PostExportService
         ArgumentNullException.ThrowIfNull(exerciseFacts);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -172,7 +173,7 @@ public sealed class PostExportService
         _exerciseFacts = exerciseFacts;
         _currentStaffSession = currentStaffSession;
         _timeProvider = timeProvider;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>Builds the workbook for the resolved exercise and records one download event.</summary>
@@ -233,7 +234,9 @@ public sealed class PostExportService
             // 4. One XC-004 event, stamped from one clock read.
             var now = _timeProvider.GetUtcNow();
             var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
-            _dbContext.TelemetryEvents.Add(BuildDownloadedEvent(exerciseId, facts, staff, lookups, workbook.RowCount, now));
+            var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
+            _dbContext.TelemetryEvents.Add(
+                BuildDownloadedEvent(exerciseId, facts, staff, lookups, workbook.RowCount, now, scenarioTime));
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             return PostExportResult.Ok(content, PostExportLabels.FileName(facts.Name, now), workbook.RowCount);
@@ -512,13 +515,14 @@ public sealed class PostExportService
         return lookups.Injects.GetValueOrDefault(itemId) ?? string.Empty;
     }
 
-    private TelemetryEvent BuildDownloadedEvent(
+    private static TelemetryEvent BuildDownloadedEvent(
         Guid exerciseId,
         ExerciseFacts facts,
         CurrentStaffSession? staff,
         ExportLookups lookups,
         int rows,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime)
     {
         string? role = null;
         if (staff is not null)
@@ -543,7 +547,7 @@ public sealed class PostExportService
                 Role = string.IsNullOrWhiteSpace(role) ? null : role,
             },
             WallClockTime = now,
-            ScenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = string.IsNullOrWhiteSpace(facts.TimeZone) ? ExerciseDay.UtcZoneId : facts.TimeZone,
             Target = new TelemetryTarget { EntityType = "exercise", EntityId = exerciseId.ToString() },
             Payload = JsonSerializer.Serialize(new DownloadedPayload { Rows = rows }),

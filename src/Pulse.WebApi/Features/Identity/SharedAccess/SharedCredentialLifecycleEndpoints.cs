@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
@@ -48,6 +49,9 @@ public static class SharedCredentialLifecycleEndpoints
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<SharedCredentialLifecycleService>();
         services.TryAddSingleton<ISharedCredentialHasher, SharedCredentialHasher>();
 

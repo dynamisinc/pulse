@@ -19,6 +19,7 @@ using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Injects;
 using Xunit;
 
@@ -87,10 +88,18 @@ public sealed class AlertEndpointsTests
 
         host.Time.Advance(TimeSpan.FromMinutes(11));
 
-        // The clock is not started and no scenario instant is persisted: expiry is never decided on wall time (COR-053).
+        // The clock is not started and the exercise has no posts: expiry is never decided on wall time (COR-053).
         (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
 
-        await PinScenarioTimeAsync(host, host.Time.GetUtcNow(), exercise.ExerciseId);
+        // Review W-3: a cold clock's latest post is the STAMP, never an expiry decision — a later post moves nothing.
+        await using (var seed = host.Db(exerciseId: null))
+        {
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.ExerciseId, host.Time.GetUtcNow());
+        }
+
+        (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
+
+        StartClocksAt(host, host.Time.GetUtcNow(), exercise.ExerciseId);
 
         (await ActiveIdsAsync(host)).Should().Equal(advisory, info);
         var history = await host.Client.GetFromJsonAsync<JsonElement>("/api/alerts/history");
@@ -171,8 +180,8 @@ public sealed class AlertEndpointsTests
         host.ActAs(b.ExerciseId, b.StaffUserId);
         var bId = await RaiseOkAsync(host, new { severity = "emergency", headline = "B", expiresScenarioTime = expires });
 
-        // The exercise clocks are not started here, so pin a persisted scenario instant: the sweep never expires on wall time.
-        await PinScenarioTimeAsync(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
+        // Expiry runs only on a started clock (review W-3; never on wall time, COR-053): start both past the expiry.
+        StartClocksAt(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
 
         var sweeper = ActivatorUtilities.CreateInstance<AlertExpirySweeper>(host.Services);
         (await sweeper.SweepAsync()).Should().BeGreaterThanOrEqualTo(2, "other tests' exercises may share the database");
@@ -291,16 +300,16 @@ public sealed class AlertEndpointsTests
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
     }
 
-    /// <summary>Persists a scenario instant on the exercise rows (the clock's fallback when it is not started).</summary>
-    private static async Task PinScenarioTimeAsync(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
+    /// <summary>
+    /// Starts each exercise's native clock at <paramref name="scenarioTime"/>: the only scenario time alert expiry is
+    /// decided against (review W-3 — a cold clock's latest post stamps, it never expires).
+    /// </summary>
+    private static void StartClocksAt(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
     {
-        await using var db = host.Db(exerciseId: null);
-        foreach (var exercise in await db.Exercises.IgnoreQueryFilters().Where(x => exerciseIds.Contains(x.Id)).ToListAsync())
+        foreach (var exerciseId in exerciseIds)
         {
-            exercise.CurrentScenarioTime = scenarioTime;
+            host.Clock.Start(exerciseId, scenarioTime, TimeZoneInfo.Utc);
         }
-
-        await db.SaveChangesAsync();
     }
 
     private static Task<HttpResponseMessage> ClearAsync(InjectTestHost host, string id) =>

@@ -464,7 +464,6 @@ public sealed class ParticipantWritePauseEndpointTests
             Hostname = world.Host,
             TimeZone = "UTC",
             Status = condition == "paused" ? "paused" : "live",
-            CurrentScenarioTime = StoredScenarioTime,
         });
         seed.Personas.Add(NewPersona(world.ParticipantPersona, exerciseId));
         seed.Personas.Add(NewPersona(world.OtherPersona, exerciseId));

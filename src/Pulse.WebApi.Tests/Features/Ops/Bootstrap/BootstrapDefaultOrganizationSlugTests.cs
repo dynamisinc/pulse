@@ -15,6 +15,7 @@ using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// #602 L-5 — when <see cref="BootstrapService"/> has to (re-)create the DEFAULT organization, its slug takes the SAME
@@ -72,7 +73,8 @@ public sealed class BootstrapDefaultOrganizationSlugTests
                     Options.Create(new DynamisIdentityProviderOptions { Accounts = new List<DynamisStaffAccount>() }),
                     new SharedCredentialHasher(),
                     new ParticipantPasswordHasher(),
-                    new OpsPersonaResolver(context))
+                    new OpsPersonaResolver(context),
+                    TestScenarioNow.Over(context))
                 .BootstrapAsync(
                     new BootstrapExerciseRequest { Hostname = $"uat-{Guid.NewGuid():N}.example.com", ExerciseName = "Slug collision" },
                     Secret);

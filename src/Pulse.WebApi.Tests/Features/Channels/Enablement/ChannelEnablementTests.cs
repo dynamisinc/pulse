@@ -15,6 +15,7 @@ using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Xunit;
 
 /// <summary>
@@ -214,7 +215,7 @@ public sealed class ChannelEnablementTests : IDisposable
             new ConstantChromeConfigProjection(),
             new ConstantShellVariantProjection(),
             new ConstantOverlayStateProjection(),
-            new AlertReader(context, scope, new ExerciseClockService(TimeProvider.System), TimeProvider.System));
+            new AlertReader(context, scope, TestScenarioNow.Over(context), new ExerciseClockService(TimeProvider.System), TimeProvider.System));
     }
 
     private PulseDbContext NewContext(Guid? exerciseId) =>

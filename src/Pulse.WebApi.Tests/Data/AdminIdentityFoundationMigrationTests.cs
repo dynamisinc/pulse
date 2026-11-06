@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// identity-auth-roles/16 (#572, Tier-2) — the <c>AdminIdentityFoundation</c> migration over a seeded legacy database:
@@ -180,7 +181,8 @@ public sealed class AdminIdentityFoundationMigrationTests
         new Pulse.WebApi.Features.Identity.EasyLogin.ExerciseFactsReader(context),
         Microsoft.Extensions.Options.Options.Create(new Pulse.WebApi.Features.Identity.EasyLogin.EasyLoginOptions()),
         TimeProvider.System,
-        Microsoft.Extensions.Logging.Abstractions.NullLogger<SessionService>.Instance);
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<SessionService>.Instance,
+        TestScenarioNow.Over(context));
 
     [RequiresDockerFact]
     public async Task Up_GivesEveryAccountAnEnrollment_CopyingRoleAndPersona_AndLeavesNoOrphanSentinel()

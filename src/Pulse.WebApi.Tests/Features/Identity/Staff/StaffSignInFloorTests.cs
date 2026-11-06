@@ -13,6 +13,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Identity.RoleMatrix;
 
 /// <summary>
@@ -135,7 +136,8 @@ public sealed class StaffSignInFloorTests
             await using var context = _fixture.CreateContext();
             var provider = new PulsePasswordIdentityProvider(
                 context, new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions())), verifier);
-            var service = new StaffLoginService(context, provider, verifier, Timing(clock, exerciseBoundFloor: floor), new RecordingSessionIssuer());
+            var service = new StaffLoginService(
+                context, provider, verifier, Timing(clock, exerciseBoundFloor: floor), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
             var started = clock.GetElapsed();
             var result = await service.LoginAsync(new StaffLoginRequest { Username = username, Secret = secret, ExerciseId = exercise.ToString() });
@@ -159,7 +161,8 @@ public sealed class StaffSignInFloorTests
             verifier,
             Timing(clock, orgFloor: TimeSpan.FromSeconds(1)),
             new RecordingSessionIssuer(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<OrgStaffLoginService>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<OrgStaffLoginService>.Instance,
+            TestScenarioNow.Over(context));
 
         (await service.LoginAsync(new StaffLoginRequest { Email = "a@b.c" }, null)).Outcome.Should().Be(OrgStaffLoginOutcome.Invalid);
         clock.Delays.Should().BeEmpty();

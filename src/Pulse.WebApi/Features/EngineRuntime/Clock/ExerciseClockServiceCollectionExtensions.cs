@@ -21,6 +21,10 @@ public static class ExerciseClockServiceCollectionExtensions
     ///   <item><see cref="IScenarioClock"/> → <see cref="ScenarioClockAdapter"/> as <b>scoped</b>, so the
     ///   engine reads the current scope's exercise minute via <see cref="Pulse.WebApi.Data.IExerciseContext"/>
     ///   (registered by <c>AddExerciseScoping</c>, a prerequisite).</item>
+    ///   <item><see cref="IScenarioNow"/> → <see cref="ScenarioNowResolver"/> as <b>scoped</b> (engine-runtime/08,
+    ///   CLK-2): the one "scenario now" — clock, else the exercise's latest post, else wall-clock now. It reads posts
+    ///   through <see cref="Pulse.WebApi.Data.PulseDbContext"/> (registered by <c>AddPersistence</c>, a
+    ///   prerequisite).</item>
     /// </list>
     /// The clock's change hook <see cref="IExerciseClockChangeSink"/> is registered as the no-op
     /// <see cref="NullExerciseClockChangeSink"/> via <c>TryAddSingleton</c>; story 18's
@@ -39,6 +43,7 @@ public static class ExerciseClockServiceCollectionExtensions
         services.TryAddSingleton<IExerciseClockChangeSink, NullExerciseClockChangeSink>();
         services.TryAddSingleton<IExerciseClock, ExerciseClockService>();
         services.TryAddScoped<IScenarioClock, ScenarioClockAdapter>();
+        services.TryAddScoped<IScenarioNow, ScenarioNowResolver>();
 
         return services;
     }

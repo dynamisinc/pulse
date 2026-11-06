@@ -11,6 +11,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// #602 M-2 / M-5 — the staff sign-in timing side channels, closed by FIXED slow-hash work. Every attempt that passes body
@@ -195,7 +196,8 @@ public sealed class StaffSignInFixedWorkTests
             context,
             new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = [.. allowlist ?? []] })),
             verifier);
-        var result = await new StaffLoginService(context, provider, verifier, TestSignInTiming.NoFloor, new RecordingSessionIssuer())
+        var result = await new StaffLoginService(
+                context, provider, verifier, TestSignInTiming.NoFloor, new RecordingSessionIssuer(), TestScenarioNow.Over(context))
             .LoginAsync(new StaffLoginRequest { Username = username, Secret = secret, ExerciseId = exerciseId.ToString() });
 
         result.Outcome.Should().Be(expected, "the scenario must take the path it claims to measure");

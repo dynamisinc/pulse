@@ -65,22 +65,22 @@ public sealed class JoinLoginService
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ExerciseFactsReader _factsReader;
     private readonly TimeProvider _timeProvider;
-    private readonly IExerciseClock? _exerciseClock;
+    private readonly IScenarioNow? _scenarioNow;
 
     /// <summary>Creates the join funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the sign-in bookkeeping and the event are written through.</param>
     /// <param name="exerciseContext">The host-resolved exercise scope (the only scoping source).</param>
     /// <param name="sessionIssuer">Mints the participant session (the same seam <c>/api/auth/login</c> uses).</param>
-    /// <param name="factsReader">The exercise's lifecycle state, zone and stored scenario time (EL-17's one read).</param>
+    /// <param name="factsReader">The exercise's lifecycle state and zone (EL-17's one read).</param>
     /// <param name="timeProvider">The server clock (one read per attempt).</param>
-    /// <param name="exerciseClock">The native exercise clock for scenario time, when the host has one.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public JoinLoginService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ISessionIssuer sessionIssuer,
         ExerciseFactsReader factsReader,
         TimeProvider timeProvider,
-        IExerciseClock? exerciseClock = null)
+        IScenarioNow? scenarioNow = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -93,7 +93,7 @@ public sealed class JoinLoginService
         _sessionIssuer = sessionIssuer;
         _factsReader = factsReader;
         _timeProvider = timeProvider;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -128,7 +128,7 @@ public sealed class JoinLoginService
         }
 
         var now = _timeProvider.GetUtcNow();
-        var time = EasyLoginEventTime.For(scope.Value, facts, _exerciseClock, now);
+        var time = await EasyLoginEventTime.ForAsync(scope.Value, facts, _scenarioNow, now, cancellationToken);
 
         // 3. One hash comparison, under the central filter (both sides are exercise-scoped). Revoked and superseded
         //    tokens fall out of the same predicate as unknown ones. Tracked: success updates both rows.

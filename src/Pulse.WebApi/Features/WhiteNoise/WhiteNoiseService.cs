@@ -97,11 +97,12 @@ public sealed partial class WhiteNoiseService
     private readonly TimeProvider _timeProvider;
     private readonly WhiteNoisePacerSignal _pacerSignal;
     private readonly ILogger<WhiteNoiseService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The unit of work.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope (the only scope source).</param>
-    /// <param name="exerciseFacts">The one read of the exercise row's facts (tenant, time zone, stored scenario time).</param>
+    /// <param name="exerciseFacts">The one read of the exercise row's facts (tenant, time zone).</param>
     /// <param name="staffSession">The acting staff user, for telemetry (server-side session, COR-018).</param>
     /// <param name="pauseTiers">The in-memory pause tiers (Freeze stops noise).</param>
     /// <param name="clock">The exercise clock (frozen or not running stops noise; scenario time for posts).</param>
@@ -111,6 +112,7 @@ public sealed partial class WhiteNoiseService
     /// <param name="timeProvider">The server clock.</param>
     /// <param name="pacerSignal">Wakes the sleeping pacer after a level or pool change commits.</param>
     /// <param name="logger">Diagnostics.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public WhiteNoiseService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -123,7 +125,8 @@ public sealed partial class WhiteNoiseService
         PostIngestService ingest,
         TimeProvider timeProvider,
         WhiteNoisePacerSignal pacerSignal,
-        ILogger<WhiteNoiseService> logger)
+        ILogger<WhiteNoiseService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -137,6 +140,7 @@ public sealed partial class WhiteNoiseService
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(pacerSignal);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -150,6 +154,7 @@ public sealed partial class WhiteNoiseService
         _timeProvider = timeProvider;
         _pacerSignal = pacerSignal;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -267,12 +272,13 @@ public sealed partial class WhiteNoiseService
         exercise.NoiseLevel = to!;
 
         var now = _timeProvider.GetUtcNow();
+        var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildEvent(
             exerciseId,
             LevelChangedEventType,
             staff.StaffUserId,
             now,
-            ScenarioNow(exerciseId, facts, now),
+            scenarioTime,
             TimeZoneOf(facts),
             JsonSerializer.Serialize(new LevelChangedPayload(from, to!))));
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -382,12 +388,13 @@ public sealed partial class WhiteNoiseService
             var existing = await _dbContext.NoisePosts.ToListAsync(cancellationToken);
             _dbContext.NoisePosts.RemoveRange(existing);
 
+            var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
             _dbContext.TelemetryEvents.Add(BuildEvent(
                 exerciseId,
                 PoolReplacedEventType,
                 staff.StaffUserId,
                 now,
-                ScenarioNow(exerciseId, facts, now),
+                scenarioTime,
                 TimeZoneOf(facts),
                 JsonSerializer.Serialize(new PoolReplacedPayload(accepted.Count))));
         }
@@ -460,10 +467,12 @@ public sealed partial class WhiteNoiseService
         item.PostedCount++;
         item.LastPostedWallClock = now;
 
+        // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else now.
+        var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var request = new CreatePostRequest
         {
             Text = item.Text,
-            ScenarioTime = ScenarioNow(exerciseId, facts, now).ToString("O", CultureInfo.InvariantCulture),
+            ScenarioTime = scenarioTime.ToString("O", CultureInfo.InvariantCulture),
             TimeZone = TimeZoneOf(facts),
         };
         var attribution = new PostAttribution
@@ -667,9 +676,6 @@ public sealed partial class WhiteNoiseService
     }
 
     private static string HandleKey(string handle) => handle.Trim().TrimStart('@');
-
-    private DateTimeOffset ScenarioNow(Guid exerciseId, ExerciseFacts facts, DateTimeOffset now) =>
-        _clock.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime ?? now;
 
     private static string TimeZoneOf(ExerciseFacts facts) =>
         string.IsNullOrWhiteSpace(facts.TimeZone) ? FallbackTimeZone : facts.TimeZone;

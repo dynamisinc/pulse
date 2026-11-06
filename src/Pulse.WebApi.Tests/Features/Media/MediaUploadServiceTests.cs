@@ -320,7 +320,7 @@ public sealed class MediaUploadServiceTests
         asset.ExerciseId.Should().Be(harness.ExerciseId, "scope comes ONLY from IExerciseContext; a body exerciseId is ignored");
         asset.UploadedByHumanId.Should().Be(harness.ActingHumanId, "the uploader is the session's acting human, not a form field");
         asset.BlobName.Should().Be($"{harness.ExerciseId:D}/{asset.Id:N}.jpg");
-        asset.CreatedScenarioTime.Should().Be(UploadHarness.ExerciseScenarioTime, "scenario time falls back to the exercise's persisted time when the clock is idle");
+        asset.CreatedScenarioTime.Should().Be(UploadHarness.ExerciseScenarioTime, "scenario time falls back to the exercise's latest post when the clock is idle (engine-runtime/08)");
         asset.CreatedWallClock.Should().Be(UploadHarness.WallClockNow, "wall clock is the server's");
         asset.OriginalFileName.Should().Be("flood main st.jpg", "path and markup are stripped (strip, never encode)");
         asset.Width.Should().Be(1200);
@@ -344,14 +344,14 @@ public sealed class MediaUploadServiceTests
 
     /// <summary>
     /// Gate-1 H-1 — the pinned fallback order for the staff-only <c>CreatedScenarioTime</c> (the DP-18a staff-metadata
-    /// exception): the running exercise clock wins; else the exercise's persisted scenario time; else the server wall
+    /// exception): the running exercise clock wins; else the exercise's latest post (engine-runtime/08); else the server wall
     /// clock, in which case it equals <c>CreatedWallClock</c>.
     /// </summary>
     [Theory]
     [InlineData("running-clock")]
-    [InlineData("stored-scenario-time")]
+    [InlineData("latest-post")]
     [InlineData("wall-clock")]
-    public async Task CreatedScenarioTime_FallsBack_Clock_ThenStored_ThenWallClock(string source)
+    public async Task CreatedScenarioTime_FallsBack_Clock_ThenLatestPost_ThenWallClock(string source)
     {
         using var harness = new UploadHarness(exerciseHasScenarioTime: source != "wall-clock");
         var clockStart = new DateTimeOffset(2033, 9, 5, 6, 0, 0, TimeSpan.Zero);
@@ -366,7 +366,7 @@ public sealed class MediaUploadServiceTests
         var expected = source switch
         {
             "running-clock" => clockStart,
-            "stored-scenario-time" => UploadHarness.ExerciseScenarioTime,
+            "latest-post" => UploadHarness.ExerciseScenarioTime,
             _ => UploadHarness.WallClockNow,
         };
         asset.CreatedScenarioTime.Should().Be(expected, "the {0} is the source here", source);

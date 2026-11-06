@@ -14,6 +14,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Addressing;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -89,6 +90,7 @@ public sealed partial class EngineContentSeedService
     private readonly IReactionLoopRegistry _registry;
     private readonly IAddressingInbox _addressingInbox;
     private readonly EngineAutonomyRegistry _autonomyRegistry;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<EngineContentSeedService> _logger;
 
@@ -99,7 +101,8 @@ public sealed partial class EngineContentSeedService
     /// <param name="registry">The in-memory reaction-loop registry this service populates (the #324 gap).</param>
     /// <param name="addressingInbox">The engine's official-post inbox, cleared when a fresh storyline is registered (engine-runtime/06).</param>
     /// <param name="autonomyRegistry">The per-exercise autonomy-state registry the cockpit reads/writes — the SHARED instance the registration must use (AC3).</param>
-    /// <param name="timeProvider">The server wall-clock source (never client input) for <c>ScenarioStart</c> + the telemetry envelope.</param>
+    /// <param name="scenarioNow">Where the world is (engine-runtime/08, CLK-1): the registration's <c>ScenarioStart</c> and the event's scenario time.</param>
+    /// <param name="timeProvider">The server wall-clock source (never client input) for the telemetry envelope and the no-posts fallback.</param>
     /// <param name="logger">Diagnostics logger — records the seeder's mutations to EXISTING rows (Gate-1 S-B); never logs a secret.</param>
     public EngineContentSeedService(
         PulseDbContext dbContext,
@@ -108,6 +111,7 @@ public sealed partial class EngineContentSeedService
         IReactionLoopRegistry registry,
         IAddressingInbox addressingInbox,
         EngineAutonomyRegistry autonomyRegistry,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider,
         ILogger<EngineContentSeedService> logger)
     {
@@ -117,6 +121,7 @@ public sealed partial class EngineContentSeedService
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(addressingInbox);
         ArgumentNullException.ThrowIfNull(autonomyRegistry);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -126,6 +131,7 @@ public sealed partial class EngineContentSeedService
         _registry = registry;
         _addressingInbox = addressingInbox;
         _autonomyRegistry = autonomyRegistry;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -178,8 +184,14 @@ public sealed partial class EngineContentSeedService
 
         var exerciseId = exercise.Id;
 
-        // One wall-clock read stamps ScenarioStart + the telemetry envelope (server-authoritative, COR-053).
+        // One wall-clock read stamps the telemetry envelope (server-authoritative).
         var now = _timeProvider.GetUtcNow();
+
+        // engine-runtime/08 (CLK-1): a cold clock starts where the world is: the exercise's latest post's scenario time,
+        // else now (a fresh exercise behaves as before, a 2033 world continues from 2033). A running clock answers for
+        // itself and is never restarted by the loop (ReactionLoopHost.ShouldStartClock), so this only matters cold.
+        // Read BEFORE the persona writes below; the seed writes no posts.
+        var scenarioStart = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
 
         // 4a. Seed the persona cast (story 01) — ADDED to the tracked context, committed below with the event.
         var seedResult = await _personaSeeder.SeedAsync(exerciseId, cancellationToken);
@@ -267,7 +279,7 @@ public sealed partial class EngineContentSeedService
             // Ambient chatter is set in the world by name only, never in the incident brief above (W-3).
             AmbientPlaceName = exercise.WorldName,
             TimeZone = exercise.TimeZone,
-            ScenarioStart = now,
+            ScenarioStart = scenarioStart,
             TimeZoneInfo = ResolveTimeZone(exercise.TimeZone),
             Storylines = [storyline],
             PersonasByHandle = personasByHandle,
@@ -280,7 +292,7 @@ public sealed partial class EngineContentSeedService
         // 5. Exactly one XC-004 audit event (COR-001-stamped with the exercise's own id) in the SAME unit of
         //    work as story 01's persona writes (AC7).
         _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(
-            exercise, now, counts, renames, storyline, autoConfirmResponses));
+            exercise, now, scenarioStart, counts, renames, storyline, autoConfirmResponses));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -385,6 +397,7 @@ public sealed partial class EngineContentSeedService
     private static TelemetryEvent BuildSeededTelemetry(
         Exercise exercise,
         DateTimeOffset now,
+        DateTimeOffset scenarioTime,
         PersonaSeedCounts counts,
         IReadOnlyList<PersonaRename> renames,
         Storyline storyline,
@@ -437,7 +450,7 @@ public sealed partial class EngineContentSeedService
                 ActingHumanId = SeedActorId,
             },
             WallClockTime = now,
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = string.IsNullOrWhiteSpace(exercise.TimeZone) ? "UTC" : exercise.TimeZone,
             Target = new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exercise.Id.ToString() },
             Payload = payload,

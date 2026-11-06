@@ -54,7 +54,7 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSession;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly ExerciseFactsReader _exerciseFacts;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<OrgNewsroomProvisioner> _logger;
@@ -63,15 +63,17 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
     /// <param name="dbContext">The exercise-scoped persistence context.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001).</param>
     /// <param name="staffSession">The staff session, if any (the telemetry actor).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-053).</param>
-    /// <param name="exerciseFacts">The one exercise-row read (time zone, stored scenario instant).</param>
+    /// <param name="scenarioNow">
+    /// The exercise's scenario now (engine-runtime/08, CLK-2: the running clock, else the latest post, else now; COR-053).
+    /// </param>
+    /// <param name="exerciseFacts">The one exercise-row read (time zone).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public OrgNewsroomProvisioner(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSession,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         ExerciseFactsReader exerciseFacts,
         TimeProvider timeProvider,
         ILogger<OrgNewsroomProvisioner> logger)
@@ -79,7 +81,7 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSession);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(exerciseFacts);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -87,7 +89,7 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _staffSession = staffSession;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _exerciseFacts = exerciseFacts;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -313,12 +315,16 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         return new OrgNewsroomProvisionResult(OrgNewsroomProvisionStatus.Ok, [.. created.Select(o => o.Id)], existing);
     }
 
-    /// <summary>The one clock read for a run (the <c>OutletService</c> rule: native clock, stored instant, wall clock).</summary>
+    /// <summary>
+    /// The one clock read for a run (the <c>OutletService</c> rule): the server wall clock, plus the exercise's scenario
+    /// now from <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2: the running clock, else the latest post, else the
+    /// wall clock).
+    /// </summary>
     private async Task<OutletEventTime> TimeForAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
-        var scenario = _exerciseClock.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        var scenario = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var timeZone = facts?.TimeZone is { } zone && !string.IsNullOrWhiteSpace(zone) ? zone : FallbackTimeZone;
         return new OutletEventTime(now, scenario, timeZone);
     }

@@ -25,9 +25,8 @@ public sealed class ExerciseFactsReaderTests
     public ExerciseFactsReaderTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     [RequiresDockerFact]
-    public async Task GetAsync_ReturnsNameZoneStatusTenantAndStoredScenarioTime()
+    public async Task GetAsync_ReturnsNameZoneStatusAndTenant()
     {
-        var scenario = new DateTimeOffset(2033, 6, 14, 9, 30, 0, TimeSpan.FromHours(-4));
         var exercise = new Exercise
         {
             Id = Guid.NewGuid(),
@@ -36,7 +35,6 @@ public sealed class ExerciseFactsReaderTests
             ParticipantName = "Harbor City",
             TimeZone = "America/New_York",
             Status = "live",
-            CurrentScenarioTime = scenario,
         };
 
         await using (var seed = _fixture.CreateContext())
@@ -49,11 +47,11 @@ public sealed class ExerciseFactsReaderTests
         var facts = await new ExerciseFactsReader(context).GetAsync(exercise.Id);
 
         facts.Should().Be(new ExerciseFacts(
-            exercise.Name, "America/New_York", "live", Organization.DefaultOrganizationId, scenario, "Harbor City"));
+            exercise.Name, "America/New_York", "live", Organization.DefaultOrganizationId, "Harbor City"));
     }
 
     [RequiresDockerFact]
-    public async Task GetAsync_WithNoStoredScenarioTime_ReturnsNullForIt()
+    public async Task GetAsync_ReturnsTheColumnDefaults_ForAnUnconfiguredExercise()
     {
         var exercise = new Exercise
         {
@@ -72,8 +70,7 @@ public sealed class ExerciseFactsReaderTests
         var facts = await new ExerciseFactsReader(context).GetAsync(exercise.Id);
 
         facts.Should().NotBeNull();
-        facts!.StoredScenarioTime.Should().BeNull();
-        facts.TimeZone.Should().Be("UTC", "the column default");
+        facts!.TimeZone.Should().Be("UTC", "the column default");
         facts.Status.Should().Be("build", "the column default");
     }
 

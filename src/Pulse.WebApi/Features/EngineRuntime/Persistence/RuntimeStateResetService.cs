@@ -48,6 +48,7 @@ public sealed class RuntimeStateResetService
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _staffSession;
     private readonly ExerciseFactsReader _exerciseFacts;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates the reset service.</summary>
@@ -56,7 +57,8 @@ public sealed class RuntimeStateResetService
     /// <param name="clock">Read for the scenario time the event is stamped with, before the clock is cleared.</param>
     /// <param name="exerciseContext">The server-resolved scope (COR-001).</param>
     /// <param name="staffSession">The calling staff human (event attribution, staff-side only).</param>
-    /// <param name="exerciseFacts">The exercise's time zone and stored scenario instant.</param>
+    /// <param name="exerciseFacts">The exercise's time zone.</param>
+    /// <param name="scenarioNow">The scenario-now fallback when no clock was running (latest post, else now; CLK-2).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     public RuntimeStateResetService(
         PauseTierRegistry pauseTiers,
@@ -65,6 +67,7 @@ public sealed class RuntimeStateResetService
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staffSession,
         ExerciseFactsReader exerciseFacts,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(pauseTiers);
@@ -73,6 +76,7 @@ public sealed class RuntimeStateResetService
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(staffSession);
         ArgumentNullException.ThrowIfNull(exerciseFacts);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _pauseTiers = pauseTiers;
@@ -81,6 +85,7 @@ public sealed class RuntimeStateResetService
         _exerciseContext = exerciseContext;
         _staffSession = staffSession;
         _exerciseFacts = exerciseFacts;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
     }
 
@@ -114,7 +119,10 @@ public sealed class RuntimeStateResetService
         // Best-effort facts for the event, with the existing fallbacks (scenario time, then UTC).
         // M-A: CancellationToken.None — after the in-memory reset nothing may be skipped by a request abort.
         var facts = await TryAsync(() => _exerciseFacts.GetAsync(exerciseId, CancellationToken.None)).ConfigureAwait(false);
-        var scenarioTime = clockScenarioTime ?? facts?.StoredScenarioTime ?? now;
+        // The clock was read BEFORE the clear; when none was running, the exercise's latest post (CLK-2), best-effort.
+        var scenarioTime = clockScenarioTime
+            ?? await TryReadAsync(() => _scenarioNow.FindAsync(exerciseId, CancellationToken.None)).ConfigureAwait(false)
+            ?? now;
 
         var auditEvent = new TelemetryEvent
         {
@@ -150,6 +158,22 @@ public sealed class RuntimeStateResetService
         var persisted = await _persister.DeleteAsync(exerciseId, auditEvent, CancellationToken.None).ConfigureAwait(false);
 
         return PauseTierStateDto.From(_pauseTiers, exerciseId, persisted);
+    }
+
+    /// <summary>The value-type twin of <see cref="TryAsync{T}"/>: <c>null</c> when the read throws (Gate-1 L-3).</summary>
+    private static async Task<T?> TryReadAsync<T>(Func<Task<T?>> read)
+        where T : struct
+    {
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Best-effort by design (Gate-1 L-3): SQL being down must not block a reset.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>Runs a best-effort read: any failure but cancellation yields <c>null</c> (the caller has a fallback).</summary>

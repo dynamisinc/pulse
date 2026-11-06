@@ -15,6 +15,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// demo-polish BM — <c>POST /api/media</c> and <c>GET /api/staff/media</c> through the REAL <c>Program</c> pipeline
@@ -38,6 +39,12 @@ public sealed class MediaEndpointTests
     public async Task ParticipantUpload_Is201_WithAParticipantSafeView_AndAScopedRowStampedFromTheSession()
     {
         var (exercise, participant) = await SeedParticipantAsync();
+        await using (var world = _fixture.CreateContext())
+        {
+            // engine-runtime/08: with no clock running, the upload's scenario time is the exercise's latest post.
+            await TestScenarioNow.SeedWorldTimeAsync(world, exercise.ExerciseId, MediaSeed.ScenarioTime);
+        }
+
         await using var host = NewHost();
         using var client = host.CreateClientFor(exercise.Host, participant.Token);
         var otherExercise = Guid.NewGuid();
@@ -58,7 +65,7 @@ public sealed class MediaEndpointTests
         var row = await db.MediaAssets.IgnoreQueryFilters().SingleAsync(asset => asset.Id == id);
         row.ExerciseId.Should().Be(exercise.ExerciseId, "scope comes from the resolved session, never the body");
         row.UploadedByHumanId.Should().Be(participant.Session.ActingHumanId, "the session's acting human");
-        row.CreatedScenarioTime.Should().Be(MediaSeed.ScenarioTime, "the exercise clock (persisted fallback), not the wall clock");
+        row.CreatedScenarioTime.Should().Be(MediaSeed.ScenarioTime, "the exercise's latest post (no clock running), not the wall clock");
         row.ContentType.Should().Be("image/png");
         row.BlobName.Should().Be($"{exercise.ExerciseId:D}/{id:N}.png");
         row.Width.Should().Be(320);

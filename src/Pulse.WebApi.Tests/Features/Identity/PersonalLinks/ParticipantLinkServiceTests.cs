@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Data;
@@ -272,6 +273,7 @@ public sealed class ParticipantLinkServiceTests
 
         // The host's AddExerciseScoping(): the issuer checks every account against the resolved scope (S-004).
         services.AddExerciseScoping();
+        services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
 
         if (foundationFirst)
         {

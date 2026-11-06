@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -59,6 +60,10 @@ public static class StaffAuthEndpoints
         // front of the Dynamis allowlist (registered concretely as its fallback) for the A1→A2 interim.
         services.AddScoped<DynamisIdentityProvider>();
         services.AddScoped<IIdentityProvider, PulsePasswordIdentityProvider>();
+
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
 
         // #602 M-2 / M-5: the counted slow-hash seam, ONE per request, shared by the Pulse password provider and both login
         // funnels so every attempt pads to a fixed PBKDF2 count. The hasher is the default PBKDF2 PasswordHasher — the

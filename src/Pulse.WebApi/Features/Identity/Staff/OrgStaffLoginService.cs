@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
 
@@ -115,6 +116,7 @@ public sealed partial class OrgStaffLoginService
     private readonly StaffSignInTiming _signInTiming;
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ILogger<OrgStaffLoginService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the org sign-in over its collaborators.</summary>
     /// <param name="dbContext">The persistence context (people, choices, audit, telemetry).</param>
@@ -126,13 +128,15 @@ public sealed partial class OrgStaffLoginService
     /// <param name="signInTiming">The wall-clock floor every validated attempt ends at (#602 W1).</param>
     /// <param name="sessionIssuer">The session-issuance seam.</param>
     /// <param name="logger">The structured log the no-resolvable-org attempts go to (never secrets).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public OrgStaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
         StaffPasswordVerifier passwordVerifier,
         StaffSignInTiming signInTiming,
         ISessionIssuer sessionIssuer,
-        ILogger<OrgStaffLoginService> logger)
+        ILogger<OrgStaffLoginService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
@@ -140,6 +144,7 @@ public sealed partial class OrgStaffLoginService
         ArgumentNullException.ThrowIfNull(signInTiming);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
@@ -147,6 +152,7 @@ public sealed partial class OrgStaffLoginService
         _signInTiming = signInTiming;
         _sessionIssuer = sessionIssuer;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -618,14 +624,17 @@ public sealed partial class OrgStaffLoginService
         await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
         staffUser.LastLoginAt = now;
 
-        // An exercise-scoped sign-in stays the exercise's XC-004 login event (§7.5), as on the exercise-bound path.
+        // An exercise-scoped sign-in stays the exercise's XC-004 login event (§7.5), as on the exercise-bound path. Its
+        // scenario time is the landing exercise's scenario now (engine-runtime/08, CLK-2); that exercise is one of the
+        // verified person's own organization's (MostRecentlyUsedStaffEnrollmentAsync joins .InOrganization).
+        var scenarioTime = await _scenarioNow.GetAsync(enrollment.ExerciseId, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(StaffLoginService.BuildLoginTelemetry(
             enrollment.ExerciseId,
             role: enrollment.Role,
             actingHumanId: staffUser.Id.ToString(),
             outcome: SuccessTelemetryPayload,
             now: now,
-            scenarioTime: enrollment.CurrentScenarioTime ?? now,
+            scenarioTime: scenarioTime,
             timeZone: enrollment.TimeZone,
             targetStaffUserId: staffUser.Id));
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -671,7 +680,6 @@ public sealed partial class OrgStaffLoginService
                 enrollment.Role,
                 enrollment.IsLead,
                 enrollment.CreatedAt,
-                exercise.CurrentScenarioTime,
                 exercise.TimeZone)).ToListAsync(cancellationToken);
 
         if (enrollments.Count == 0)
@@ -809,7 +817,6 @@ public sealed partial class OrgStaffLoginService
         string Role,
         bool IsLead,
         DateTimeOffset CreatedAt,
-        DateTimeOffset? CurrentScenarioTime,
         string TimeZone);
 }
 

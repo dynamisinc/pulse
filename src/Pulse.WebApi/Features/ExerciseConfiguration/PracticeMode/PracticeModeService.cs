@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>The outcome kind of a <see cref="PracticeModeService"/> call.</summary>
@@ -114,27 +115,32 @@ public sealed class PracticeModeService
     private readonly IExerciseContext _exerciseContext;
     private readonly IEvaluationEligibility _evaluationEligibility;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over persistence, the resolved scope, the eligibility seam and the staff session.</summary>
     /// <param name="dbContext">The persistence context the flag is read and written through.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope — the ONLY source of "which exercise".</param>
     /// <param name="evaluationEligibility">The single evaluation-eligibility seam (never re-derived locally).</param>
     /// <param name="currentStaffSession">Identifies the acting staff human for the XC-004 event.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public PracticeModeService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IEvaluationEligibility evaluationEligibility,
-        ICurrentStaffSessionAccessor currentStaffSession)
+        ICurrentStaffSessionAccessor currentStaffSession,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(evaluationEligibility);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _evaluationEligibility = evaluationEligibility;
         _currentStaffSession = currentStaffSession;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>Reads the resolved exercise's practice/sandbox state. Fails closed on an unresolved scope.</summary>
@@ -203,6 +209,8 @@ public sealed class PracticeModeService
 
             var now = DateTimeOffset.UtcNow;
             var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
+            // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else this operation's now.
+            var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
 
             _dbContext.TelemetryEvents.Add(new TelemetryEvent
             {
@@ -221,7 +229,7 @@ public sealed class PracticeModeService
                     SessionId = staff?.SessionId.ToString(),
                 },
                 WallClockTime = now,
-                ScenarioTime = exercise.CurrentScenarioTime ?? now,
+                ScenarioTime = scenarioTime,
                 TimeZone = exercise.TimeZone,
                 Target = new TelemetryTarget { EntityType = "exercise", EntityId = exerciseId.ToString() },
                 Payload = JsonSerializer.Serialize(new PracticeModeUpdatedPayload { IsPracticeMode = requested }),
