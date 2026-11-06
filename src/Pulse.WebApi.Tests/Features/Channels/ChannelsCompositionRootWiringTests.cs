@@ -11,6 +11,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,7 @@ using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Content.Read;
 using Pulse.WebApi.Features.Channels.Content.Scheduling;
+using Pulse.WebApi.Features.Channels.Content.Staff;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
@@ -44,7 +46,8 @@ using Xunit;
 /// <remarks>
 /// Story 01 registered no service of its own (schema only); stories 03+ extend this file as they fill
 /// <c>AddChannels()</c> / <c>MapChannels()</c> (story 03: the outlet registry; story 04: the publish funnel; story 08: the
-/// enablement gate; story 10: the alert source and the <c>/api/alerts*</c> routes). Resolving services only needs the host
+/// enablement gate; story 10: the alert source and the <c>/api/alerts*</c> routes; story 07: the staff
+/// <c>/api/content-items*</c> routes). Resolving services only needs the host
 /// to BUILD, so it is fed a dummy, never-connecting connection string; the anonymous probe is answered before any database
 /// work.
 /// </remarks>
@@ -118,11 +121,12 @@ public sealed class ChannelsCompositionRootWiringTests
     public void AKindNamingAnUnregisteredProfile_FailsHostStart()
     {
         using var factory = new WiringProbeFactory(services =>
-            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("article", "news", "article-rich")));
+            services.AddScoped<IContentKindDescriptor>(_ => new Publish.TestKindDescriptor("probe_kind", "news", "no-such-profile")));
 
         var start = () => factory.Services;
 
-        start.Should().Throw<InvalidOperationException>().WithMessage("*article-rich*not registered*");
+        // news 01 now ships `article` + `article-rich`, so the probe uses a kind and profile no channel registers.
+        start.Should().Throw<InvalidOperationException>().WithMessage("*no-such-profile*not registered*");
     }
 
     [Theory]
@@ -275,6 +279,90 @@ public sealed class ChannelsCompositionRootWiringTests
             .BuildServiceProvider();
         slice.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
             .Which.IsActive.Should().BeFalse();
+    }
+
+    /// <summary>Story 07: every <c>/api/content-items*</c> route, mapped by <c>MapChannels()</c>.</summary>
+    /// <returns>The method and raw route pattern of each route.</returns>
+    public static TheoryData<string, string> StaffContentRoutes() => new()
+    {
+        { "GET", "/api/content-items" },
+        { "GET", "/api/content-items/{id:guid}" },
+        { "GET", "/api/content-items/{id:guid}/preview" },
+        { "POST", "/api/content-items" },
+        { "PUT", "/api/content-items/{id:guid}" },
+        { "DELETE", "/api/content-items/{id:guid}" },
+        { "POST", "/api/content-items/{id:guid}/publish" },
+        { "POST", "/api/content-items/{id:guid}/schedule" },
+        { "POST", "/api/content-items/{id:guid}/unschedule" },
+        { "POST", "/api/content-items/{id:guid}/retract" },
+        { "POST", "/api/content-items/{id:guid}/restore" },
+        { "POST", "/api/content-items/{id:guid}/revise" },
+        { "POST", "/api/content-items/{id:guid}/feature" },
+        { "POST", "/api/content-items/feature/reorder" },
+    };
+
+    [Fact]
+    public void ProgramCs_MapsEveryStaffContentRoute_ExactlyOnce_WithTheSharedPublishBucketOnTheFourPublishingRoutes()
+    {
+        using var factory = new WiringProbeFactory();
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+        string[] limited = ["publish", "schedule", "revise", "retract"];
+
+        foreach (var route in StaffContentRoutes())
+        {
+            var (method, pattern) = ((string)route[0], (string)route[1]);
+            var matches = endpoints
+                .Where(endpoint =>
+                    string.Equals(endpoint.RoutePattern.RawText, pattern, StringComparison.OrdinalIgnoreCase)
+                    && (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method) ?? false))
+                .ToList();
+            matches.Should().ContainSingle("{0} {1} must be wired into Program.cs exactly once (MapChannels -> MapStaffContent)", method, pattern);
+
+            var policy = matches[0].Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
+            var shouldLimit = limited.Any(action => pattern.EndsWith("/" + action, StringComparison.Ordinal));
+            policy.Should().Be(
+                shouldLimit ? ContentPublishRateLimiterPolicy.PolicyName : null,
+                "{0} {1}: publish/schedule/revise/retract share one per-staff bucket; reads and draft edits are unlimited",
+                method,
+                pattern);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(StaffContentRoutes))]
+    public async Task AnAnonymousStaffContentCall_IsRefused_NeverA404(string method, string pattern)
+    {
+        using var factory = new WiringProbeFactory(resolveExercise: true);
+        using var client = factory.CreateClient();
+
+        using var request = new HttpRequestMessage(
+            new HttpMethod(method), pattern.Replace("{id:guid}", "00000000-0000-0000-0000-000000000001", StringComparison.Ordinal));
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Unauthorized,
+            "{0} {1}: an anonymous caller is refused before any handler or database work (an unwired route would 404)",
+            method,
+            pattern);
+    }
+
+    [Fact]
+    public void ProgramCs_ResolvesTheStaffContentService_OverTheRealFunnel()
+    {
+        // Story 07: the endpoints' service, and both funnel seams it calls, resolve to the REAL funnel through AddChannels().
+        using var factory = new WiringProbeFactory();
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+
+        scope.ServiceProvider.GetRequiredService<StaffContentService>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IContentPublishService>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<IContentFeaturing>().Should().BeOfType<ContentPublishService>(
+            "feature and reorder go through the funnel too; nothing else writes ContentItem rows");
+
+        var once = new ServiceCollection().AddChannels();
+        var twice = new ServiceCollection().AddChannels().AddChannels();
+        twice.Count(d => d.ServiceType == typeof(StaffContentService)).Should().Be(1);
+        twice.Should().HaveCount(once.Count, "AddStaffContent() is idempotent (a second AddPolicy would throw at startup)");
     }
 
     /// <summary>Story 06: the participant content read routes, mapped by <c>MapChannels()</c>.</summary>

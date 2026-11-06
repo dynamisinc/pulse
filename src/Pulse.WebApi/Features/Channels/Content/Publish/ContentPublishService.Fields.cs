@@ -184,6 +184,8 @@ public sealed partial class ContentPublishService
                 Services = _services,
                 ContentItemId = existing?.Id,
                 TargetStatus = targetStatus,
+                Media = [.. media.Select(item => new PayloadMediaRef(item.AssetId, item.Role))],
+                HeroMediaId = heroMediaId,
             },
             cancellationToken);
         errors.AddRange(validation.Errors);

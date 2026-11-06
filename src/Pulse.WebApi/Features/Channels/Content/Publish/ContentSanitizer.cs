@@ -304,6 +304,13 @@ public static partial class ContentSanitizer
                 }
 
                 var value = WebUtility.HtmlDecode(rawValue ?? string.Empty);
+                if (_profile.AttributeValuePatterns.TryGetValue(tag.Name, out var rules)
+                    && rules.TryGetValue(name, out var pattern)
+                    && !pattern.IsMatch(value))
+                {
+                    continue;
+                }
+
                 if (UrlAttributes.Contains(name))
                 {
                     if (!IsAllowedUrl(value, _profile))

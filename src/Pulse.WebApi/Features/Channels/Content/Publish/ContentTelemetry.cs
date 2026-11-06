@@ -13,7 +13,8 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// <remarks>
 /// <para>
 /// <b>Types.</b> publish and restore → <c>content_published</c>, except a participant-origin publish of a
-/// <c>release</c>, which is the existing <c>press_release</c> instead (never both); revise → <c>content_revised</c>;
+/// <c>release</c>, which is the existing <c>press_release</c> instead (never both); revise and feature (story 07) →
+/// <c>content_revised</c>;
 /// retract and soft delete → <c>content_retracted</c>; schedule and unschedule → <see cref="ContentScheduled"/>; a
 /// scheduled publish the funnel refused (story 05) → <c>content_schedule_failed</c>, with the refusal in
 /// <c>payload.error</c>.
@@ -61,7 +62,7 @@ public static class ContentTelemetry
             ContentTransitions.Publish when item.Kind == ChannelVocabulary.KindRelease
                 && caller.Origin == ChannelVocabulary.OriginParticipant => PressRelease,
             ContentTransitions.Publish or ContentTransitions.Restore => ChannelTelemetryEventTypes.ContentPublished,
-            ContentTransitions.Revise => ChannelTelemetryEventTypes.ContentRevised,
+            ContentTransitions.Revise or ContentPublishService.FeatureAction => ChannelTelemetryEventTypes.ContentRevised,
             ContentTransitions.Retract or ContentPublishService.DeleteAction => ChannelTelemetryEventTypes.ContentRetracted,
             ContentTransitions.Schedule or ContentTransitions.Unschedule => ContentScheduled,
             ContentPublishService.ScheduleFailedAction => ChannelTelemetryEventTypes.ContentScheduleFailed,
