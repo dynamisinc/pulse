@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Data;
 
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
@@ -27,12 +28,16 @@ public sealed class A2CredentialFoundationMigrationTests
     public A2CredentialFoundationMigrationTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     [RequiresDockerFact]
-    public void TheMigration_IsTheLatest_AndSortsAfterA3()
+    public void TheMigration_ImmediatelyFollowsA3()
     {
+        // Adjacency, not "is the latest" (#665 cold review): the next wave's migration must not break this pin.
         using var context = new PulseDbContext(
             new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
-        var migrations = context.Database.GetMigrations();
-        migrations.Should().EndWith([PreviousMigration, MigrationUnderTest], "A2's one migration follows A3 (#670), which deploys first");
+        var migrations = context.Database.GetMigrations().ToList();
+        var previous = migrations.IndexOf(PreviousMigration);
+        previous.Should().BeGreaterThanOrEqualTo(0);
+        migrations.IndexOf(MigrationUnderTest).Should().Be(
+            previous + 1, "A2's one migration follows A3 (#670), which deploys first");
     }
 
     [RequiresDockerFact]
