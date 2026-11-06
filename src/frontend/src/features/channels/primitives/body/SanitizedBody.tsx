@@ -132,18 +132,21 @@ export function SanitizedBody({
 /**
  * Swaps each `<figure data-media-id>` for an empty host `div` (the media renders its own
  * `<figure>`, so the placeholder must not nest a second one) and collects the author's
- * caption as plain text. A figure with no usable id is dropped with its caption.
+ * caption as plain text. (The sanitizer already drops an empty or invalid id, so every
+ * figure matched here has one.) A placeholder nested inside another is skipped: the outer
+ * one's replacement detaches it, and a portal into detached DOM would load media unseen.
  */
 function replaceMediaFigures(container: HTMLElement): MediaTarget[] {
   const found: MediaTarget[] = []
   for (const figure of container.querySelectorAll(`figure[${MEDIA_ID_ATTR}]`)) {
+    if (!container.contains(figure)) continue
     const mediaId = figure.getAttribute(MEDIA_ID_ATTR)?.trim() ?? ''
     const caption = figure.querySelector('figcaption')?.textContent?.trim() || null
     const host = container.ownerDocument.createElement('div')
     host.className = styles.mediaHost ?? ''
     host.setAttribute('data-media-host', '')
     figure.replaceWith(host)
-    if (mediaId !== '') found.push({ element: host, mediaId, caption })
+    found.push({ element: host, mediaId, caption })
   }
   return found
 }

@@ -73,7 +73,7 @@ describe('EmbeddedPost', () => {
     render(<Providers><EmbeddedPost postId="p-1" /></Providers>)
     const skeleton = await screen.findByTestId('news-embedded-post-loading')
     expect(skeleton).toHaveAttribute('role', 'status')
-    expect(skeleton).toHaveAttribute('aria-busy', 'true')
+    expect(skeleton).toHaveAccessibleName('Loading post')
     expect(screen.queryByTestId('post-card')).toBeNull()
     await waitFor(() => expect(release).toBeDefined())
     release?.()

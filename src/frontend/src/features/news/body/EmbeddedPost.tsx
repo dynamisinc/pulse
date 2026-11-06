@@ -21,7 +21,7 @@
  * the feed's pattern) routes to the post's thread in the Social channel, and reports the
  * open through `onOpen` (story 19's `content_embed_open` telemetry hook, wired by 04).
  *
- * STATES. Loading: a skeleton (announced as busy, no motion under reduced-motion).
+ * STATES. Loading: a skeleton (a "Loading post" status, no motion under reduced-motion).
  * Unavailable, or an author not in the exercise cast: the in-fiction line "This post is
  * unavailable." (`role="note"`, icon plus words, never colour alone; Social's wording).
  *
@@ -101,7 +101,6 @@ function EmbeddedPostSkeleton() {
     <div
       className={styles.skeleton}
       role="status"
-      aria-busy="true"
       aria-label="Loading post"
       data-testid="news-embedded-post-loading"
     >

@@ -2,14 +2,17 @@
  * features/news/body/EmbeddedPost.module.css
  * The frame around an embedded Social post. It sits inside `SkinResetBoundary`, so no
  * outlet variable reaches here: colours come from the exercise brand (`--pulse-brand-*`)
- * with neutral fallbacks. The card itself is styled by Social alone.
+ * with neutral fallbacks. The fixed greys (border, tombstone, skeleton) are deliberate: an
+ * embed must look the same in every outlet, so it takes no skin colour; the skin-only
+ * colour rule in `ArticleBody.static.test.ts` does not apply to this file. The card itself
+ * is styled by Social alone.
  */
 
 .embed {
   display: block;
   max-width: 100%;
   margin: 0;
-  border: 1px solid #cfd4dc;
+  border: 1px solid #8b95a5;
   border-radius: 12px;
   overflow: hidden;
   background-color: var(--pulse-brand-surface, #ffffff);

@@ -76,6 +76,8 @@ describe.each(OUTLET_SKINS)('ArticleBody in %s', (key, tokens) => {
     const { container } = renderBody(PAYLOADS.join('\n'), tokens, key)
     const body = await screen.findByTestId('news-article-body')
     await screen.findByTestId('post-card')
+    // jsdom loads no image and fires no `onerror`, so `__pwned` alone would pass against a
+    // broken sanitizer; the DOM assertions below are the real check.
     expect(window.__pwned).toBeUndefined()
     expect(body.querySelector('script, iframe, form, math, style, img[src="x"]')).toBeNull()
     // An author svg never survives (the embed's own FontAwesome / seal icons are Social's).

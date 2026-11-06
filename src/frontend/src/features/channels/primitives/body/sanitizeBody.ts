@@ -104,10 +104,10 @@ purifier.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'href' && !ALLOWED_URI.test(data.attrValue.replace(URI_WHITESPACE, ''))) {
     data.keepAttr = false
   }
-  // `class` survives only as the pull-quote marker on a blockquote, normalised to that one token.
+  // `class` survives only as EXACTLY the pull-quote marker on a blockquote (the server's
+  // article-rich rule: any other value is dropped, not normalised).
   if (data.attrName === 'class') {
-    const tokens = data.attrValue.split(/\s+/)
-    if (node.nodeName === 'BLOCKQUOTE' && tokens.includes(PULL_QUOTE_CLASS)) {
+    if (node.nodeName === 'BLOCKQUOTE' && data.attrValue.trim() === PULL_QUOTE_CLASS) {
       data.attrValue = PULL_QUOTE_CLASS
     } else {
       data.keepAttr = false

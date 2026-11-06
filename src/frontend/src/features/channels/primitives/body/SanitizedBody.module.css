@@ -2,6 +2,10 @@
  * features/channels/primitives/body/SanitizedBody.module.css
  * Body typography from the outlet skin's CSS variables (FC-3b), each with a neutral
  * fallback. Authors cannot style the body (no `style` / `class` in the allowlist).
+ *
+ * Every element rule carries `:where(:not(pulse-post *))` so it never cascades into an
+ * embedded post (a portal inside `<pulse-post>`, news 06): the embed renders in Social's
+ * anatomy verbatim (SOC-002/004). `:where()` keeps the original specificity.
  */
 
 .body {
@@ -12,39 +16,39 @@
   overflow-wrap: break-word;
 }
 
-.body :where(p, ul, ol, blockquote, pre, figure, table) {
+.body :where(p, ul, ol, blockquote, pre, figure, table):where(:not(pulse-post *)) {
   margin: 0 0 1em;
 }
 
-.body :where(h2, h3, h4) {
+.body :where(h2, h3, h4):where(:not(pulse-post *)) {
   margin: 1.4em 0 0.5em;
   font-family: var(--pulse-skin-font-hed, inherit);
   line-height: 1.25;
 }
 
 /* Links are underlined, not colour-only (WCAG 1.4.1). */
-.body a {
+.body a:where(:not(pulse-post *)) {
   color: var(--pulse-skin-link, #0b57d0);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.body a:hover {
+.body a:where(:not(pulse-post *)):hover {
   text-decoration-thickness: 2px;
 }
 
-.body a:focus-visible {
+.body a:where(:not(pulse-post *)):focus-visible {
   outline: 3px solid var(--pulse-skin-link, #0b57d0);
   outline-offset: 2px;
   border-radius: 2px;
 }
 
-.body blockquote {
+.body blockquote:where(:not(pulse-post *)) {
   padding-left: 1em;
   border-left: 3px solid var(--pulse-skin-rule, #c4c9d1);
 }
 
-.body hr {
+.body hr:where(:not(pulse-post *)) {
   border: 0;
   border-top: 1px solid var(--pulse-skin-rule, #c4c9d1);
 }
@@ -62,12 +66,12 @@
   outline-offset: 2px;
 }
 
-.body table {
+.body table:where(:not(pulse-post *)) {
   margin: 0;
   border-collapse: collapse;
 }
 
-.body :where(th, td) {
+.body :where(th, td):where(:not(pulse-post *)) {
   padding: 4px 8px;
   border: 1px solid var(--pulse-skin-rule, #c4c9d1);
   text-align: left;

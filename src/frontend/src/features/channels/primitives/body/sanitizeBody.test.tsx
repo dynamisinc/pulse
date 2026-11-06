@@ -187,11 +187,12 @@ describe('sanitizeBodyHtml: href normalisation follows the browser (re-review W-
 })
 
 describe('sanitizeBodyHtml: the article-rich markers (news 06)', () => {
-  it('keeps class only as the pull-quote marker on a blockquote, normalised', () => {
+  it('keeps class only as exactly the pull-quote marker on a blockquote (server parity)', () => {
     expect(sanitizeBodyHtml('<blockquote class="pull-quote">q</blockquote>'))
       .toBe(`<blockquote class="${PULL_QUOTE_CLASS}">q</blockquote>`)
+    // Any other value is dropped, not normalised (story 01's article-rich rule).
     expect(sanitizeBodyHtml('<blockquote class="evil pull-quote huge">q</blockquote>'))
-      .toBe('<blockquote class="pull-quote">q</blockquote>')
+      .toBe('<blockquote>q</blockquote>')
   })
 
   it.each([

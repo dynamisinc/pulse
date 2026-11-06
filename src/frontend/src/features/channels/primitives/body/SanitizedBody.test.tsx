@@ -139,7 +139,10 @@ describe('SanitizedBody: inline media placeholders (news 06)', () => {
     // The placeholder figure is gone (no nested figure), and the hosts sit in body order.
     const body = screen.getByTestId('sanitized-body')
     expect(body.querySelectorAll(':scope > figure')).toHaveLength(0)
-    expect([...body.children].map(el => el.tagName)).toEqual(['P', 'DIV', 'DIV', 'P'])
+    const hosts = [...body.querySelectorAll('[data-media-host]')]
+    expect(hosts.map(host => host.firstElementChild?.getAttribute('data-testid')))
+      .toEqual(['media-m1', 'media-m2'])
+    expect(hosts.every(host => host.parentElement === body)).toBe(true)
     expect(container.querySelector('figcaption')).toBeNull()
   })
 
@@ -159,5 +162,15 @@ describe('SanitizedBody: inline media placeholders (news 06)', () => {
   it('a figure without data-media-id is left as authored', () => {
     renderMedia('<figure><figcaption>plain</figcaption></figure>', () => <span>x</span>)
     expect(screen.getByText('plain').closest('figure')).not.toBeNull()
+  })
+
+  it('a placeholder nested in another is never mounted into detached DOM', () => {
+    const renderMediaFn = vi.fn((id: string) => <span data-testid={`media-${id}`}>{id}</span>)
+    renderMedia(
+      '<figure data-media-id="outer"><figure data-media-id="inner"></figure></figure>',
+      renderMediaFn,
+    )
+    expect(renderMediaFn.mock.calls.map(([id]) => id)).toEqual(['outer'])
+    expect(screen.getByTestId('media-outer').isConnected).toBe(true)
   })
 })
