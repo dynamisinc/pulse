@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.EngineRuntime;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.BackgroundWork;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 
@@ -25,6 +27,7 @@ public static class EngineRuntimeServiceCollectionExtensions
         System.ArgumentNullException.ThrowIfNull(services);
 
         services.AddSingleton<IEngineTelemetryEmitter, EngineTelemetryEmitter>();
+        services.AddWakeSignal<EngineReviewTickSignal>(wakeOnClockChange: true);
         services.AddScoped<IEngineReviewStore, EngineReviewStore>();
 
         return services;

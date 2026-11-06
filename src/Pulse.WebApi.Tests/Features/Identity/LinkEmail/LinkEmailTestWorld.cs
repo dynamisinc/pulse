@@ -77,8 +77,11 @@ internal sealed class LinkEmailTestWorld
 
     public MsSqlContainerFixture Fixture => _fixture;
 
-    /// <summary>Seeds an exercise.</summary>
-    public async Task<Guid> SeedExerciseAsync(string? name = null)
+    /// <summary>
+    /// Seeds an exercise. <paramref name="name"/> is the INTERNAL name; <paramref name="participantName"/> is the
+    /// participant-facing one the email subject carries (§8.4).
+    /// </summary>
+    public async Task<Guid> SeedExerciseAsync(string? name = null, string? participantName = null)
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
@@ -90,6 +93,7 @@ internal sealed class LinkEmailTestWorld
             TimeZone = "America/New_York",
             Status = "live",
             CurrentScenarioTime = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero),
+            ParticipantName = participantName,
         });
         await seed.SaveChangesAsync();
         return id;

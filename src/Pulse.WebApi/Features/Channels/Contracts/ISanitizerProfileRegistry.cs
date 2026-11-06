@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Channels.Contracts;
 
 using System.Collections.Frozen;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// FC-7, named body-sanitization profiles over <c>PostSanitizer</c> (extended by profile, never forked;
@@ -52,6 +53,16 @@ public sealed record SanitizerProfile
     /// <summary>Per-element lowercase attribute allowlist (e.g. <c>a</c> → <c>href</c>). Absent = none.</summary>
     public IReadOnlyDictionary<string, IReadOnlySet<string>> AllowedAttributes { get; init; } =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Optional per-element, per-attribute value rules (lowercase element → lowercase attribute → pattern). An allowlisted
+    /// attribute that has a rule survives only when its entity-decoded value matches the pattern (the caller anchors it);
+    /// otherwise the attribute is removed and the element kept. Narrowing only: a rule can never let through anything the
+    /// allowlists above refuse. Absent = any value (news story 01: <c>blockquote[class=pull-quote]</c>, GUID-valued
+    /// <c>data-*</c> references).
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, Regex>> AttributeValuePatterns { get; init; } =
+        new Dictionary<string, IReadOnlyDictionary<string, Regex>>(StringComparer.Ordinal);
 
     /// <summary>The <c>rel</c> value forced onto every surviving <c>a</c>.</summary>
     public string ForcedLinkRel { get; init; } = "noopener noreferrer nofollow";

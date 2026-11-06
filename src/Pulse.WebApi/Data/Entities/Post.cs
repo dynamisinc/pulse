@@ -116,4 +116,13 @@ public sealed class Post : IExerciseScoped
 
     /// <summary>When the last edit was applied, in scenario time (COR-053); <c>null</c> when never edited.</summary>
     public DateTimeOffset? LastEditedScenarioTime { get; set; }
+
+    /// <summary>
+    /// Whether this post is SETUP content (the opening feed / pre-exercise history) rather than conduct content
+    /// (ADMIN-IDENTITY-MODEL §5.4). <c>NOT NULL DEFAULT 0</c>: existing rows were backfilled by the A3 migration
+    /// (<c>A3SetupContentParticipantName</c>); the write-path stamp (true only while the exercise is in
+    /// <c>build</c>, never for a participant-origin post) is exercise-build-golive/01. Staff-world only (XC-002):
+    /// never projected onto a participant response.
+    /// </summary>
+    public bool IsSetupContent { get; set; }
 }

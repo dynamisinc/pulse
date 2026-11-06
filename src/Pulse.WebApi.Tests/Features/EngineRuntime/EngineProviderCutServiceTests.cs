@@ -407,7 +407,7 @@ public sealed class EngineProviderCutServiceTests
 
         var cuts = providerCut ?? new GenerationProviderCutRegistry();
         var service = new EngineReviewService(
-            new EngineReviewStore(db),
+            new EngineReviewStore(db, new EngineReviewTickSignal()),
             db,
             context,
             clock,

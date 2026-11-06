@@ -61,6 +61,17 @@ public interface IContentKindDescriptor
     /// <returns>The options, or null (the default) for none.</returns>
     /// <remarks>A default interface member: the funnel calls it through <see cref="IContentKindDescriptor"/>.</remarks>
     PublishOptions? ResolvePublishOptions(ContentItem item) => null;
+
+    /// <summary>
+    /// The alert suggestion for ONE item: what the staff publish dialog pre-fills when it opens on <paramref name="item"/>.
+    /// Defaults to <see cref="DefaultAlertMapping"/>; a kind whose suggestion depends on the item (news suggests an
+    /// <c>advisory</c> only for a breaking article, NWS-012) overrides it. Like <see cref="DefaultAlertMapping"/> it is a
+    /// suggestion only: the funnel never raises an alert from it (FC-7a).
+    /// </summary>
+    /// <param name="item">The item the dialog is publishing.</param>
+    /// <returns>The suggestion, or null for none.</returns>
+    /// <remarks>Additive default interface member (news story 01). Dialogs should call this rather than read the property.</remarks>
+    PublishAlertOptions? SuggestAlert(ContentItem item) => DefaultAlertMapping;
 }
 
 /// <summary>What <see cref="IContentKindDescriptor.ValidatePayloadAsync"/> may read.</summary>
@@ -80,7 +91,22 @@ public sealed record PayloadValidationContext
 
     /// <summary>The target status of the write (<see cref="ChannelVocabulary.ContentStatuses"/>).</summary>
     public required string TargetStatus { get; init; }
+
+    /// <summary>
+    /// The write's media list as the funnel resolved it: every entry names an in-scope asset the kind's
+    /// <see cref="IContentKindDescriptor.AllowedMediaKinds"/> allows (or the write already failed). Empty when the write
+    /// carries none. Lets a kind add media rules of its own (news: one hero, a video hero needs a poster).
+    /// </summary>
+    public IReadOnlyList<PayloadMediaRef> Media { get; init; } = [];
+
+    /// <summary>The write's <c>heroMediaId</c> as the funnel resolved it, or null.</summary>
+    public Guid? HeroMediaId { get; init; }
 }
+
+/// <summary>One media entry of the write, as passed to <see cref="PayloadValidationContext.Media"/>.</summary>
+/// <param name="MediaId">The in-scope media asset id.</param>
+/// <param name="Role">The role (<see cref="ChannelVocabulary.MediaRoles"/>).</param>
+public sealed record PayloadMediaRef(Guid MediaId, string Role);
 
 /// <summary>The result of <see cref="IContentKindDescriptor.ValidatePayloadAsync"/>.</summary>
 /// <param name="Errors">One message per problem, keyed by payload path where useful; empty when valid.</param>

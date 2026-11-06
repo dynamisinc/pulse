@@ -105,8 +105,8 @@ public sealed class LinkEmailIsolationTests
     [RequiresDockerFact]
     public async Task TheExerciseNameInTheSubject_IsTheCallersExercise()
     {
-        var exerciseA = await _world.SeedExerciseAsync(name: "Exercise A name");
-        await _world.SeedExerciseAsync(name: "Exercise B name");
+        var exerciseA = await _world.SeedExerciseAsync(name: "Exercise A internal", participantName: "Exercise A name");
+        await _world.SeedExerciseAsync(name: "Exercise B internal", participantName: "Exercise B name");
         var staff = await _world.SeedStaffAsync((exerciseA, "controller"));
         await _world.SeedParticipantAsync(exerciseA, "Alice In A");
         var mailer = new FakeParticipantLinkMailer();

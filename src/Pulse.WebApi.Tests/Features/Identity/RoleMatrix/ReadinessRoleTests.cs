@@ -113,7 +113,8 @@ public sealed class ReadinessRoleTests
         controller.GetProperty("status").GetString().Should().Be("ok", "the world's own controllers are enrolled");
         controller.GetProperty("detail").ValueKind.Should().Be(JsonValueKind.Null, "detail is null (not omitted) when ok");
         controller.GetProperty("label").GetString().Should().NotBeNullOrWhiteSpace();
-        blocking[1].GetProperty("status").GetString().Should().Be("notChecked");
+        blocking[1].GetProperty("status").GetString().Should().Be(
+            "open", "the matrix world sets no participant-facing name (exercise-build-golive/09 made this a real check)");
         blocking[2].GetProperty("status").GetString().Should().Be("open");
     }
 }

@@ -13,6 +13,11 @@
  *    imports Social. With no render prop the placeholder stays empty. Note for E4: React
  *    events from an embed bubble through the REACT tree (to this component's parent), not
  *    through the body `div`, so a card-level `onClick` above this sees embed clicks.
+ *  - `<figure data-media-id="…">` placeholders (news story 06) are swapped for an empty
+ *    host `div` and filled by `renderInlineMedia(id, caption)` the same way; `caption` is
+ *    the author's own `figcaption` text (plain text, or `null`). With no render prop, or a
+ *    render that returns nothing (an id not in `item.media`), the host stays empty and
+ *    takes no space: never a broken image.
  *
  * Presentational only. Typography comes from skin CSS variables.
  */
@@ -21,7 +26,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { INSIM_LINK_ATTR, PULSE_POST_TAG, sanitizeBodyHtml } from './sanitizeBody'
+import { INSIM_LINK_ATTR, MEDIA_ID_ATTR, PULSE_POST_TAG, sanitizeBodyHtml } from './sanitizeBody'
 import styles from './SanitizedBody.module.css'
 
 export interface SanitizedBodyProps {
@@ -29,6 +34,11 @@ export interface SanitizedBodyProps {
   readonly bodyHtml: string
   /** Renders an embedded Pulse post for a `<pulse-post data-id>` placeholder. */
   readonly renderEmbeddedPost?: (postId: string) => ReactNode
+  /**
+   * Renders an inline image / video for a `<figure data-media-id>` placeholder (news 06).
+   * `caption` is the author's `figcaption` text, or `null` when there was none.
+   */
+  readonly renderInlineMedia?: (mediaId: string, caption: string | null) => ReactNode
   readonly className?: string
 }
 
@@ -37,11 +47,29 @@ interface EmbedTarget {
   readonly postId: string
 }
 
-export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: SanitizedBodyProps) {
+interface MediaTarget {
+  readonly element: Element
+  readonly mediaId: string
+  readonly caption: string | null
+}
+
+interface Placeholders {
+  readonly embeds: readonly EmbedTarget[]
+  readonly media: readonly MediaTarget[]
+}
+
+const NO_PLACEHOLDERS: Placeholders = { embeds: [], media: [] }
+
+export function SanitizedBody({
+  bodyHtml,
+  renderEmbeddedPost,
+  renderInlineMedia,
+  className,
+}: SanitizedBodyProps) {
   const navigate = useNavigate()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const html = useMemo(() => sanitizeBodyHtml(bodyHtml), [bodyHtml])
-  const [embeds, setEmbeds] = useState<readonly EmbedTarget[]>([])
+  const [{ embeds, media }, setPlaceholders] = useState<Placeholders>(NO_PLACEHOLDERS)
 
   // The sanitized HTML is written here, into a container React renders NO children into, so
   // a re-render can never reset it and wipe the embed portals mounted inside it (React's own
@@ -58,7 +86,7 @@ export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: Sanit
       const postId = element.getAttribute('data-id')?.trim() ?? ''
       if (postId !== '') found.push({ element, postId })
     }
-    setEmbeds(found)
+    setPlaceholders({ embeds: found, media: replaceMediaFigures(container) })
   }, [html])
 
   const handleClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -91,8 +119,36 @@ export function SanitizedBody({ bodyHtml, renderEmbeddedPost, className }: Sanit
           element,
           `${postId}-${index}`,
         ))}
+      {renderInlineMedia !== undefined
+        && media.map(({ element, mediaId, caption }, index) => createPortal(
+          renderInlineMedia(mediaId, caption),
+          element,
+          `media-${mediaId}-${index}`,
+        ))}
     </>
   )
+}
+
+/**
+ * Swaps each `<figure data-media-id>` for an empty host `div` (the media renders its own
+ * `<figure>`, so the placeholder must not nest a second one) and collects the author's
+ * caption as plain text. (The sanitizer already drops an empty or invalid id, so every
+ * figure matched here has one.) A placeholder nested inside another is skipped: the outer
+ * one's replacement detaches it, and a portal into detached DOM would load media unseen.
+ */
+function replaceMediaFigures(container: HTMLElement): MediaTarget[] {
+  const found: MediaTarget[] = []
+  for (const figure of container.querySelectorAll(`figure[${MEDIA_ID_ATTR}]`)) {
+    if (!container.contains(figure)) continue
+    const mediaId = figure.getAttribute(MEDIA_ID_ATTR)?.trim() ?? ''
+    const caption = figure.querySelector('figcaption')?.textContent?.trim() || null
+    const host = container.ownerDocument.createElement('div')
+    host.className = styles.mediaHost ?? ''
+    host.setAttribute('data-media-host', '')
+    figure.replaceWith(host)
+    found.push({ element: host, mediaId, caption })
+  }
+  return found
 }
 
 /**
