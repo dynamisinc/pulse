@@ -34,11 +34,20 @@ using Pulse.WebApi.Features.Social.Pins;
 /// <c>live</c> / <c>paused</c>, legacy <c>active</c>): the frame goes to <see cref="ExerciseRealtimeHub.GroupNameFor"/>
 /// as before. Anything else — <c>build</c>, <c>completed</c>, <c>archived</c>, an unknown literal, or no exercise
 /// row — FAILS CLOSED: the frame goes to <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/> only, so a participant
-/// tab still connected after EndEx receives nothing while staff consoles keep their live view. The hub stays
+/// tab still connected after EndEx receives nothing (bar the correction exception below) while staff consoles keep their live view. The hub stays
 /// un-gated on CONNECT by design (the overlay client re-GETs <c>/api/overlay-state</c> on reconnect); this send
 /// side is what closes the risk the gating middleware names. The gate lives here rather than in a decorator so
 /// that every caller (storyline auto-send, inject bursts, approve, controller-as-persona, pins, takedowns,
 /// edits, engagement) inherits it and the registered <see cref="IFeedBroadcaster"/> stays this concrete type.
+/// </para>
+/// <para>
+/// <b>The one narrow exception: corrections reach an ended review (ended read-only review F-3).</b> In
+/// <c>completed</c> (and legacy <c>complete</c>) ONLY <c>PostRemoved</c> and <c>PostEdited</c> still go to the
+/// exercise-wide group: participants keep reading the run after EndEx, so a staff takedown or edit made during the
+/// review must reach tabs that are open on it, or they keep showing content staff have pulled or corrected. Nothing
+/// that ADDS to the world passes (new posts, pins, engagement counts, the clock, channel content, alerts stay
+/// staff-only), and <c>build</c> / <c>archived</c> / unknown stay fully closed. The exception is opted into per frame
+/// (<see cref="ResolveTargetAsync"/>'s <c>reachesEndedReview</c>), so a new frame is closed by default.
 /// </para>
 /// <para>
 /// <b>Accepted race:</b> each send reads the status once, then calls <c>SendAsync</c>. An EndEx committed between
@@ -133,15 +142,16 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
     /// exercise-wide group from <see cref="ExerciseRealtimeHub.GroupNameFor"/>, the same group
     /// <c>PostReceived</c> uses, because participants are the ones who must drop the post. While participants are
     /// admitted it never targets <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/>: staff connections already belong
-    /// to the exercise-wide group, so they receive it exactly once. (Outside those states the EndEx gate in the type's
-    /// remarks sends to the staff group INSTEAD — still exactly once.)
+    /// to the exercise-wide group, so they receive it exactly once. (In <c>completed</c> it still goes to the exercise-wide
+    /// group — the F-3 correction exception — and in every other closed state the EndEx gate in the type's remarks
+    /// sends it to the staff group INSTEAD — still exactly once.)
     /// </remarks>
     public async Task BroadcastPostRemovedAsync(
         Guid exerciseId,
         Guid postId,
         CancellationToken cancellationToken = default)
     {
-        var target = await ResolveTargetAsync(exerciseId, PostRemovedEvent, cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostRemovedEvent, cancellationToken, reachesEndedReview: true);
         await target.SendAsync(PostRemovedEvent, PostRemovedDto.For(postId), cancellationToken: cancellationToken);
     }
 
@@ -165,7 +175,8 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
     /// <remarks>
     /// Sends <c>PostEdited</c> with <see cref="PostEditedDto"/> to the exercise-wide group from
     /// <see cref="ExerciseRealtimeHub.GroupNameFor"/>, exactly as <c>PostRemoved</c> and <c>PostPinChanged</c> do. Staff
-    /// connections already belong to that group, so consoles receive it once too.
+    /// connections already belong to that group, so consoles receive it once too. Like <c>PostRemoved</c> it passes
+    /// the F-3 correction exception: in <c>completed</c> it still reaches the participants reviewing the run.
     /// </remarks>
     public async Task BroadcastPostEditedAsync(
         Guid exerciseId,
@@ -174,7 +185,7 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
     {
         ArgumentNullException.ThrowIfNull(edited);
 
-        var target = await ResolveTargetAsync(exerciseId, PostEditedEvent, cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostEditedEvent, cancellationToken, reachesEndedReview: true);
         await target.SendAsync(PostEditedEvent, edited, cancellationToken: cancellationToken);
     }
 
@@ -287,13 +298,26 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
     /// <param name="exerciseId">The server-resolved exercise the frame belongs to (COR-001).</param>
     /// <param name="eventName">The client event about to be sent, for the suppression log.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="reachesEndedReview">
+    /// <c>true</c> only for the correction frames (<c>PostRemoved</c>, <c>PostEdited</c>) that must still reach
+    /// participants reading a <c>completed</c> exercise (F-3, see the type's remarks). Every other frame leaves it
+    /// <c>false</c> and stays staff-only after EndEx.
+    /// </param>
     /// <returns>The client proxy the frame must be sent to.</returns>
-    private async Task<IClientProxy> ResolveTargetAsync(Guid exerciseId, string eventName, CancellationToken cancellationToken)
+    private async Task<IClientProxy> ResolveTargetAsync(
+        Guid exerciseId, string eventName, CancellationToken cancellationToken, bool reachesEndedReview = false)
     {
         // Exercise is the scope, not an IExerciseScoped entity: this is a direct status read by the SERVER-resolved
         // id the caller fans out for, never a client-supplied one.
         var status = await _lifecycleStatusReader(exerciseId, cancellationToken);
         if (ExerciseLifecycleStates.IsLivePushOpen(status))
+        {
+            return _hubContext.Clients.Group(ExerciseRealtimeHub.GroupNameFor(exerciseId));
+        }
+
+        if (reachesEndedReview
+            && ExerciseLifecycleStates.TryParse(status, out var canonical)
+            && canonical == ExerciseLifecycleStates.Completed)
         {
             return _hubContext.Clients.Group(ExerciseRealtimeHub.GroupNameFor(exerciseId));
         }

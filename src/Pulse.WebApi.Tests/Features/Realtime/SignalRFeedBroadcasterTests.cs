@@ -207,13 +207,45 @@ public class SignalRFeedBroadcasterTests
         "AlertsChanged",
     };
 
-    /// <summary>Every (frame, closed status) pair: build, completed, archived, an unknown literal, and a missing row.</summary>
+    /// <summary>
+    /// The ONLY frames that still reach participants in <c>completed</c> (ended read-only review F-3): the corrections
+    /// a staff member makes to content participants are still reading. Pinned exactly — adding a frame here is a ruling.
+    /// </summary>
+    private static readonly string[] EndedReviewCorrectionFrames = ["PostRemoved", "PostEdited"];
+
+    /// <summary>The completed literals: canonical and legacy.</summary>
+    private static readonly string[] CompletedStatuses = ["completed", "complete"];
+
+    /// <summary>
+    /// Every (frame, closed status) pair: build, completed (and legacy complete), archived, an unknown literal, and a
+    /// missing row — EXCEPT the F-3 correction frames in completed, which <see cref="CorrectionFramesInCompleted"/> pins.
+    /// </summary>
     public static TheoryData<string, string?> FramesInClosedStates()
     {
         var data = new TheoryData<string, string?>();
         foreach (var frame in AllFrames)
         {
-            foreach (var status in new[] { "build", "completed", "archived", "not-a-state", null })
+            foreach (var status in new[] { "build", "completed", "complete", "archived", "not-a-state", null })
+            {
+                if (EndedReviewCorrectionFrames.Contains(frame) && CompletedStatuses.Contains(status))
+                {
+                    continue;
+                }
+
+                data.Add(frame, status);
+            }
+        }
+
+        return data;
+    }
+
+    /// <summary>The F-3 exception: (correction frame, completed literal) pairs.</summary>
+    public static TheoryData<string, string> CorrectionFramesInCompleted()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var frame in EndedReviewCorrectionFrames)
+        {
+            foreach (var status in CompletedStatuses)
             {
                 data.Add(frame, status);
             }
@@ -292,6 +324,45 @@ public class SignalRFeedBroadcasterTests
             c => c.Group($"exercise:{exerciseId}:staff"),
             Times.Never,
             "staff connections are in the exercise-wide group too, so they get the frame exactly once");
+    }
+
+    [Theory]
+    [MemberData(nameof(CorrectionFramesInCompleted))]
+    public async Task Broadcast_CorrectionFrames_InACompletedExercise_StillReachTheParticipantsReviewingIt(
+        string frame, string status)
+    {
+        // Ended read-only review F-3: participants keep reading after EndEx, so a staff takedown (PostRemoved) or edit
+        // (PostEdited) made during the review must reach their open tabs. Exercise-wide group, exactly once (staff
+        // connections are members of it), never the staff group.
+        var exerciseId = Guid.NewGuid();
+        var participantGroup = new Mock<IClientProxy>();
+        var staffGroup = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}")).Returns(participantGroup.Object);
+        clients.Setup(c => c.Group($"exercise:{exerciseId}:staff")).Returns(staffGroup.Object);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
+
+        await SendAsync(TestFeedBroadcasters.Create(hubContext.Object, status), frame, exerciseId);
+
+        participantGroup.Verify(
+            p => p.SendCoreAsync(frame, It.Is<object?[]>(args => args.Length == 1), It.IsAny<CancellationToken>()),
+            Times.Once,
+            $"a {frame} correction in '{status}' must reach the participants still reading the ended run");
+        clients.Verify(
+            c => c.Group($"exercise:{exerciseId}:staff"),
+            Times.Never,
+            "staff connections are in the exercise-wide group too, so they get the correction exactly once");
+    }
+
+    [Fact]
+    public void TheEndedReviewException_IsExactlyTheTwoCorrectionFrames()
+    {
+        // Pins the exception's width: every frame NOT listed here is covered by FramesInClosedStates in completed,
+        // so widening the exception without updating this list fails the closed-state theory.
+        AllFrames.Cast<object[]>().Select(row => (string)row[0]).Where(EndedReviewCorrectionFrames.Contains).Should().BeEquivalentTo(
+            ["PostRemoved", "PostEdited"],
+            "only takedowns and edits reach an ended review; nothing that adds to the world does");
     }
 
     [Theory]

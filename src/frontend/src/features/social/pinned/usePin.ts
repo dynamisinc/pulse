@@ -32,6 +32,7 @@ import { useSession } from '@/core/auth'
 import { useTransientMessage, type UseTransientMessageResult } from '../hooks/useTransientMessage'
 import { deletePin, putPin } from './pinService'
 import { pinState, viewerEngagement } from './pinEvents'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** Shown (and announced) when a pin / unpin write fails and is rolled back. */
 export const PIN_FAILURE_MESSAGE = "Couldn't update your pin. Please try again."
@@ -63,7 +64,9 @@ export interface UsePinResult {
 export function usePin(options: UsePinOptions): UsePinResult {
   const { postId, initiallyPinned } = options
   const session = useSession()
-  const canPin = !session.isReadOnly && session.personaId !== undefined
+  // Read-only session OR exercise ended: every write is off (personal READ views are unaffected).
+  const canWrite = useCanWrite()
+  const canPin = canWrite && session.personaId !== undefined
 
   const ownNotice = useTransientMessage()
   const { show, clear } = options.notice ?? ownNotice

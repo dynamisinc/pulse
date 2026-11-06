@@ -90,6 +90,16 @@ public sealed class ActiveEnrollmentSweepTests
                 continue; // the DbSet property itself is declared as Set<Enrollment>().
             }
 
+            if (relativePath.Replace('\\', '/').EndsWith("Data/SqlApplicationLock.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                // sp_getapplock only (a named transaction lock): it reads no table. The exemption holds only while the
+                // file never names enrollments; if it ever does, it is swept like any other raw SQL.
+                lines.Should().NotContain(
+                    line => line.Contains("Enrollment", StringComparison.Ordinal),
+                    "SqlApplicationLock is exempt only because its raw SQL reaches no table");
+                continue;
+            }
+
             for (var i = 0; i < lines.Length; i++)
             {
                 var code = StripLineComment(lines[i]);

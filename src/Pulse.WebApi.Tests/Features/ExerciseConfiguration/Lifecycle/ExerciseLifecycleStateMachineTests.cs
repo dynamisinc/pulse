@@ -176,11 +176,113 @@ public sealed class ExerciseLifecycleStateMachineTests
         ExerciseLifecycleStates.IsOverlayStateServed(state).Should().Be(
             served, "an overlay cannot render if the endpoint that carries it is refused (decision 2)");
 
-    /// <summary>The carve-out is the OVERLAY endpoint's alone — it does not reopen participant access.</summary>
+    /// <summary>
+    /// The overlay carve-out does not reopen participant ACCESS (every verb): completed opens READS only, through the
+    /// separate read carve-out below.
+    /// </summary>
     [Fact]
     public void IsOverlayStateServed_DoesNotWidenParticipantAccess() =>
         ExerciseLifecycleStates.IsParticipantAccessible("completed").Should().BeFalse(
-            "completed still serves no feed, thread, persona or shell-config read — only /api/overlay-state");
+            "completed is not participant-accessible: it serves reads (the ended review) and refuses every write");
+
+    /// <summary>
+    /// <b>The read carve-out (Tom, 2026-10-19), over EVERY literal:</b> canonical, legacy, cased, padded, unknown and
+    /// missing. A participant read is served exactly where <c>ParticipantReadsAccepted</c> holds.
+    /// </summary>
+    [Theory]
+    [InlineData("build", false)]
+    [InlineData("staged", true)]
+    [InlineData("live", true)]
+    [InlineData("paused", true)]
+    [InlineData("completed", true)]
+    [InlineData("archived", false)]
+    [InlineData("scheduled", false)]
+    [InlineData("active", true)]
+    [InlineData("complete", true)]
+    [InlineData("Completed", true)]
+    [InlineData(" completed ", true)]
+    [InlineData("ARCHIVED", false)]
+    [InlineData("running", false)]
+    [InlineData("endex", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsParticipantReadServed_IsExactlyParticipantReadsAccepted(string? state, bool served)
+    {
+        ExerciseLifecycleStates.IsParticipantReadServed(state).Should().Be(
+            served, "a participant read is served in '{0}' exactly when reads are accepted", state);
+        ExerciseLifecycleStates.IsParticipantReadServed(state).Should().Be(
+            ExerciseLifecycleStates.BehaviourOf(state).ParticipantReadsAccepted, "it IS the behaviour flag, not a copy");
+        ExerciseLifecycleStates.IsOverlayStateServed(state).Should().Be(
+            served, "the overlay carve-out is re-expressed through the same flag (they are the same set of states)");
+    }
+
+    /// <summary>
+    /// The gate's full SERVE decision (<see cref="ExerciseLifecycleGatedRoutes.IsServed"/>), every literal crossed with
+    /// every verb on a non-overlay route: GET/HEAD follow the read carve-out, writes follow participant access — so
+    /// <c>completed</c> serves reads and refuses writes, and <c>build</c>/<c>archived</c> refuse everything.
+    /// </summary>
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    [InlineData("scheduled")]
+    [InlineData("active")]
+    [InlineData("complete")]
+    [InlineData("running")]
+    [InlineData(null)]
+    public void GatedRoutesIsServed_ReadsFollowTheReadFlag_WritesFollowParticipantAccess(string? state)
+    {
+        var path = new Microsoft.AspNetCore.Http.PathString("/api/feed");
+        var readsServed = ExerciseLifecycleStates.BehaviourOf(state).ParticipantReadsAccepted;
+        var writesServed = ExerciseLifecycleStates.IsParticipantAccessible(state);
+
+        foreach (var read in new[] { "GET", "HEAD", "get" })
+        {
+            ExerciseLifecycleGatedRoutes.IsServed(state, read, path).Should().Be(
+                readsServed, "{0} in '{1}' is a read", read, state);
+        }
+
+        foreach (var write in new[] { "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "BOGUS", string.Empty })
+        {
+            ExerciseLifecycleGatedRoutes.IsServed(state, write, path).Should().Be(
+                writesServed, "'{0}' in '{1}' is not a read, so only participant access serves it", write, state);
+        }
+
+        ExerciseLifecycleGatedRoutes.IsServed(state, null, path).Should().Be(
+            writesServed, "a missing method is not a read (fail closed)");
+    }
+
+    /// <summary>The headline, named: completed reads served, completed writes refused; archived/build nothing.</summary>
+    [Fact]
+    public void GatedRoutesIsServed_Completed_ReadsYes_WritesNo_AndBuildArchivedNothing()
+    {
+        var posts = new Microsoft.AspNetCore.Http.PathString("/api/posts");
+
+        ExerciseLifecycleGatedRoutes.IsServed("completed", "GET", posts).Should().BeTrue();
+        ExerciseLifecycleGatedRoutes.IsServed("completed", "HEAD", posts).Should().BeTrue();
+        foreach (var write in new[] { "POST", "PUT", "PATCH", "DELETE" })
+        {
+            ExerciseLifecycleGatedRoutes.IsServed("completed", write, posts).Should().BeFalse("Tom: '403, closed'");
+        }
+
+        foreach (var closed in new[] { "build", "archived" })
+        {
+            foreach (var verb in new[] { "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE" })
+            {
+                ExerciseLifecycleGatedRoutes.IsServed(closed, verb, posts).Should().BeFalse(
+                    "'{0}' stays verb-blind and fully closed ({1})", closed, verb);
+            }
+        }
+    }
+
+    /// <summary>#375's tripwire still holds: opening completed reads did NOT open live pushes.</summary>
+    [Fact]
+    public void TheReadCarveOut_DoesNotOpenLivePushInCompleted() =>
+        ExerciseLifecycleStates.IsLivePushOpen("completed").Should().BeFalse(
+            "reads reopen after EndEx; nothing new may keep arriving in an open tab");
 
     /// <summary>A legacy row's accessibility follows its canonical mapping, not its spelling.</summary>
     [Theory]

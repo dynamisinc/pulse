@@ -80,6 +80,59 @@ public sealed class LifecycleOverlayPushTests
         AssertBystanderUntouched(hub, bystander);
     }
 
+    /// <summary>
+    /// The ended, read-only review (Tom, 2026-10-19): the live → completed push carries <c>ended: true</c> with
+    /// <c>state: none</c> — the shell's "exercise has ended" signal reaches an open tab without a re-GET — and equals
+    /// the GET.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task LiveToCompleted_PushCarriesEndedTrue_AndMatchesTheGet()
+    {
+        var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
+        var hub = new RecordingHub();
+        await using var host = await StartAsync(exerciseId, hub);
+
+        await TransitionAsync(host, ExerciseLifecycleStates.Completed);
+
+        var push = hub.SendsTo(exerciseId).Should().ContainSingle().Which;
+        push.State.Should().Be("none", "completed is never the blocking 'endex' overlay");
+        JsonFields(push.Json).Should().Contain("ended", "true", "the EndEx push tells the shell the exercise has ended");
+        await AssertParityAsync(host, push);
+        AssertBystanderUntouched(hub, bystander);
+    }
+
+    /// <summary>
+    /// A Freeze CLEAR while the exercise is completed (the clearing publish is never gated) pushes the composed GET
+    /// body — so it carries <c>ended: true</c> too, and cannot flip an ended tab back to "not ended".
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task FreezeClearWhileCompleted_PushCarriesEndedTrue_AndMatchesTheGet()
+    {
+        var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
+        var hub = new RecordingHub();
+        await using var host = await StartAsync(exerciseId, hub);
+        await FreezeAsync(host, exerciseId);
+        JsonFields(hub.SendsTo(exerciseId).Last().Json).Should().Contain("ended", "false", "a live Freeze has not ended");
+        await TransitionAsync(host, ExerciseLifecycleStates.Completed);
+
+        var cleared = await host.Services.GetRequiredService<PauseTierRegistry>().SetTierAsync(
+            exerciseId,
+            PauseTier.Running,
+            "human-controller-01",
+            new PauseClockStart(DateTimeOffset.UtcNow, TimeZoneInfo.Utc));
+        cleared.Outcome.Should().Be(PauseTierOutcome.Applied);
+
+        var pushes = hub.SendsTo(exerciseId);
+        pushes.Should().HaveCount(3, "the Freeze, the EndEx and the Freeze clear each push once");
+        var clearPush = pushes[2];
+        clearPush.State.Should().Be("none");
+        JsonFields(clearPush.Json).Should().Contain("ended", "true", "the Freeze-clear push carries the composed GET body");
+        await AssertParityAsync(host, clearPush);
+        AssertBystanderUntouched(hub, bystander);
+    }
+
     /// <summary>live → paused pushes the lifecycle's holding page to connected tabs.</summary>
     [RequiresDockerFact]
     public async Task LiveToPaused_PushesTheLifecyclePauseProjection()
@@ -96,6 +149,7 @@ public sealed class LifecycleOverlayPushTests
         push.Register.Should().Be(
             "out-of-fiction", "with nothing chosen on either side the composer falls back to out-of-fiction");
         push.Sequence.Should().BePositive("an unsequenced push is dropped by the client as unorderable (SG-002)");
+        JsonFields(push.Json).Should().Contain("ended", "false", "a paused exercise has not ended");
         await AssertParityAsync(host, push);
         AssertBystanderUntouched(hub, bystander);
     }
