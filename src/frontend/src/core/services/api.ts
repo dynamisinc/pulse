@@ -141,7 +141,7 @@ import { reportIfWriteRefused } from './writeRefusal'
  * part of the public axios config surface — a documented escape hatch this
  * file alone reads and writes.
  */
-interface PulseRequestFlags {
+export interface PulseRequestFlags {
   /**
    * Tells the REQUEST interceptor to skip attaching the stored access token
    * for this one call, even though the caller didn't supply its own
@@ -219,6 +219,7 @@ const NO_REFRESH_RETRY_PATHS = new Set([
   '/auth/shared',
   '/auth/join',
   '/auth/word',
+  '/auth/password/reset', // #576: pre-auth; body carries a one-time token + password
 ])
 
 function isExcludedFromRefresh(url: string | undefined): boolean {

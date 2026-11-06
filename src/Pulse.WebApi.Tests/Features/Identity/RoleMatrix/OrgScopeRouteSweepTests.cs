@@ -65,6 +65,7 @@ public sealed class OrgScopeRouteSweepTests
         ["POST /api/org/exercises"] = "org-admin exercise creation in the caller's organization",
         ["PATCH /api/org/exercises/{exerciseId:guid}"] = "org-admin exercise management, resolved InOrganization (a foreign id is the bare 404)",
         ["POST /api/org/exercises/{exerciseId:guid}/archive"] = "org-admin exercise archive, resolved InOrganization (a foreign id is the bare 404)",
+        ["POST /api/org/people/{personId:guid}/password-reset"] = "org-admin copy-link password reset (#576), OrgAdminOnly on an org-scope session, tenant-bound by the caller's organization (a foreign id is the bare 404)",
     };
 
     /// <summary>
@@ -74,16 +75,17 @@ public sealed class OrgScopeRouteSweepTests
     private static readonly string[] HubEndpointPatterns = ["/hubs/exercise", "/hubs/exercise/negotiate"];
 
     /// <summary>
-    /// Routes behind <c>RequireChannelEnabled</c> (channels-foundation story 08) whose slug path values the sweep cannot
-    /// seed. The channel-enablement filter runs BEFORE the handler and answers an unresolved exercise scope with the bare,
+    /// Routes behind <c>RequireChannelEnabled</c> (channels-foundation story 08) whose path values (slugs, or an id the sweep
+    /// does not seed) the sweep cannot make real. The channel-enablement filter runs BEFORE the handler and answers an unresolved exercise scope with the bare,
     /// indistinguishable 404 (XC-001: a disabled channel looks like an unmapped route), so no lookup ever runs for an
     /// org-scope session. That gate 404 is the refusal here, even on an unseeded id. Pinned to the mapped routes below.
     /// </summary>
-    private static readonly string[] ChannelGatedSlugRoutes =
+    private static readonly string[] ChannelGatedRoutes =
     [
         "GET /api/channels/news/content/{outletSlug}/{contentSlug}",
         "GET /api/channels/press/content/{outletSlug}/{contentSlug}",
         "GET /api/channels/weather/content/{outletSlug}/{contentSlug}",
+        "GET /api/portal/resources/{id:guid}", // portal04 (#815): behind RequireChannelEnabled("portal")
     ];
 
     /// <summary>The ANONYMOUS methodless endpoints: the platform health probes (no session, no exercise content).</summary>
@@ -101,7 +103,7 @@ public sealed class OrgScopeRouteSweepTests
 
         OrgScopeRoutes.Keys.Where(key => !mapped.Contains(key)).Should().BeEmpty(
             "an allowlisted org-scope route that is no longer mapped is stale — remove it");
-        ChannelGatedSlugRoutes.Where(key => !mapped.Contains(key)).Should().BeEmpty(
+        ChannelGatedRoutes.Where(key => !mapped.Contains(key)).Should().BeEmpty(
             "a channel-gated route that is no longer mapped is stale — remove it");
     }
 
@@ -176,7 +178,7 @@ public sealed class OrgScopeRouteSweepTests
                 using var response = await client.SendAsync(request);
 
                 var refused = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
-                    || ((allIdsReal || ChannelGatedSlugRoutes.Contains(key, StringComparer.Ordinal))
+                    || ((allIdsReal || ChannelGatedRoutes.Contains(key, StringComparer.Ordinal))
                         && response.StatusCode is HttpStatusCode.NotFound);
                 if (!refused)
                 {

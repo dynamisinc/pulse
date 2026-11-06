@@ -226,6 +226,7 @@ public sealed class ExerciseManagementService
         // the cross-exercise read is own-only (PersonId == the caller's session-carried id).
         var holdsPlanner = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .AnyAsync(
                 e => e.ExerciseId == exercise.Id

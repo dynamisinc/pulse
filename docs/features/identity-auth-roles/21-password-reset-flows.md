@@ -18,6 +18,7 @@ Staff and participants need to recover access without Dynamis support ([`docs/de
 - [ ] `Cache-Control: no-store` on both routes (also story 26 / #485). Tokens are stored only as SHA-256 hashes.
 - [ ] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
 - [ ] Telemetry (XC-004): the action emits an event (wall + scenario time, acting `PersonId` and role, channel `system`) per the v0 schema, in the same unit of work as the mutation.
+  - *Amended 2026-10-19 (#665 Gate-1 W-002):* staff credential events are **org-scoped** and have no exercise, so they are recorded as `OrgAuditEvent` (ADMIN-IDENTITY-MODEL §7.5) in the same unit of work, not as an exercise `TelemetryEvent`. Participant (exercise) credential events, when built, still emit XC-004.
 - [ ] Two worlds: staff reset page uses COBRA; the participant reset page uses the exercise brand skin, no COBRA, no default MUI look, mobile-first; no internal exercise name shown (#376).
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; status/error states are never color-only; async results announced via a live region.
 - [ ] User guide (C5 docs-as-done): `docs/guide/getting-started.md` is updated in the same PR (and `tools/guide-screenshots` if a screen changed), or the PR states "no guide impact". and `troubleshooting.md` (forgot password; temporary password card workflow).
@@ -36,3 +37,17 @@ Wave A2, after A1. Owns `CredentialToken`; 20 consumes it. Needs 18 (#480) for t
 
 ## Tests
 Policy unit tests; token lifecycle tests (single use, expiry, voiding); anti-enumeration timing/shape test; session-revocation test; foreign-org/exercise route tests; RTL for both reset pages.
+
+### Test linkage — #576 backend subset (credential foundation; forgot-password, participant reset, temporary password and the participant reset page are NOT in this subset; the staff reset page is)
+- `PasswordPolicyTests` (all) — AC "Policy (§3.2)": staff 12 / participant 8 floors, 128 ceiling in code points, no composition rules, embedded top-10k blocklist, org name / email local part / display name, specific non-leaking codes.
+- `CredentialTokenServiceTests.Issue_ReturnsAUrlSafe256BitTokenOnce_StoresOnlyItsSha256_WithThePurposesLifetime` — AC "Reset" (lifetimes), AC "Tokens are stored only as SHA-256 hashes".
+- `CredentialTokenServiceTests.Issue_VoidsTheEarlierUnusedTokensOfTheSamePurpose_Only_AndOnlyForThatPerson` — AC "Reset" (issuing voids earlier unused tokens of the same purpose).
+- `CredentialTokenServiceTests.FindRedeemable_IsNullForUnknownExpiredUsedOrMalformed_AndTheRowOtherwise`, `.TryClaim_IsSingleUse_AcrossTwoUnitsOfWork_AndRefusesAnotherOrganizationsBound` — AC "Reset" (single use, uniform error).
+- `CredentialTokenServiceTests.CredentialChangeInvalidation_VoidsEveryOutstandingTokenOfBothPurposes_ForThatPersonOnly`, `CredentialEndpointsHttpTests.Reset_VoidsTheOlderInvite_TheOlderResetLink_AndTheOlderOrgChoice` — Copilot review 5 fold (older invite, older reset link and older org choice all fail).
+- `CredentialEndpointsHttpTests.Reset_FromAnAdminIssuedLink_SetsThePassword_SignsInWithIt_AndRevokesEveryLiveSession` — AC "Reset" (sets the password, revokes every live session, `identity.credential.changed` org audit), AC `Cache-Control: no-store`.
+- `CredentialEndpointsHttpTests.Reset_WithAnUnknownExpiredUsedOrMissingToken_IsOneUniform400`, `.Reset_WithAPolicyViolation_IsTheSpecificCode_AndDoesNotConsumeTheToken` — AC "Reset" (uniform error), AC "Policy" (specific codes).
+- `CredentialEndpointsHttpTests.AdminReset_ByAnOrgAdmin_ReturnsTheLinkOnce_NoStore_StoresOnlyTheHash_AndAudits`, `.AdminReset_IsRefusedToAPlanner_AndToAnAnonymousCaller_AndConflictsForADisabledPerson`, `.AdminReset_WithoutAFrontendBaseUrl_Is503_AndIssuesNothing` — AC "Admin reset" (staff half: org admin only; copy-link flow because email is off; `IPulseMailer` no-op).
+- `CredentialEndpointsHttpTests.AdminReset_ForAnotherCustomersPerson_IsTheSameBare404AsAMissingId_AndIssuesNothing`, `.Reset_ATokenStampedWithAnotherOrganization_CannotReachThePerson`, `CompositionRootWiringTests.TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds` — AC "Isolation" (foreign-org bare 404; the person-id route is allow-listed). Neither route takes an exercise, so there is no foreign-exercise case.
+- `CredentialCompositionRootWiringTests` (both) — Program.cs wiring; the reset route is pre-auth and the admin route is not.
+- Staff reset page, two worlds + a11y + token handling: `src/frontend/src/features/staffPasswordReset/pages/StaffSetPasswordPage.test.tsx` (COBRA staff page; token read from the fragment and stripped; live regions; policy-code messages)
+- User guide: `docs/guide/getting-started.md` ("Setting or resetting your password") and `docs/guide/troubleshooting.md` (set-password page messages)

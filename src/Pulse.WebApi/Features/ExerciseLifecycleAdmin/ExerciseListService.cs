@@ -101,6 +101,7 @@ public sealed class ExerciseListService
                         // .InOrganization(caller.OrganizationId); own-only (PersonId == the session-carried person id).
                         && _dbContext.Enrollments
                             .IgnoreQueryFilters()
+                            .Active()
                             .Any(e => e.ExerciseId == exercise.Id
                                 && e.PersonId == personId
                                 && e.Role == EnrollmentRoles.Planner))))

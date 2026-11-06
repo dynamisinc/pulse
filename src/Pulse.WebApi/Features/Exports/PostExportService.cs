@@ -256,7 +256,7 @@ public sealed class PostExportService
         // confines it to the resolved exercise; the predicate is explicit too); StaffUser is bounded by the exercise's
         // own tenant. Same join as InjectQueueService.ReadRosterAsync.
         var staff = await (
-            from assignment in _dbContext.Enrollments.AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            from assignment in _dbContext.Enrollments.Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where assignment.ExerciseId == exerciseId
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(organizationId)
                 on assignment.PersonId equals (Guid?)staffUser.Id

@@ -34,7 +34,7 @@ import type { ExerciseScope } from '@/core/exerciseContext'
 import { api } from '@/core/services/api'
 import { createRoleAwareRoutes } from './routes'
 import type { RoleAwareEntryProps } from './RoleAwareEntry'
-import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH, STAFF_RESET_PATH } from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
@@ -121,6 +121,7 @@ describe('createRoleAwareRoutes', () => {
     expect(routes.map(r => r.path)).toEqual([
       LOGIN_PATH,
       STAFF_LOGIN_PATH,
+      STAFF_RESET_PATH, // #576
       `${JOIN_PATH}/:token`,
       JOIN_PATH,
       '*',

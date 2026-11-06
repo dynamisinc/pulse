@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Enrollments;
 
@@ -248,7 +249,11 @@ public sealed class EnrollmentServiceTests
         }
 
         await using var read = _kit.ReadContext();
-        (await read.Enrollments.IgnoreQueryFilters().AnyAsync(e => e.Id == leadEnrollment)).Should().BeFalse();
+        // identity-auth-roles/21: the revoke is a SOFT delete (XC-010) — the row survives as history, released and revoked.
+        (await read.Enrollments.IgnoreQueryFilters().Active().AnyAsync(e => e.Id == leadEnrollment)).Should().BeFalse();
+        var revokedRow = await read.Enrollments.IgnoreQueryFilters().SingleAsync(e => e.Id == leadEnrollment);
+        revokedRow.DeletedAt.Should().NotBeNull("the revoke stamps DeletedAt instead of removing the row");
+        revokedRow.IsLead.Should().BeFalse("the lead is released before the row is revoked");
         (await read.Enrollments.IgnoreQueryFilters().AnyAsync(e => e.ExerciseId == exercise && e.IsLead)).Should().BeFalse(
             "the exercise has no lead until a planner sets one");
         _kit.Swamped.Calls.Should().ContainSingle().Which.ExerciseId.Should().Be(exercise);

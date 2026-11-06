@@ -483,6 +483,7 @@ public sealed class DayWordService
         // identity-auth-roles/16: the caller's OWN enrollment on the RESOLVED exercise, never one named by the request.
         // Enrollment is IExerciseScoped (central filter) and the predicates are explicit too (StaffUser.Id == Person.Id).
         var role = await _dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .Where(enrollment => enrollment.PersonId == current.StaffUserId && enrollment.ExerciseId == exerciseId)
             .Select(enrollment => enrollment.Role)

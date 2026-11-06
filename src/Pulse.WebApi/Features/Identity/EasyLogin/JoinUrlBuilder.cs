@@ -64,9 +64,12 @@ public sealed class JoinUrlBuilder
 
     /// <summary>
     /// Reads and validates the configured base: an absolute <c>http</c>/<c>https</c> URL with no query, fragment or
-    /// user-info, normalised to <c>scheme://authority/path</c> with every trailing slash trimmed.
+    /// user-info, normalised to <c>scheme://authority/path</c> with every trailing slash trimmed. Public so the other
+    /// SPA links (identity-auth-roles/21's staff reset link) build on the SAME validated base instead of re-parsing it.
     /// </summary>
-    private bool TryGetBase(out string baseUrl)
+    /// <param name="baseUrl">The normalised base on success; empty otherwise.</param>
+    /// <returns><c>true</c> when a usable base is configured.</returns>
+    public bool TryGetBase(out string baseUrl)
     {
         baseUrl = string.Empty;
 

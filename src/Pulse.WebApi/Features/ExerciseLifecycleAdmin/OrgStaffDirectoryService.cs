@@ -85,7 +85,7 @@ public sealed class OrgStaffDirectoryService
         var rows = await (
             // org-scope-exempt(TenantChecked): every row must inner-join BOTH an Exercise and a StaffUser of the
             // caller's OWN server-resolved organization, so no other customer's enrollment can be listed.
-            from assignment in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            from assignment in _dbContext.Enrollments.IgnoreQueryFilters().Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             join exercise in _dbContext.Exercises.AsNoTracking().InOrganization(tenant)
                 on assignment.ExerciseId equals exercise.Id
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(tenant)
