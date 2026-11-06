@@ -1,0 +1,35 @@
+/*
+ * features/weather/components/product/SeverityChip.module.css
+ * The fill and text colours are set inline from severity.ts (skin `ext.weather` hue + fixed
+ * white); this file is shape and type only.
+ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--pulse-skin-radius, 4px);
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.icon {
+  flex: none;
+}
+
+.label {
+  /* The word is authored upper case; nothing transforms it. */
+  text-transform: none;
+}
+
+/* Forced colours drop the fill: keep the chip's outline so it still reads as a chip. */
+@media (forced-colors: active) {
+  .chip {
+    border: 2px solid CanvasText;
+  }
+}

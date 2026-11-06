@@ -112,6 +112,14 @@ export const SOCIAL_RESERVED_SEGMENTS: readonly string[] = [
   'login',
   'join',
   'staff',
+  // The other channels' prefixes (FC-4) and the reserved display route: the channel
+  // router hands these to their own channel, so a persona handle here could never
+  // resolve to a profile (channels-foundation 12).
+  'portal',
+  'news',
+  'press',
+  'weather',
+  'display',
   THREAD_HANDLE_PLACEHOLDER,
 ]
 
@@ -158,8 +166,13 @@ export const socialPaths = {
    * `handle` is optional: omit it (post id only) and the placeholder segment is
    * used -- see {@link THREAD_HANDLE_PLACEHOLDER}.
    */
-  thread: (postId: string, handle: string = THREAD_HANDLE_PLACEHOLDER): string =>
-    `/${encodeURIComponent(handle)}/status/${encodeURIComponent(postId)}`,
+  thread: (postId: string, handle: string = THREAD_HANDLE_PLACEHOLDER): string => {
+    // A handle that is a reserved segment (e.g. a persona called `weather`, whose
+    // `/weather/...` the channel router hands to the Weather channel) takes the
+    // placeholder: the thread resolves by id alone.
+    const segment = isReservedSegment(handle) ? THREAD_HANDLE_PLACEHOLDER : handle
+    return `/${encodeURIComponent(segment)}/status/${encodeURIComponent(postId)}`
+  },
 }
 
 /**
