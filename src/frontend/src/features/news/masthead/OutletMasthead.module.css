@@ -1,0 +1,208 @@
+/*
+ * features/news/masthead/OutletMasthead.module.css
+ * Story 03. One stylesheet, four variants selected by `data-masthead` (the skin's
+ * `ext.news.masthead`). Every value is a skin CSS custom property (F13) with a neutral
+ * fallback; no skin key appears here. Text on a fill uses the derived `--pulse-skin-on-*`
+ * colour (always ≥4.5:1), and focus rings use `currentColor` so they track the fill.
+ */
+
+.root {
+  display: block;
+  background: var(--pulse-skin-bg, #ffffff);
+  color: var(--pulse-skin-text, #1c1c1c);
+}
+
+.band {
+  background: var(--pulse-skin-bg, #ffffff);
+  color: var(--pulse-skin-text, #1c1c1c);
+}
+
+.well {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: calc(var(--pulse-skin-space, 8px) * 1.5) 16px;
+  box-sizing: border-box;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.name {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--pulse-skin-font-masthead, system-ui, sans-serif);
+  font-size: clamp(1.5rem, 1.1rem + 2vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.nameLink {
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.nameLink:hover {
+  text-decoration: underline;
+}
+
+.nameLink:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.logo {
+  display: block;
+  height: clamp(32px, 6vw, 56px);
+  width: auto;
+  max-width: 100%;
+}
+
+.tagline {
+  margin: 4px 0 0;
+  font-family: var(--pulse-skin-font-dek, system-ui, sans-serif);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+/* The skin's own live-chip word: decorative branding on the breaking fill. */
+.liveChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--pulse-skin-radius, 4px);
+  background: var(--pulse-skin-breaking, #a4161a);
+  color: var(--pulse-skin-on-breaking, #ffffff);
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.liveChip::before {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Mobile: name (+ chip) and the Sections disclosure only. */
+@media (max-width: 767.98px) {
+  .tagline {
+    display: none;
+  }
+}
+
+/* ---- tv-bar: the accent bar, condensed caps ------------------------------------------ */
+.root[data-masthead='tv-bar'] .band {
+  background: var(--pulse-skin-accent, #1f4e79);
+  color: var(--pulse-skin-on-accent, #ffffff);
+}
+
+.root[data-masthead='tv-bar'] .name {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.root[data-masthead='tv-bar'] .tagline {
+  font-family: var(--pulse-skin-font-kicker, system-ui, sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8125rem;
+}
+
+/* ---- centered-nameplate: centred (its double rule is below) ----------------------------- */
+
+.root[data-masthead='centered-nameplate'] .well {
+  text-align: center;
+}
+
+.root[data-masthead='centered-nameplate'] .nameRow {
+  justify-content: center;
+}
+
+.root[data-masthead='centered-nameplate'] .name {
+  font-size: clamp(1.75rem, 1.2rem + 2.6vw, 3rem);
+  font-weight: 600;
+}
+
+.root[data-masthead='centered-nameplate'] .tagline {
+  font-style: italic;
+}
+
+/* ---- wire-strip: a flat strip, accent rule on top, kicker-family tagline ---------------- */
+.root[data-masthead='wire-strip'] .band {
+  background: var(--pulse-skin-surface, #f5f6f7);
+  border-top: max(3px, calc(var(--pulse-skin-rule-weight, 1px) * 4)) solid
+    var(--pulse-skin-accent, #1f4e79);
+  border-bottom: var(--pulse-skin-rule-weight, 1px) solid var(--pulse-skin-rule, #c9ced4);
+}
+
+.root[data-masthead='wire-strip'] .well {
+  padding-block: var(--pulse-skin-space, 8px);
+}
+
+.root[data-masthead='wire-strip'] .name {
+  font-size: clamp(1.25rem, 1rem + 1.2vw, 1.75rem);
+  letter-spacing: 0.01em;
+}
+
+.root[data-masthead='wire-strip'] .tagline {
+  font-family: var(--pulse-skin-font-kicker, monospace);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---- tabloid-flag: the loud flag on the breaking fill ----------------------------------- */
+.root[data-masthead='tabloid-flag'] .name {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--pulse-skin-breaking, #a4161a);
+  color: var(--pulse-skin-on-breaking, #ffffff);
+  font-size: clamp(1.75rem, 1.2rem + 3vw, 3.25rem);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  max-width: calc(100% - 8px);
+  transform: rotate(-1.5deg);
+}
+
+.root[data-masthead='tabloid-flag'] .liveChip {
+  background: var(--pulse-skin-accent, #1f4e79);
+  color: var(--pulse-skin-on-accent, #ffffff);
+}
+
+.root[data-masthead='tabloid-flag'] .tagline {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.root[data-masthead='tabloid-flag'] .band {
+  border-bottom: max(2px, calc(var(--pulse-skin-rule-weight, 1px) * 2)) solid
+    var(--pulse-skin-text, #1c1c1c);
+}
+
+/* ---- skin refinements on any variant ------------------------------------------------------ */
+
+/* The skin's own band fill (ext.news.mastheadFill); text is the derived on-fill colour. */
+.root[data-fill='true'] .band {
+  /* The fill and its on-colour are set together inline, so they can never disagree. */
+  background: var(--news-masthead-fill, var(--pulse-skin-accent, #1f4e79));
+  color: var(--news-masthead-on-fill, var(--pulse-skin-on-accent, #ffffff));
+}
+
+/* A double rule under the nameplate (always for centered-nameplate; ext.news.mastheadDoubleRule). */
+.root[data-double-rule='true'] .band {
+  border-bottom: max(3px, calc(var(--pulse-skin-rule-weight, 1px) * 3)) double
+    var(--pulse-skin-text, #1c1c1c);
+}
