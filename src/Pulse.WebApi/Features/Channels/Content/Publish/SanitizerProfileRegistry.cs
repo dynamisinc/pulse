@@ -111,6 +111,21 @@ public sealed partial class SanitizerProfileRegistry : ISanitizerProfileRegistry
             }
         }
 
+        // A value rule must name an allowed element/attribute exactly: a mistyped or mixed-case key would silently narrow
+        // nothing (news story 01).
+        foreach (var (element, rules) in profile.AttributeValuePatterns)
+        {
+            foreach (var attribute in rules.Keys)
+            {
+                if (!profile.AllowedAttributes.TryGetValue(element, out var allowed) || !allowed.Contains(attribute))
+                {
+                    throw new ArgumentException(
+                        $"Sanitizer profile '{name}' has a value rule for '{element}[{attribute}]', which it does not allow.",
+                        nameof(profile));
+                }
+            }
+        }
+
         foreach (var scheme in profile.AllowedUrlSchemes)
         {
             if (!PermittedSchemes.Contains(scheme))

@@ -25,6 +25,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Pulse.Core.Tests" />
+    <!-- Engine-runtime story 07: the restart-restore seams (EngineAutonomyState.Restore, Storyline.Restore,
+         IGenerationProviderCutSeed) are internal so only the WebApi rehydrator (and its tests) can reach them. -->
+    <InternalsVisibleTo Include="Pulse.WebApi" />
+    <InternalsVisibleTo Include="Pulse.WebApi.Tests" />
   </ItemGroup>
 
 </Project>

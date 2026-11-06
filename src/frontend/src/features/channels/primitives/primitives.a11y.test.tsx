@@ -87,7 +87,7 @@ describe('primitives: keyboard', () => {
   })
 
   it.each([
-    ['features/channels/primitives/body/SanitizedBody.module.css', '.body a:focus-visible'],
+    ['features/channels/primitives/body/SanitizedBody.module.css', '.body a:where(:not(pulse-post *)):focus-visible'],
     ['features/channels/primitives/media/ContentMedia.module.css', '.docLink:focus-visible'],
   ])('%s has a visible focus style (%s)', (path, selector) => {
     const css = readSrcFile(path)

@@ -80,7 +80,8 @@ public sealed class EngineAmbientGovernanceOptions
 /// <para>
 /// <b>Process memory, by design, and fail-safe.</b> Only non-resting policies are stored; an exercise with no entry
 /// reads <see cref="AmbientTierPolicy.Off"/>. A restart therefore resets every exercise to <c>off</c> — no ambient
-/// content until a controller turns it back on (persistence is wave C3, after Session A's A1 schema).
+/// content until a controller turns it back on — unless the engine-runtime story 07 rehydrator re-installs the
+/// persisted policy through <see cref="InstallPersisted"/> (which never re-arms <c>autonomous</c>, decision Q1).
 /// </para>
 /// <para>
 /// <b>Only a human raises it (§8.2).</b> <see cref="TrySet"/> is called only by the controller-role settings POST;
@@ -216,6 +217,68 @@ public sealed class EngineAmbientPolicyRegistry
         return false;
     }
 
+    /// <summary>
+    /// STARTUP RESTORE ONLY (engine-runtime story 07): installs an exercise's persisted policy as a FRESH slot through
+    /// the registry's own compare-and-set primitive, under the fail-closed rule of decision Q1. <see cref="AmbientPolicyMode.Off"/>
+    /// and <see cref="AmbientPolicyMode.Review"/> (drafts for a human) are installed as persisted;
+    /// <see cref="AmbientPolicyMode.Autonomous"/> (posts without a human) is a raise and is installed as
+    /// <see cref="AmbientPolicyMode.Off"/> with its caps and allow-lists kept — the same lowering
+    /// <see cref="DemoteAutonomous"/> applies — and the persisted policy is handed back as the held "previous" for a
+    /// later, controller-confirmed restore through <see cref="TrySet"/> (and so through every raise check).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>CAS semantics unchanged (story 07 "CAS semantics are unchanged").</b> The install is a <c>TryAdd</c> of a new
+    /// <c>Slot</c> — the same primitive <see cref="TrySet"/> uses from the resting <see cref="AmbientTierPolicy.Off"/> — so
+    /// it is mutually atomic with <see cref="TrySet"/>, <see cref="Set"/> and <see cref="DemoteAutonomous"/>. The installed
+    /// instance is exactly what <see cref="Get"/> then returns, so <c>TrySet(expected: Get(id), …)</c> accepts it.
+    /// </para>
+    /// <para>
+    /// <b>The in-memory slot stays the authority; the row is a follower.</b> If any writer stored a policy for the
+    /// exercise before the load reached it, that live policy is newer and is kept: nothing is installed and
+    /// <see cref="AmbientPolicyInstallResult.Installed"/> is <c>false</c>. A persisted row can therefore never
+    /// overwrite — or resurrect — a policy a controller or the engine just set.
+    /// </para>
+    /// <para>Never raises: the only modes this can store are the persisted <c>Off</c>/<c>Review</c> or <c>Off</c>. No audit
+    /// event is emitted here; the rehydrator records the restore in its single <c>engine.state_restored</c> event.</para>
+    /// <para>
+    /// <b>A corrupt row fails loudly, before anything is installed.</b> The row is re-validated with the same
+    /// context-free rules the settings POST applies before <see cref="TrySet"/> (<see cref="AmbientPolicyValidator.Validate"/>):
+    /// a defined mode; caps of 0 or more, per-minute ≤ the exercise's <see cref="MaxEnginePostsPerMinute"/>, per-hour ≤ 60 ×
+    /// that cap; topics in the ambient vocabulary; at most <see cref="AmbientPolicyValidator.MaxPersonaAllowListLength"/>
+    /// non-empty persona ids; non-null allow-lists. The governed autonomy flag is NOT re-checked here: a persisted
+    /// <c>Autonomous</c> is never installed (it boots <c>Off</c>), and the held previous only comes back through the
+    /// settings POST, which checks the flag. Two rules need exercise data this seam does not have and are left to the S4
+    /// rehydrator / the existing runtime re-checks: every allow-listed persona is a persona of THIS exercise, and of an
+    /// ambient-eligible type (the loop's eligible cast and the publish re-check already ignore any other id). The
+    /// per-minute cap is read through <see cref="MaxEnginePostsPerMinute"/> — the exercise's loop when it is registered,
+    /// otherwise the default config — so S4 must install the ambient policy after the loop registration if an exercise's
+    /// cap can ever differ from the default.
+    /// </para>
+    /// </remarks>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="persisted">The policy read from the exercise's persisted row.</param>
+    /// <returns>Whether it was installed, the policy <see cref="Get"/> now returns, and any withheld Autonomous policy.</returns>
+    /// <exception cref="ArgumentException"><paramref name="persisted"/> has an undefined mode, a null allow-list, or fails
+    /// <see cref="AmbientPolicyValidator.Validate"/> (a corrupt row; the rehydrator fails closed, Q7).</exception>
+    internal AmbientPolicyInstallResult InstallPersisted(Guid exerciseId, AmbientTierPolicy persisted)
+    {
+        EnsureScoped(exerciseId);
+        ArgumentNullException.ThrowIfNull(persisted);
+        ValidatePersisted(exerciseId, persisted);
+
+        var raise = persisted.Mode == AmbientPolicyMode.Autonomous;
+        var install = raise ? persisted with { Mode = AmbientPolicyMode.Off } : persisted;
+
+        if (_policies.TryAdd(exerciseId, new Slot(install)))
+        {
+            return new AmbientPolicyInstallResult(Installed: true, Current: install, HeldPrevious: raise ? persisted : null);
+        }
+
+        // A live policy is already stored: it is newer than the row, so the row loses (fail closed, no overwrite).
+        return new AmbientPolicyInstallResult(Installed: false, Current: Get(exerciseId), HeldPrevious: null);
+    }
+
     /// <summary>The exercise's global engine cap (ADP-011): its loop's <c>RateConfig</c>, or the default when it has no loop.</summary>
     /// <param name="exerciseId">The exercise.</param>
     /// <returns><see cref="RateGovernanceConfig.MaxEnginePostsPerMinute"/> for the exercise.</returns>
@@ -266,6 +329,34 @@ public sealed class EngineAmbientPolicyRegistry
         return registration?.PersonasByHandle.Values.FirstOrDefault(persona => persona.InstanceId == personaId)?.Dossier.Type;
     }
 
+    private void ValidatePersisted(Guid exerciseId, AmbientTierPolicy persisted)
+    {
+        if (!Enum.IsDefined(persisted.Mode))
+        {
+            throw new ArgumentException($"'{(int)persisted.Mode}' is not a defined ambient-policy mode.", nameof(persisted));
+        }
+
+        if (persisted.TopicAllowList is null || persisted.PersonaAllowList is null)
+        {
+            throw new ArgumentException("A persisted ambient policy needs both allow-lists (empty = none).", nameof(persisted));
+        }
+
+        // The same pure rules the settings POST runs before TrySet. Autonomy authorization is passed as granted on purpose:
+        // a persisted Autonomous is installed as Off, never armed (see InstallPersisted's remarks).
+        var validation = AmbientPolicyValidator.Validate(
+            AmbientPolicyModes.ToLiteral(persisted.Mode),
+            persisted.MaxPerMinute,
+            persisted.MaxPerHour,
+            persisted.TopicAllowList,
+            persisted.PersonaAllowList.Select(id => id.ToString()).ToList(),
+            MaxEnginePostsPerMinute(exerciseId),
+            autonomyAuthorized: true);
+        if (!validation.IsValid)
+        {
+            throw new ArgumentException($"The persisted ambient policy is invalid: {validation.Error}", nameof(persisted));
+        }
+    }
+
     private static void EnsureScoped(Guid exerciseId)
     {
         if (exerciseId == Guid.Empty)
@@ -280,6 +371,15 @@ public sealed class EngineAmbientPolicyRegistry
         public AmbientTierPolicy Policy { get; } = policy;
     }
 }
+
+/// <summary>
+/// The outcome of <see cref="EngineAmbientPolicyRegistry.InstallPersisted"/> (engine-runtime story 07): whether the
+/// persisted policy was installed, the policy now in effect, and the withheld Autonomous policy (decision Q1).
+/// </summary>
+/// <param name="Installed"><c>true</c> when the persisted policy (or its Off demotion) was stored; <c>false</c> when a newer live policy was kept.</param>
+/// <param name="Current">The policy <see cref="EngineAmbientPolicyRegistry.Get"/> returns after the call — the instance <c>TrySet</c> compares against.</param>
+/// <param name="HeldPrevious">The persisted <see cref="AmbientPolicyMode.Autonomous"/> policy booted as Off, kept as "previous" for a human restore; otherwise <c>null</c>.</param>
+internal sealed record AmbientPolicyInstallResult(bool Installed, AmbientTierPolicy Current, AmbientTierPolicy? HeldPrevious);
 
 /// <summary>Serializes <see cref="AmbientPolicyMode"/> as <c>off</c> / <c>review</c> / <c>autonomous</c>.</summary>
 public sealed class AmbientPolicyModeJsonConverter : MappedEnumJsonConverter<AmbientPolicyMode>
