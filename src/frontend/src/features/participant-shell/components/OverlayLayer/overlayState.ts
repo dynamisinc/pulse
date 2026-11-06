@@ -103,10 +103,11 @@ import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useExerciseContext, useOptionalExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { registerSessionReset } from '@/core/auth/sessionReset'
+import { onWriteRefused } from '@/core/services/writeRefusal'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
 import type { OverlayRegister, OverlayState, OverlayStateKind } from './types'
@@ -118,7 +119,7 @@ const OVERLAY_STATE_PATH = '/overlay-state'
 const OVERLAY_STATE_CHANGED_EVENT = 'OverlayStateChanged'
 
 /** Wire shape of the (future) `/overlay-state` response body. */
-type OverlayStateResponseBody = OverlayState
+type OverlayStateResponseBody = Omit<OverlayState, 'ended'> & { readonly ended?: unknown }
 
 /**
  * All valid overlay states / registers. The runtime guards check membership
@@ -164,6 +165,7 @@ const MOCK_OVERLAY_STATE: OverlayStateResponseBody = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 /**
@@ -204,6 +206,7 @@ async function fetchOverlayState(): Promise<OverlayState> {
     state: response.data.state,
     register: response.data.register,
     message: response.data.message,
+    ended: (response.data as { ended?: unknown }).ended === true,
   }
 }
 
@@ -218,6 +221,7 @@ const DEFAULT_OVERLAY_STATE: OverlayState = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +240,7 @@ interface WireOverlayState {
   readonly state: OverlayStateKind
   readonly register: OverlayRegister
   readonly message: string
+  readonly ended?: unknown
   readonly sequence?: number
 }
 
@@ -262,11 +267,41 @@ function readSequence(wire: WireOverlayState): number {
 }
 
 function toOverlayState(wire: WireOverlayState): OverlayState {
-  return { state: wire.state, register: wire.register, message: wire.message }
+  return {
+    state: wire.state,
+    register: wire.register,
+    message: wire.message,
+    ended: wire.ended === true,
+  }
 }
 
 /** The current live snapshot. Starts at the safe `'none'` default (fail closed). */
 let liveSnapshot: OverlayState = DEFAULT_OVERLAY_STATE
+
+/**
+ * True once the server has answered at least once for THIS session (a GET, a push, or a 403
+ * clear). Until then `ended` is only the first-paint scope seed; after, it is authoritative.
+ */
+let liveSettled = false
+
+/**
+ * THE ENDED LATCH (ended read-only review F-2). True once `ended` has been seen TRUE. Once
+ * the server has said `ended: true` for an exercise, nothing it says later in this session
+ * clears it: `completed -> archived` answers the 403 re-GET (applied as the default,
+ * `ended: false`) and pushes `ended: false`, and un-ending the tab there would bring the write
+ * controls back over a run that is over. There is no `completed -> live` transition in COR-032's
+ * table today; a future Reopen must clear this latch deliberately.
+ *
+ * Scoped by exercise id (`bindLiveExercise`, from the shell's resolved scope) so a different
+ * exercise starts fresh, and dropped by the session reset (a new identity re-learns from its GET).
+ */
+let endedLatched = false
+
+/** The exercise the latch was set for (`liveExerciseId` at the time). */
+let endedLatchedFor: string | null = null
+
+/** The exercise the live source is serving (keys the latch). `null` until a shell binds one. */
+let liveExerciseId: string | null = null
 
 /** The `sequence` of the most recently applied state — the stale-push cutoff. */
 let lastAppliedSequence = 0
@@ -306,6 +341,10 @@ function notifyLive(): void {
 }
 
 /** Returns the live snapshot. Stable reference until the next change. */
+function getLiveSettled(): boolean {
+  return liveSettled
+}
+
 function getLiveSnapshot(): OverlayState {
   return liveSnapshot
 }
@@ -323,13 +362,22 @@ function subscribeLive(listener: () => void): () => void {
  * a real change, so an idempotent re-GET (the reconnect resync) does not churn
  * every subscriber.
  */
-function applyLive(next: OverlayState, sequence: number): void {
+function applyLive(incoming: OverlayState, sequence: number): void {
+  if (incoming.ended) {
+    endedLatched = true
+    endedLatchedFor = liveExerciseId
+  }
+  const next = endedLatched && !incoming.ended ? { ...incoming, ended: true } : incoming
   lastAppliedSequence = sequence
+  const wasSettled = liveSettled
+  liveSettled = true
   if (
     next.state === liveSnapshot.state &&
     next.register === liveSnapshot.register &&
-    next.message === liveSnapshot.message
+    next.message === liveSnapshot.message &&
+    next.ended === liveSnapshot.ended
   ) {
+    if (!wasSettled) notifyLive()
     return
   }
   liveSnapshot = next
@@ -385,7 +433,9 @@ async function refetchLive(): Promise<void> {
     //
     // The clear is ordering-guarded exactly like the success path above, and it
     // deliberately does NOT rewind `lastAppliedSequence`: nothing about a refused
-    // read makes an already-consumed push replayable.
+    // read makes an already-consumed push replayable. Nor does it clear `ended`
+    // once that has been seen (F-2, `endedLatched`): `applyLive` keeps it latched,
+    // so `completed -> archived` never brings the write controls back.
     //
     // Everything else stays FAIL-CLOSED — a `401` (unresolved scope), a `5xx`, a
     // malformed body, or a network failure keeps the previous snapshot and lets
@@ -429,6 +479,43 @@ function onBecameVisible(listener: () => void): () => void {
   }
   document.addEventListener('visibilitychange', handler)
   return () => document.removeEventListener('visibilitychange', handler)
+}
+
+/**
+ * Tells the live source which exercise it serves (the shell's resolved scope), so the ended latch
+ * is per exercise: binding a DIFFERENT exercise drops a latch set for the previous one.
+ */
+function bindLiveExercise(exerciseId: string): void {
+  if (exerciseId === liveExerciseId) return
+  const previous = liveExerciseId
+  liveExerciseId = exerciseId
+  // A latch set before any bind (endedLatchedFor null) belongs to this first exercise: keep it.
+  if (endedLatched && endedLatchedFor !== null && endedLatchedFor !== exerciseId) {
+    endedLatched = false
+    endedLatchedFor = null
+  }
+  if (endedLatched && endedLatchedFor === null) endedLatchedFor = exerciseId
+  // A SWITCH (not the first bind, which must not discard the seed GET): the snapshot is the old
+  // exercise's. Drop its `ended`, discard any GET still in flight for it (it would otherwise latch
+  // the new exercise), and re-read the new one.
+  if (previous === null) return
+  fetchGeneration += 1
+  if (liveSnapshot.ended) {
+    liveSnapshot = { ...liveSnapshot, ended: false }
+    notifyLive()
+  }
+  if (liveStarted) void refetchLive()
+}
+
+/**
+ * F-4: a participant WRITE refused with 403 re-reads the overlay, so a tab that missed the EndEx
+ * push learns `ended` (and shows the ended banner, and drops its write controls) on the first
+ * refusal instead of failing every later write the same way. Only while the live source runs (a
+ * participant shell is mounted with live data); the GET is the same ordering-guarded `refetchLive`.
+ */
+function relearnAfterRefusedWrite(): void {
+  // Once ended is latched there is nothing left to learn: a burst of refused writes costs no GETs.
+  if (liveStarted && !endedLatched) void refetchLive()
 }
 
 /**
@@ -490,8 +577,14 @@ function resetLiveForSession(): void {
   detachLive()
   // Never lowered, so a GET issued before this moment can tell it was superseded (CR-001).
   fetchGeneration += 1
-  // Back to the safe 'none' AND to sequence 0: the next exercise counts its own sequence.
+  // Back to the safe 'none' AND to sequence 0: the next exercise counts its own sequence. The
+  // ended latch belongs to the old identity too; the new one re-learns `ended` from its GET.
+  endedLatched = false
+  endedLatchedFor = null
   applyLive(DEFAULT_OVERLAY_STATE, 0)
+  // The new session has not been heard from yet.
+  liveSettled = false
+  notifyLive()
   if (!stillMounted) return
   // A shell is still subscribed: nothing will call ensureStarted() for it again, so
   // re-attach here. A microtask later, so core/realtime's stop() has begun; and only with a
@@ -506,6 +599,10 @@ function resetLiveForTests(): void {
   detachLive()
   attachedConnection = realtimeConnection
   liveSnapshot = DEFAULT_OVERLAY_STATE
+  liveSettled = false
+  endedLatched = false
+  endedLatchedFor = null
+  liveExerciseId = null
   lastAppliedSequence = 0
   fetchGeneration = 0
   appliedPushCount = 0
@@ -520,8 +617,10 @@ function resetLiveForTests(): void {
  */
 export const liveOverlayStateStore = {
   getSnapshot: getLiveSnapshot,
+  isSettled: getLiveSettled,
   subscribe: subscribeLive,
   ensureStarted: ensureStartedLive,
+  bindExercise: bindLiveExercise,
   resetForTests: resetLiveForTests,
 }
 
@@ -542,18 +641,30 @@ export const liveOverlayStateStore = {
  * COR-001) — this module never sends an exercise id.
  */
 export function useOverlayState(): OverlayState {
+  return useOverlayStateResolution().state
+}
+
+/** The overlay state plus whether the server has answered yet (see {@link useExerciseEnded}). */
+function useOverlayStateResolution(): { readonly state: OverlayState; readonly settled: boolean } {
   const { exerciseId } = useExerciseContext()
 
   // Live path only: kick off the seeding GET + the realtime subscription once
   // (idempotent — see `ensureStartedLive`). No-op under mock data.
   useEffect(() => {
-    if (!USE_MOCK_DATA) liveOverlayStateStore.ensureStarted()
-  }, [])
+    if (USE_MOCK_DATA) return
+    liveOverlayStateStore.bindExercise(exerciseId)
+    liveOverlayStateStore.ensureStarted()
+  }, [exerciseId])
 
   const live = useSyncExternalStore(
     liveOverlayStateStore.subscribe,
     liveOverlayStateStore.getSnapshot,
     liveOverlayStateStore.getSnapshot,
+  )
+  const liveSettledNow = useSyncExternalStore(
+    liveOverlayStateStore.subscribe,
+    liveOverlayStateStore.isSettled,
+    liveOverlayStateStore.isSettled,
   )
 
   const { data } = useQuery({
@@ -562,7 +673,29 @@ export function useOverlayState(): OverlayState {
     enabled: USE_MOCK_DATA,
   })
 
-  return USE_MOCK_DATA ? data ?? DEFAULT_OVERLAY_STATE : live
+  return USE_MOCK_DATA
+    ? { state: data ?? DEFAULT_OVERLAY_STATE, settled: data !== undefined }
+    : { state: live, settled: liveSettledNow }
 }
 
 registerSessionReset(resetLiveForSession, import.meta.hot)
+onWriteRefused(relearnAfterRefusedWrite, import.meta.hot)
+
+/**
+ * True once the exercise has ended (lifecycle `completed`): participants may still READ, but every
+ * write is refused server-side (403). Drives the ended banner and the write-disable seam.
+ * Absent on the wire is false. The caller may OR in `scope.status === 'completed'` as a
+ * first-paint seed ONLY, until the overlay answer has landed.
+ */
+export function useExerciseEnded(): boolean {
+  const { state, settled } = useOverlayStateResolution()
+  // First-paint seed ONLY: the bound scope already says `completed` before the overlay answer
+  // lands, so no write control flashes. Once the server has answered, `ended` is authoritative
+  // (and, on the live source, LATCHED per exercise: a later `ended: false` from `archived` cannot
+  // un-end the tab - see `endedLatchedFor`).
+  const scope = useOptionalExerciseContext()
+  if (settled) return state.ended
+  // The legacy `complete` literal is `completed` too: with `full` projected for both (F-1),
+  // this seed is the only thing hiding write controls before the overlay answers.
+  return state.ended || scope?.status === 'completed' || scope?.status === 'complete'
+}

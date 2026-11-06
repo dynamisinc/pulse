@@ -134,6 +134,7 @@ import {
 } from '../auth/tokenStore'
 import { installCrossTabSessionSync } from '../auth/crossTabSessionSync'
 import { installWorldSync } from '../auth/worldSync'
+import { reportIfWriteRefused } from './writeRefusal'
 
 /**
  * Internal per-request flags this module attaches to a config object. Not
@@ -542,6 +543,9 @@ function sentBearerToken(config: InternalAxiosRequestConfig): string | null {
 api.interceptors.response.use(
   response => response,
   (error: unknown) => {
+    // A WRITE refused with 403 (ended read-only review F-4): tell the listeners (the participant
+    // overlay store re-learns `ended`), then fail exactly as before.
+    reportIfWriteRefused(error)
     if (!axios.isAxiosError(error) || error.response?.status !== 401) {
       return Promise.reject(error)
     }
