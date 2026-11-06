@@ -108,9 +108,50 @@ public static class StaffSignInLockout
         }
     }
 
-    /// <summary>Clears the failure counter and any lockout after a verified password.</summary>
-    /// <param name="person">The (tracked) person that verified.</param>
-    public static void RecordSuccess(Person person)
+    /// <summary>
+    /// Clears the failure counter and any lockout after a verified password, ATOMICALLY in the database (one
+    /// <c>UPDATE</c>, executed immediately), as <see cref="RecordFailureAsync"/> counts (#660 review W-3). A tracked
+    /// write would be lost whenever the snapshot already read 0 / null while a concurrent failure has since incremented
+    /// the row (EF sees no change and writes nothing), leaving a person who just signed in one step nearer a lockout.
+    /// The tracked entity is brought in line and its original values accepted, so a later <c>SaveChanges</c> of the
+    /// same context writes nothing back over the reset.
+    /// </summary>
+    /// <param name="dbContext">The persistence context.</param>
+    /// <param name="person">The person that verified (its id and organization bound the update).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public static async Task RecordSuccessAsync(
+        PulseDbContext dbContext,
+        Person person,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(person);
+
+        await dbContext.People
+            .InOrganization(person.OrganizationId)
+            .Where(p => p.Id == person.Id)
+            .ExecuteUpdateAsync(
+                set => set
+                    .SetProperty(p => p.FailedLoginCount, 0)
+                    .SetProperty(p => p.LockedOutUntil, (DateTimeOffset?)null),
+                cancellationToken);
+
+        RecordSuccess(person);
+        var entry = dbContext.Entry(person);
+        if (entry.State != EntityState.Detached)
+        {
+            entry.Property(p => p.FailedLoginCount).OriginalValue = 0;
+            entry.Property(p => p.LockedOutUntil).OriginalValue = null;
+        }
+    }
+
+    /// <summary>
+    /// The in-memory model of a success (the rule <see cref="RecordSuccessAsync"/> applies in SQL). Not for production
+    /// sign-in paths — a tracked write can miss a concurrent failure.
+    /// </summary>
+    /// <param name="person">The person that verified.</param>
+    internal static void RecordSuccess(Person person)
     {
         ArgumentNullException.ThrowIfNull(person);
 

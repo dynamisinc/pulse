@@ -163,6 +163,35 @@ public sealed class StaffSignInLockoutConcurrencyTests
         second.Compiled.Should().Be(0, "the second failure reuses the query compiled for the first");
     }
 
+    [RequiresDockerFact]
+    public async Task Success_ResetsTheRow_EvenWhenAConcurrentFailureLandedAfterTheSnapshot()
+    {
+        // #660 review W-3: the verifying request read the person at count 0; a concurrent failure has since made it 3.
+        // A tracked reset (0 over a snapshot of 0) is no change to EF and would write nothing — the reset must be atomic.
+        var org = await _kit.SeedOrganizationAsync();
+        var personId = await _kit.SeedPersonAsync(org.Id, OrgSignInTestKit.NewEmail());
+        var now = DateTimeOffset.UtcNow;
+
+        await using var verifying = _kit.Context();
+        var person = await verifying.People.InOrganization(org.Id).SingleAsync(p => p.Id == personId);
+        person.FailedLoginCount.Should().Be(0);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await using var racing = _kit.Context();
+            var other = await racing.People.InOrganization(org.Id).AsNoTracking().SingleAsync(p => p.Id == personId);
+            await StaffSignInLockout.RecordFailureAsync(racing, other, now);
+        }
+
+        await StaffSignInLockout.RecordSuccessAsync(verifying, person);
+        await verifying.SaveChangesAsync();
+
+        var row = await ReadAsync(personId);
+        row.FailedLoginCount.Should().Be(0, "a verified sign-in clears every failure, including one that raced it");
+        row.LockedOutUntil.Should().BeNull();
+        verifying.Entry(person).State.Should().Be(EntityState.Unchanged, "nothing stale is left to write back");
+    }
+
     private async Task<Person> ReadAsync(Guid personId)
     {
         await using var read = _kit.Context();
