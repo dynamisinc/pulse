@@ -1,0 +1,82 @@
+/*
+ * features/news/body/EmbeddedPost.module.css
+ * The frame around an embedded Social post. It sits inside `SkinResetBoundary`, so no
+ * outlet variable reaches here: colours come from the exercise brand (`--pulse-brand-*`)
+ * with neutral fallbacks. The card itself is styled by Social alone.
+ */
+
+.embed {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid #cfd4dc;
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: var(--pulse-brand-surface, #ffffff);
+  color: var(--pulse-brand-on-surface, #1b1f24);
+}
+
+.tombstone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 16px;
+  font-size: 0.9375rem;
+  color: #3d4451;
+  background-color: #f3f4f6;
+}
+
+.tombstoneIcon {
+  flex: none;
+}
+
+.skeleton {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+}
+
+.skeletonAvatar,
+.skeletonLine {
+  display: block;
+  background-color: #e4e7eb;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeletonAvatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.skeletonLines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.skeletonLine {
+  height: 12px;
+  border-radius: 4px;
+}
+
+.skeletonShort {
+  width: 60%;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonAvatar,
+  .skeletonLine {
+    animation: none;
+  }
+}

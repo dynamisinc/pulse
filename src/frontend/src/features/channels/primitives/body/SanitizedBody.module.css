@@ -78,6 +78,15 @@
   margin: 0 0 1em;
 }
 
+/* An inline-media host (news 06): takes no space while empty (an unknown media id). */
+.mediaHost {
+  margin: 0 0 1em;
+}
+
+.mediaHost:empty {
+  display: none;
+}
+
 /* "(opens in new tab)" on external links: read by screen readers, not shown. */
 .body [data-new-tab-note] {
   position: absolute;

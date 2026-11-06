@@ -1,0 +1,50 @@
+/*
+ * features/news/body/PullQuote.module.css
+ * The pull-quote treatment for `blockquote.pull-quote` in an article body (news 06,
+ * D3-P2). Every value is a skin variable (accent rule, headline face, rule weight,
+ * spacing) with a neutral fallback, so each outlet's pull quote follows its token file.
+ * The quote stays a real `<blockquote>` read once by assistive tech (no hidden copy), and
+ * it never overflows the column on a phone.
+ */
+
+.scope :global(blockquote.pull-quote) {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: calc(var(--pulse-skin-space, 8px) * 3) 0;
+  padding: calc(var(--pulse-skin-space, 8px) * 1.5) 0 calc(var(--pulse-skin-space, 8px) * 1.5)
+    calc(var(--pulse-skin-space, 8px) * 2);
+  border-left: max(3px, var(--pulse-skin-rule-weight, 4px)) solid var(--pulse-skin-accent, #1b1f24);
+  font-family: var(--pulse-skin-font-hed, inherit);
+  font-size: 1.375em;
+  font-weight: 600;
+  line-height: 1.3;
+  text-transform: var(--pulse-skin-hed-transform, none);
+  font-variant-caps: var(--pulse-skin-hed-caps, normal);
+  color: var(--pulse-skin-text, #1b1f24);
+  overflow-wrap: anywhere;
+}
+
+.scope :global(blockquote.pull-quote) > :where(p) {
+  margin: 0;
+}
+
+.scope :global(blockquote.pull-quote) cite {
+  display: block;
+  margin-top: var(--pulse-skin-space, 8px);
+  font-family: var(--pulse-skin-font-kicker, var(--pulse-skin-font-body, inherit));
+  font-size: 0.6em;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.scope :global(blockquote.pull-quote) cite::before {
+  content: '\2014\00a0';
+}
+
+@media (max-width: 599.95px) {
+  .scope :global(blockquote.pull-quote) {
+    font-size: 1.2em;
+  }
+}
