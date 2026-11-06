@@ -6,7 +6,9 @@
 .root {
   width: 100%;
   /* One 44px control row; the chip box and PlayerControls both read it. */
-  --news-player-controls-h: 44px;
+  --pulse-player-controls-h: 44px;
+  /* So the frame can size itself from its own width (100cqi). */
+  container-type: inline-size;
 }
 
 /*
@@ -18,23 +20,32 @@
   border: 0;
   border-radius: var(--pulse-skin-radius, 0);
   background: #000;
+  /*
+   * The frame is the PICTURE at its own ratio PLUS the control row, so the row never
+   * shrinks the footage. The shared player sets `aspect-ratio` (and `--vp-ratio`) inline,
+   * hence the `!important` to take the height over.
+   */
+  aspect-ratio: auto !important;
+  height: calc(100cqi / var(--vp-ratio, 1.7778) + var(--pulse-player-controls-h, 44px));
 }
 
 .frame.frame:fullscreen {
+  height: 100%;
   border-radius: 0;
   /* Notched phone in fullscreen: the row grows by the bottom safe area (home indicator). */
   --news-player-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --news-player-controls-h: calc(44px + env(safe-area-inset-bottom, 0px));
+  --pulse-player-controls-h: calc(44px + env(safe-area-inset-bottom, 0px));
 }
 
 /*
  * The PICTURE ends above the control row, so captions (cues render at the bottom of the
- * video box) and burned-in lower-thirds are never behind it; `object-fit: contain`
- * letterboxes. `height` (not `bottom`), because an absolutely positioned replaced element
+ * video box) and burned-in lower-thirds are never behind it. Inline, the frame already
+ * adds the row's height, so the picture keeps its full ratio; in fullscreen
+ * `object-fit: contain` letterboxes. `height` (not `bottom`), because an absolutely positioned replaced element
  * does not stretch between `top` and `bottom`.
  */
 .frame.frame > video {
-  height: calc(100% - var(--news-player-controls-h, 44px));
+  height: calc(100% - var(--pulse-player-controls-h, 44px));
 }
 
 /*
@@ -46,7 +57,7 @@
   position: absolute;
   top: 0;
   right: 0;
-  bottom: var(--news-player-controls-h, 44px);
+  bottom: var(--pulse-player-controls-h, 44px);
   left: 0;
   z-index: 2;
   pointer-events: none;

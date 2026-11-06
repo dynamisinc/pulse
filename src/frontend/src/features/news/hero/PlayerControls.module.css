@@ -4,7 +4,7 @@
  * (`--pulse-skin-player-tint`) and its F13-computed ink (`--pulse-skin-on-player-tint`).
  * The fallbacks are a neutral near-black with white ink (>= 4.5:1).
  *
- * Height: one 44px row (`--news-player-controls-h`, set by the broadcast frame), so the
+ * Height: one 44px row (`--pulse-player-controls-h`, set by the broadcast frame), so the
  * EXERCISE chip box and the shared bands' 44px bottom lift sit exactly above it.
  */
 
@@ -18,7 +18,7 @@
   container: news-player-row / inline-size;
   display: flex;
   box-sizing: border-box;
-  height: var(--news-player-controls-h, 44px);
+  height: var(--pulse-player-controls-h, 44px);
   align-items: center;
   gap: 4px;
   padding:
@@ -72,7 +72,8 @@
 /*
  * The scrub, drawn entirely in the ink (WCAG 1.4.11): the played part is solid ink, the
  * unplayed part is an ink OUTLINE on the tint, so both are >= 4.5:1 against the row
- * whatever the tint (no browser-default grey track). `--news-scrub-fill` is the played %.
+ * whatever the tint (no browser-default grey track). `--news-scrub-fill` is the played
+ * fraction; the fill ends at the 14px thumb's centre.
  */
 .scrub {
   flex: 1 1 auto;
@@ -89,7 +90,8 @@
   height: 6px;
   border-radius: 3px;
   background:
-    linear-gradient(currentColor, currentColor) 0 0 / var(--news-scrub-fill, 0%) 100% no-repeat,
+    linear-gradient(currentColor, currentColor) 0 0 /
+    calc(7px + (100% - 14px) * var(--news-scrub-fill, 0)) 100% no-repeat,
     transparent;
   box-shadow: inset 0 0 0 1px currentColor;
 }
@@ -98,7 +100,8 @@
   height: 6px;
   border-radius: 3px;
   background:
-    linear-gradient(currentColor, currentColor) 0 0 / var(--news-scrub-fill, 0%) 100% no-repeat,
+    linear-gradient(currentColor, currentColor) 0 0 /
+    calc(7px + (100% - 14px) * var(--news-scrub-fill, 0)) 100% no-repeat,
     transparent;
   box-shadow: inset 0 0 0 1px currentColor;
 }

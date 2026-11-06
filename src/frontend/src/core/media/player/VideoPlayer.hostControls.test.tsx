@@ -112,6 +112,27 @@ describe('VideoPlayer renderControls', () => {
     expect(wrapper).toHaveAccessibleDescription('The caption')
   })
 
+  it('only a host-controls player subscribes to the text tracks (Social pays nothing)', () => {
+    const subscribe = vi.fn()
+    const original = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'textTracks')
+    Object.defineProperty(HTMLMediaElement.prototype, 'textTracks', {
+      configurable: true,
+      get() {
+        return { length: 0, addEventListener: subscribe, removeEventListener: vi.fn() }
+      },
+    })
+    try {
+      const social = render(<VideoPlayer media={MEDIA} />)
+      expect(subscribe).not.toHaveBeenCalled()
+      social.unmount()
+      renderHost()
+      expect(subscribe).toHaveBeenCalledWith('addtrack', expect.any(Function))
+    } finally {
+      if (original) Object.defineProperty(HTMLMediaElement.prototype, 'textTracks', original)
+      else Reflect.deleteProperty(HTMLMediaElement.prototype, 'textTracks')
+    }
+  })
+
   it('without it, the native controls stay (Social unchanged)', () => {
     render(<VideoPlayer media={MEDIA} />)
     const video = screen.getByTestId('video-player').querySelector('video') as HTMLVideoElement

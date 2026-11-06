@@ -256,10 +256,16 @@ describe('Hero slot: broadcast player (NWS-014)', () => {
     expect(events).toEqual([{ type: 'play' }, { type: 'progress', pct: 50 }])
   })
 
+  // Source GUARDS (jsdom does no layout): the frame adds the row's height to the picture's
+  // ratio, and the picture box ends above the row.
   it('the picture ends above the control row (captions / lower-thirds never behind it)', () => {
     const css = readSrcFile('features/news/hero/BroadcastPlayer.module.css')
+    const frame = /\.frame\.frame\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(frame).toContain(
+      'height: calc(100cqi / var(--vp-ratio, 1.7778) + var(--pulse-player-controls-h, 44px))',
+    )
     const rule = /\.frame\.frame > video\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
-    expect(rule).toMatch(/height:\s*calc\(100% - var\(--news-player-controls-h, 44px\)\)/)
+    expect(rule).toMatch(/height:\s*calc\(100% - var\(--pulse-player-controls-h, 44px\)\)/)
   })
 
   it('an unplayable video shows no footage, so no chip or bands (as F14 / Social)', () => {
@@ -291,7 +297,7 @@ describe('Hero slot: video watermark (NWS-032 / NFR-008)', () => {
     expect(chip.parentElement).toBe(box)
     expect(screen.getByTestId('broadcast-controls')).not.toContainElement(chip)
     const css = readSrcFile('features/news/hero/BroadcastPlayer.module.css')
-    expect(css).toMatch(/\.chipBox\s*\{[^}]*bottom:\s*var\(--news-player-controls-h, 44px\)/)
+    expect(css).toMatch(/\.chipBox\s*\{[^}]*bottom:\s*var\(--pulse-player-controls-h, 44px\)/)
   })
 
   it('reserves the chip when not required', () => {

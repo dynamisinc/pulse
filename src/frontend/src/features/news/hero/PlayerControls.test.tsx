@@ -78,6 +78,30 @@ describe('PlayerControls', () => {
     expect(scrub).toHaveValue('60.2')
   })
 
+  it.each([
+    ['a release outside the slider (lost pointer capture)', 'lostPointerCapture'],
+    ['a keyboard press', 'keyDown'],
+    ['blur', 'blur'],
+  ] as const)('%s ends the drag, so the thumb follows the video again', (_label, end) => {
+    const controls = api({ currentTime: 12 })
+    const { rerender } = render(<PlayerControls api={controls} />)
+    const scrub = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.pointerDown(scrub)
+    fireEvent.change(scrub, { target: { value: '60' } })
+    fireEvent[end](scrub)
+    rerender(<PlayerControls api={{ ...controls, currentTime: 61 }} />)
+    expect(scrub).toHaveValue('61')
+  })
+
+  it('a non-primary button never starts a drag', () => {
+    const controls = api({ currentTime: 12 })
+    const { rerender } = render(<PlayerControls api={controls} />)
+    const scrub = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.pointerDown(scrub, { button: 2 })
+    rerender(<PlayerControls api={{ ...controls, currentTime: 13 }} />)
+    expect(scrub).toHaveValue('13')
+  })
+
   it('the scrub seeks; it is disabled until the duration is known', () => {
     const controls = api()
     const { rerender } = render(<PlayerControls api={controls} />)

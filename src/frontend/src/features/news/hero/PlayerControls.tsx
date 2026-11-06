@@ -25,7 +25,7 @@
  */
 
 import { useState } from 'react'
-import type { CSSProperties, ChangeEvent } from 'react'
+import type { CSSProperties, ChangeEvent, PointerEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faClosedCaptioning,
@@ -63,8 +63,20 @@ export function PlayerControls({ api }: PlayerControlsProps) {
     api.seekTo(seconds)
   }
   const endDrag = () => setDragValue(null)
+  const startDrag = (event: PointerEvent<HTMLInputElement>) => {
+    // Primary button only (a right-click's context menu would swallow the pointerup).
+    if (event.button !== 0) return
+    // Capture, so a release OUTSIDE the slider still ends the drag (lostpointercapture).
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // No capture support (or the pointer is already gone): pointerup / blur still end it.
+    }
+    setDragValue(api.currentTime)
+  }
+  // The played fraction; the CSS offsets it by half a thumb so fill and thumb line up.
   const scrubStyle = {
-    '--news-scrub-fill': `${max > 0 ? (value / max) * 100 : 0}%`,
+    '--news-scrub-fill': String(max > 0 ? value / max : 0),
   } as CSSProperties
 
   return (
@@ -97,10 +109,13 @@ export function PlayerControls({ api }: PlayerControlsProps) {
         aria-valuetext={`${elapsed} of ${total}`}
         data-testid="broadcast-scrub"
         onChange={handleScrub}
-        onPointerDown={() => setDragValue(api.currentTime)}
+        onPointerDown={startDrag}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
         onBlur={endDrag}
+        // Keyboard use always follows the video's own time.
+        onKeyDown={endDrag}
       />
 
       <span className={styles.time} data-testid="broadcast-time">

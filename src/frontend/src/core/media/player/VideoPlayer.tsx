@@ -230,6 +230,8 @@ export function VideoPlayer({
   const attachVideo = useCallback((video: HTMLVideoElement | null) => {
     videoRef.current = video
     if (video === null) return undefined
+    // Re-attached while playing (the callback identity changed): keep the one-at-a-time claim.
+    if (!video.paused) claimPlayback(video)
     // iOS Safari presents its own native fullscreen for a `<video>` (no page overlay, so no
     // watermark): leave it the instant it begins and use the in-app viewer instead.
     const handleBeginFullscreen = () => {

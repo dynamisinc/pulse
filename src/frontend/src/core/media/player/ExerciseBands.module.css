@@ -62,5 +62,5 @@
  * bar (timeline, time, volume), which sits on the bottom edge of the frame.
  */
 .clearControls {
-  padding-bottom: 44px;
+  padding-bottom: var(--pulse-player-controls-h, 44px);
 }
