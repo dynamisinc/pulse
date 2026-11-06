@@ -192,10 +192,12 @@ describe('ShellLayout kiosk — alert bar kept (AC2, PRT-010)', () => {
   /** The bar's a11y-relevant shape, to compare kiosk against the standard variant. */
   function alertBarShape() {
     const bar = screen.getByTestId('pulse-alert-bar')
+    // Story 11 moved the live region off the host onto an inner node, so rotation is not re-read.
+    const live = screen.getByTestId('pulse-alert-bar-live')
     return {
-      role: bar.getAttribute('role'),
-      ariaLive: bar.getAttribute('aria-live'),
-      ariaAtomic: bar.getAttribute('aria-atomic'),
+      role: live.getAttribute('role'),
+      ariaLive: live.getAttribute('aria-live'),
+      ariaAtomic: live.getAttribute('aria-atomic'),
       severity: bar.getAttribute('data-alert-severity'),
       treatment: bar.getAttribute('data-alert-treatment'),
       text: bar.textContent,
