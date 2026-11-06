@@ -2,12 +2,14 @@ namespace Pulse.WebApi.Features.Media;
 
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using Pulse.WebApi.Features.Media.Documents;
 
 /// <summary>
 /// The DEVELOPMENT-ONLY <c>GET /dev-media/*</c> static mapping that serves <see cref="LocalFileMediaStore"/>'s files
@@ -28,8 +30,8 @@ using Microsoft.Extensions.Primitives;
 /// is untouched and <c>/dev-media/*</c> is simply unmapped (routing's 404).
 /// </para>
 /// <para>
-/// Only the six sniffed extensions are served, as their canonical types, with <c>X-Content-Type-Options:
-/// nosniff</c>. No directory browsing. Path traversal is refused by <see cref="PhysicalFileProvider"/>.
+/// Only the seven sniffed extensions are served, as their canonical types, with <c>X-Content-Type-Options:
+/// nosniff</c> (a <c>.pdf</c> also download-only and CSP-sandboxed). No directory browsing. Path traversal is refused by <see cref="PhysicalFileProvider"/>.
 /// </para>
 /// </remarks>
 public sealed class DevMediaStartupFilter : IStartupFilter
@@ -53,7 +55,7 @@ public sealed class DevMediaStartupFilter : IStartupFilter
                     FileProvider = new LazyDirectoryFileProvider(root),
                     ContentTypeProvider = CreateContentTypeProvider(),
                     ServeUnknownFileTypes = false,
-                    OnPrepareResponse = context => context.Context.Response.Headers.XContentTypeOptions = "nosniff",
+                    OnPrepareResponse = context => PrepareResponse(context.Context.Response, context.File.Name),
                 });
             }
 
@@ -61,7 +63,7 @@ public sealed class DevMediaStartupFilter : IStartupFilter
         };
     }
 
-    /// <summary>Maps exactly the six sniffed extensions to their canonical types; nothing else is served.</summary>
+    /// <summary>Maps exactly the seven sniffed extensions to their canonical types; nothing else is served.</summary>
     private static FileExtensionContentTypeProvider CreateContentTypeProvider()
     {
         var provider = new FileExtensionContentTypeProvider();
@@ -72,7 +74,25 @@ public sealed class DevMediaStartupFilter : IStartupFilter
         provider.Mappings[".webp"] = "image/webp";
         provider.Mappings[".mp4"] = "video/mp4";
         provider.Mappings[".webm"] = "video/webm";
+        provider.Mappings[".pdf"] = DocumentDownload.ContentType;
         return provider;
+    }
+
+    /// <summary>
+    /// <c>nosniff</c> on everything; a document (press-room story 02) is additionally download-only and sandboxed —
+    /// <c>Content-Disposition: attachment</c> and <c>Content-Security-Policy: sandbox</c> — because this mapping
+    /// serves it from the API's OWN origin.
+    /// </summary>
+    /// <param name="response">The response being prepared.</param>
+    /// <param name="fileName">The served file's name (<c>{Id:N}.{ext}</c>).</param>
+    internal static void PrepareResponse(HttpResponse response, string fileName)
+    {
+        response.Headers.XContentTypeOptions = "nosniff";
+        if (fileName.EndsWith(DocumentDownload.Extension, StringComparison.OrdinalIgnoreCase))
+        {
+            response.Headers.ContentDisposition = DocumentDownload.ContentDisposition(fileName);
+            response.Headers.ContentSecurityPolicy = "sandbox";
+        }
     }
 
     /// <summary>

@@ -26,7 +26,9 @@ media and the fictional names. Constraint from plan §9: display names, bios and
 - [ ] **Media rules.** Videos are H.264 MP4, 720p, ≤ 30 s and ≤ 20 MB; photos ≤ 5 MB (JPEG/PNG/WebP); every file
       passes the server's limits and magic-byte check (verified by S1's validator); royalty-free stock only
       (Pexels/Pixabay) with source and licence recorded in `docs/demo/pack/CREDITS.md`; **no real logos, real
-      people's likeness or real news brands**.
+      people's likeness or real news brands**. *(Amended 2026-10-19,
+      [FIC-002](../../design/DECISIONS.md): media licensed and supplied by the Dynamis team, and images generated
+      for the pack, are allowed too.)*
 - [ ] **Accessibility and fiction safety.** Every image and video has a meaningful `alt` (a description, not a
       filename); no out-of-fiction words ("simulation", "exercise", "training") in post text, bios or alt text;
       no real phone numbers, addresses or personal data.

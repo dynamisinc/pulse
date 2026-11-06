@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -96,6 +97,7 @@ public sealed class PracticeModeTestHost : IAsyncDisposable
 
         // The feature in the orchestrator's declared order: 01b's slice first, this story's contribution after.
         builder.Services.AddExerciseConfiguration();
+        builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
         builder.Services.AddPracticeMode();
 
         // The server-authoritative request scope (fixed per host; null = the fail-closed case).

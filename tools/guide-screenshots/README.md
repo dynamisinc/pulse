@@ -65,7 +65,7 @@ lets the browser override three mock seams through `localStorage`:
 
 | Key | Effect |
 |-----|--------|
-| `pulse.guideShots.role` | Mock session role: `participant`, `pio`, `controller`, `evaluator`, `planner`, `orgAdmin` |
+| `pulse.guideShots.role` | Mock session role (its world — staff or participant — follows the role): `participant`, `pio`, `controller`, `evaluator`, `planner`, `orgAdmin` |
 | `pulse.guideShots.alerts` | JSON list of alerts for the participant alert bar (stock mock: none) |
 | `pulse.guideShots.overlay` | JSON pause / EndEx overlay, e.g. `{"state":"pause","register":"out-of-fiction","message":""}` |
 

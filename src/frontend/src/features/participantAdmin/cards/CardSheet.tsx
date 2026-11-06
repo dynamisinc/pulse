@@ -23,8 +23,8 @@ import type { RosterCardDto } from './types'
 
 export interface CardSheetProps {
   cards: readonly RosterCardDto[]
-  /** `RosterCardsDto.exerciseName`, printed on every card. */
-  exerciseName: string
+  /** `RosterCardsDto.exerciseName`, printed on every card when non-null. */
+  exerciseName: string | null
 }
 
 function CardSheetImpl({ cards, exerciseName }: CardSheetProps) {

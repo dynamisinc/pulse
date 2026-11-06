@@ -190,7 +190,10 @@ public class SignalRFeedBroadcasterTests
 
     // ---- #375: the EndEx send gate ---------------------------------------------------------------------
 
-    /// <summary>The five participant frames the broadcaster sends, by client event name.</summary>
+    /// <summary>
+    /// The participant frames the broadcaster sends, by client event name: the five post frames and the four FC-5
+    /// channel frames (channels-foundation 09 routes them through the same lifecycle choke point, #375).
+    /// </summary>
     public static readonly TheoryData<string> AllFrames = new()
     {
         "PostReceived",
@@ -198,6 +201,10 @@ public class SignalRFeedBroadcasterTests
         "PostPinChanged",
         "PostEdited",
         "PostEngagementChanged",
+        "ContentPublished",
+        "ContentRevised",
+        "ContentRetracted",
+        "AlertsChanged",
     };
 
     /// <summary>Every (frame, closed status) pair: build, completed, archived, an unknown literal, and a missing row.</summary>
@@ -321,6 +328,7 @@ public class SignalRFeedBroadcasterTests
         var broadcaster = new SignalRFeedBroadcaster(
             hubContext.Object,
             (_, _) => throw new InvalidOperationException("status read failed"),
+            TestFeedBroadcasters.AllChannelsEnabled,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<SignalRFeedBroadcaster>.Instance);
 
         var act = () => SendAsync(broadcaster, frame, Guid.NewGuid());
@@ -368,6 +376,10 @@ public class SignalRFeedBroadcasterTests
         }),
         "PostEngagementChanged" => broadcaster.BroadcastPostEngagementChangedAsync(
             exerciseId, PostEngagementChangedDto.For(Guid.NewGuid(), new ParticipantPostCounts(1, 0, 0), 1)),
+        "ContentPublished" => broadcaster.BroadcastContentPublishedAsync(exerciseId, ChannelFrames.Published()),
+        "ContentRevised" => broadcaster.BroadcastContentRevisedAsync(exerciseId, ChannelFrames.Revised()),
+        "ContentRetracted" => broadcaster.BroadcastContentRetractedAsync(exerciseId, ChannelFrames.Retracted()),
+        "AlertsChanged" => broadcaster.BroadcastAlertsChangedAsync(exerciseId, ChannelFrames.Alerts()),
         _ => throw new ArgumentOutOfRangeException(nameof(frame), frame, "not a broadcaster frame"),
     };
 

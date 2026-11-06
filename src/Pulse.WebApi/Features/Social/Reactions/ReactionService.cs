@@ -279,7 +279,7 @@ public sealed partial class ReactionService
             .Select(candidate => new { candidate.CurrentScenarioTime, candidate.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
         // A RUNNING clock is authoritative and is not clamped (the post's own time may be client-supplied). Only the
-        // fallbacks are clamped to the post: the stored CurrentScenarioTime is seed-written and can be stale.
+        // fallbacks are clamped to the post: the stored CurrentScenarioTime is not written by production code today and can be stale.
         var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
             ?? Later(exercise?.CurrentScenarioTime ?? baseline.PostScenarioTime, baseline.PostScenarioTime);
 

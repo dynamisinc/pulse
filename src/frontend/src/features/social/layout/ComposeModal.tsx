@@ -69,6 +69,11 @@ export interface ComposeModalProps {
   onClose: () => void
   /** The control to return focus to on close (the Post button). */
   returnFocusRef?: RefObject<HTMLElement | null>
+  /**
+   * The draft's starting text (channels-foundation 21: `useComposeWithLink` pre-fills an
+   * in-sim permalink). A pre-filled draft is a draft: Esc / Close ask before discarding it.
+   */
+  initialText?: string
 }
 
 /** Controls a Tab press can land on. Visually hidden inputs are filtered out below. */
@@ -104,7 +109,7 @@ function hasUnsentDraft(dialog: HTMLElement): boolean {
   return dialog.querySelector('[data-testid="composer-media"] li') !== null
 }
 
-export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
+export function ComposeModal({ onClose, returnFocusRef, initialText }: ComposeModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const keepEditingRef = useRef<HTMLButtonElement>(null)
   const titleId = useId()
@@ -241,7 +246,7 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
 
         {/* `inert` while the question shows: the draft cannot change under it. */}
         <div inert={confirmingDiscard}>
-          <Composer onPosted={onClose} />
+          <Composer onPosted={onClose} {...(initialText !== undefined ? { initialText } : {})} />
         </div>
       </div>
     </div>

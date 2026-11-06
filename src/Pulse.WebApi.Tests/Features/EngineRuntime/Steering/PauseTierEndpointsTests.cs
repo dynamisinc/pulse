@@ -20,6 +20,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration;
@@ -963,6 +964,7 @@ public sealed class PauseTierEndpointsTests
             // come after AddExerciseLifecycle()'s, or the pause contribution is silently evicted (see
             // AddPauseParticipantOverlay's ordering note). This mirrors Program.cs.
             builder.Services.AddExerciseConfiguration();
+            builder.Services.AddChannels(); // channels-foundation 10: GET /api/alerts delegates to the alert source
             builder.Services.AddExerciseLifecycle();
 
             // Story 08: the REAL participant-overlay publisher replaces story 07's no-op default, the shared hub's

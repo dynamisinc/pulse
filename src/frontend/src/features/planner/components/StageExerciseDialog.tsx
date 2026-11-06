@@ -49,8 +49,8 @@ const PENDING_SX = {
 } as const
 
 export interface StageExerciseDialogProps {
-  /** The exercise the console shows (the scope's name): the one this dialog says it stages. */
-  readonly exerciseName: string
+  /** The INTERNAL name of the exercise being staged (story 09); null until known: generic title. */
+  readonly exerciseName: string | null
   /** Count of OPEN blocking items from the last readiness read; `undefined` = unknown. */
   readonly openBlocking: number | undefined
   /** A request is in flight: not dismissable; the confirm reads "Staging...". */
@@ -104,7 +104,7 @@ export function StageExerciseDialog({
       data-testid="stage-exercise-dialog"
     >
       <DialogTitle id={titleId} sx={{ fontSize: 15, fontWeight: 800 }}>
-        Stage {exerciseName}?
+        {exerciseName === null ? 'Stage this exercise?' : `Stage ${exerciseName}?`}
       </DialogTitle>
       <DialogContent>
         <Typography id={bodyId} component="div" sx={{ fontSize: 13, lineHeight: 1.5, mb: 1.5 }}>

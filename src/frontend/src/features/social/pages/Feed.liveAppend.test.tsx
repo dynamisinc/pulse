@@ -194,14 +194,15 @@ describe('Feed — pill-load guards against empty/dupe resolve (Copilot #301)', 
     expect(loads[0]?.payload?.newPostsLoaded).toBe(1)
   })
 
-  it('a tap that resolves nothing (unknown author) clears the count WITHOUT scrolling or emitting', async () => {
+  it('a tap on an unknown-author post keeps it buffered (pill stays honest) WITHOUT scrolling or emitting', async () => {
     renderFeed()
     const before = await screen.findAllByTestId('post-card')
     expect(before.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
 
     // Buffers fine (the stream source doesn't check authors) — the pill counts
-    // it — but the author is not in the persona cast, so resolveLiveViews skips
-    // it on load and nothing actually renders (matching the baseline skip).
+    // it — but the author is not in the cached persona cast yet (a persona created
+    // after the page loaded), so nothing can render. The post is NOT dropped: it stays
+    // buffered behind the pill and the cast is invalidated so a later tap can resolve it.
     act(() => {
       postStore.appendPost(
         buildLivePost({ id: 'post-live-unknown-author', authorPersonaId: 'persona-does-not-exist' }),
@@ -212,10 +213,10 @@ describe('Feed — pill-load guards against empty/dupe resolve (Copilot #301)', 
 
     fireEvent.click(pill)
 
-    // Count clears (drain reset it) and the pill disappears …
-    await waitFor(() => expect(screen.queryByTestId('new-posts-pill')).toBeNull())
+    // The pill is still there, still counting the one post it promised …
+    expect(await screen.findByTestId('new-posts-pill')).toHaveTextContent('1 new post')
 
-    // … but the feed did not change, we did NOT scroll, and NO load event fired.
+    // … the feed did not change, we did NOT scroll, and NO load event fired.
     const after = screen.getAllByTestId('post-card')
     expect(after.map(c => c.getAttribute('data-post-id'))).toEqual(NEWEST_FIRST_SEEDED_IDS)
     expect(scrollSpy).not.toHaveBeenCalled()

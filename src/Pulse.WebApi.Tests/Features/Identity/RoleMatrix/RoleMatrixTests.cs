@@ -258,6 +258,20 @@ public sealed class RoleMatrixTests
         Probe("POST /api/injects/{id:guid}/unskip", ControllerOnly);
         Probe("POST /api/injects/{id:guid}/retry", ControllerOnly);
         Probe("POST /api/injects/{itemId:guid}/mark-fired", ControllerOnly);
+        Probe("POST /api/alerts", ControllerOnly); // channels-foundation 10: raise an in-fiction alert
+        Probe("POST /api/alerts/{id:guid}/clear", ControllerOnly);
+
+        // channels-foundation 03 (#699): outlet registry writes are controller-only (story AC "Staff write").
+        Probe("POST /api/outlets", ControllerOnly);
+        Probe("PUT /api/outlets/{id:guid}", ControllerOnly);
+        Probe("DELETE /api/outlets/{id:guid}", ControllerOnly);
+        Probe("POST /api/outlets/reorder", ControllerOnly);
+        Probe("POST /api/outlets/defaults", ControllerOnly);
+
+        // weather-source 02 (#753): weather zone writes are controller-only (story AC "Staff CRUD").
+        Probe("POST /api/weather/zones", ControllerOnly);
+        Probe("PUT /api/weather/zones/{id:guid}", ControllerOnly);
+        Probe("DELETE /api/weather/zones/{id:guid}", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);
@@ -291,6 +305,10 @@ public sealed class RoleMatrixTests
         Probe("PUT /api/staff/posts/{postId:guid}/pin", ControllerOnly);
         Probe("DELETE /api/staff/posts/{postId:guid}/pin", ControllerOnly);
         Probe("POST /api/media", UploadAuthoring);
+
+        // press-room story 02: a document upload is staff-only until a feature opts participants in — the default-deny
+        // IDocumentUploadAuthorizer answers 403 for participant and PIO sessions before the body is read.
+        Probe("POST /api/media/documents", PlannerOrController);
 
         // ---- Participant sim writes (live; staged in StaffAuthoringTests). Staff never react, edit, or
         //      follow without a persona of their own (the services' own refusals). ----

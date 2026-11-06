@@ -89,8 +89,11 @@ const PENDING_SX = {
 } as const
 
 export interface EndExerciseDialogProps {
-  /** The exercise the console is showing (the scope's name): the one this dialog says it ends. */
-  readonly exerciseName: string
+  /**
+   * The exercise the console is showing, by its INTERNAL name: the one this dialog says it
+   * ends. Null until known (the dialog then says "the exercise").
+   */
+  readonly exerciseName: string | null
   /** A request is in flight: the dialog cannot be dismissed and the confirm reads "Ending...". */
   readonly pending: boolean
   /** The plain-text reason the last attempt failed; shown inside the dialog. */
@@ -165,8 +168,13 @@ export function EndExerciseDialog({
       </DialogTitle>
       <DialogContent onKeyDown={handleKeyDown}>
         <Typography id={bodyId} component="div" sx={{ fontSize: 13, lineHeight: 1.5, mb: 1.5 }}>
-          This moves <strong data-testid="end-exercise-name">{exerciseName}</strong> to ENDEX for
-          everyone in it. It cannot be undone from the console.
+          This moves{' '}
+          {exerciseName ? (
+            <strong data-testid="end-exercise-name">{exerciseName}</strong>
+          ) : (
+            'the exercise'
+          )}{' '}
+          to ENDEX for everyone in it. It cannot be undone from the console.
         </Typography>
         <CobraTextField
           label="Type END to confirm"

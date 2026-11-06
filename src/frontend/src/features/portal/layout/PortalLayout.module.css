@@ -1,0 +1,72 @@
+/* features/portal/layout/PortalLayout.module.css
+ * The `anchor` layout (D2-003) on `grid-template-areas`. Mobile first: one column,
+ * the rail folded under the lead in stored order; lead + 336 px rail from 1024 px.
+ * Spacing from the skin (`--pulse-skin-space`, F13) with a neutral fallback.
+ * No fixed width below 1024 px, so 320 px never scrolls sideways. */
+
+.page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1200px;
+  min-width: 0;
+  margin-inline: auto;
+  padding-inline: 16px;
+  padding-block: calc(var(--pulse-skin-space, 8px) * 2);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pulse-skin-space, 8px) * 3);
+  background: var(--pulse-skin-bg, transparent);
+  color: var(--pulse-skin-text, #1a1a1a);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'lead'
+    'rail';
+  gap: calc(var(--pulse-skin-space, 8px) * 3);
+  min-width: 0;
+}
+
+.grid[hidden] {
+  display: none;
+}
+
+/* A region with nothing visible collapses; the other takes the full width. */
+.grid[data-rail='empty'] {
+  grid-template-areas: 'lead';
+}
+
+.grid[data-lead='empty'] {
+  grid-template-areas: 'rail';
+}
+
+@media (min-width: 1024px) {
+  .grid[data-lead='filled'][data-rail='filled'] {
+    grid-template-columns: minmax(0, 1fr) 336px;
+    grid-template-areas: 'lead rail';
+    align-items: start;
+  }
+}
+
+.lead,
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pulse-skin-space, 8px) * 3);
+  min-width: 0;
+}
+
+.lead {
+  grid-area: lead;
+}
+
+.rail {
+  grid-area: rail;
+}
+
+.lead[hidden],
+.rail[hidden] {
+  display: none;
+}

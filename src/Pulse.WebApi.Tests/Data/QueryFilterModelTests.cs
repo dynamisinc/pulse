@@ -41,6 +41,14 @@ public class QueryFilterModelTests
     [InlineData(typeof(NoisePost))]       // demo-feedback/01
     [InlineData(typeof(ExerciseRuntimeState))] // demo-feedback/17
     [InlineData(typeof(PostEdit))]        // demo-feedback/17
+    [InlineData(typeof(Outlet))]          // channels-foundation/01 (M1)
+    [InlineData(typeof(ContentItem))]     // channels-foundation/01 (M1)
+    [InlineData(typeof(ContentItemRevision))] // channels-foundation/01 (M1)
+    [InlineData(typeof(ContentItemMedia))] // channels-foundation/01 (M1)
+    [InlineData(typeof(ChannelAlert))]    // channels-foundation/01 (M1)
+    [InlineData(typeof(PortalConfig))]    // channels-foundation/01 (M1, portal PC-2)
+    [InlineData(typeof(PortalResource))]  // channels-foundation/01 (M1, portal PC-2)
+    [InlineData(typeof(WeatherZone))]     // channels-foundation/01 (M1, weather zones)
     public void EveryExerciseScopedEntity_HasAGlobalQueryFilter(Type scopedType)
     {
         using var context = BuildModelOnlyContext();

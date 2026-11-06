@@ -87,7 +87,7 @@ describe('interactive header controls — touch targets', () => {
       status: 'live',
     })
     vi.mocked(getStaffAssignments).mockResolvedValue([
-      { exerciseId: 'ex-alpha', exerciseName: 'Alpha', role: 'controller', personId: 'p-1', isLead: false },
+      { exerciseId: 'ex-alpha', exerciseName: 'Alpha Exercise With A Very Long Name', role: 'controller', personId: 'p-1', isLead: false },
       { exerciseId: 'ex-bravo', exerciseName: 'Bravo', role: 'evaluator', personId: 'p-1', isLead: false },
     ])
     render(<ExerciseIdentityBadge role="CONTROLLER" cell="SIMCELL-1" />, { wrapper: Wrapper })
