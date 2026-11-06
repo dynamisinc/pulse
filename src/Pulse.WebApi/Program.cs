@@ -29,6 +29,7 @@ using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.Press;                  // press-room 01
 using Pulse.WebApi.Features.Weather;                // weather-source 01
+using Pulse.WebApi.Features.News;                   // news-network 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -302,6 +303,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 builder.Services.AddChannels();
 builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01), zones (02); read, delivery follow
 builder.Services.AddPress();                    // press-room (E5): release kind, seam defaults, org newsrooms (01)
+builder.Services.AddNewsChannel();              // news-network (E4): article kind descriptor + article-rich body profile (01)
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
