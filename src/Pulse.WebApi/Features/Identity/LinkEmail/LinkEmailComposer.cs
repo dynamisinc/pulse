@@ -44,7 +44,10 @@ public static class LinkEmailComposer
 
     /// <summary>Builds the message for one participant.</summary>
     /// <param name="recipientAddress">The participant's address (already checked by <see cref="LinkEmailAddresses.IsDeliverable"/>).</param>
-    /// <param name="exerciseName">The exercise name from <c>ExerciseFactsReader</c>.</param>
+    /// <param name="exerciseName">
+    /// The PARTICIPANT-FACING exercise name from <c>ExerciseFactsReader</c> (<c>ParticipantName</c>, §8.4), or empty when
+    /// unset; never the internal name.
+    /// </param>
     /// <param name="participantName">The participant's display name (participant-typed: never trusted).</param>
     /// <param name="signInName">The participant's sign-in name.</param>
     /// <param name="joinUrl">The join URL from <c>JoinUrlBuilder</c> (via <c>RosterLinkDtoFactory</c>).</param>

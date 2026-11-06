@@ -679,6 +679,10 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<string>("OutletNamesJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ParticipantName")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
                     b.Property<DateTimeOffset?>("ScheduledEndAt")
                         .HasColumnType("datetimeoffset");
 
@@ -842,6 +846,11 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.Property<Guid>("FollowerPersonaId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsSetupContent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.HasKey("Id");
 
@@ -1737,6 +1746,11 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.Property<string>("InjectId")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsSetupContent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTimeOffset?>("LastEditedAt")
                         .HasColumnType("datetimeoffset");
