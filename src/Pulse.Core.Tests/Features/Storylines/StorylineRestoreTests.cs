@@ -75,6 +75,59 @@ public sealed class StorylineRestoreTests
         restored.ToSnapshot().Should().Be(snapshot, "Tick stores a pre-StartEx negative minute, so it must restore");
     }
 
+    [Fact]
+    public void Restore_AcceptsTheEdgesOfTheMinuteBands_AndTheCrossFieldOrder()
+    {
+        var exercise = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        const int max = int.MaxValue / 4;
+        var edges = new[]
+        {
+            new StorylineRuntimeSnapshot(exercise, id, StorylinePhase.Escalating, 50, 0.1, null, max, max, max, max, "Standard"),
+            new StorylineRuntimeSnapshot(exercise, id, StorylinePhase.Seeded, 50, 0.1, null, 0, 0, -1440, 0, "Standard"),
+            new StorylineRuntimeSnapshot(exercise, id, StorylinePhase.Peak, 50, 0.1, null, 3, 2, 8, 8, "Standard"),
+        };
+
+        foreach (var snapshot in edges)
+        {
+            var restored = Fresh(exercise, id);
+            restored.Restore(snapshot);
+            restored.ToSnapshot().Should().Be(snapshot, "a row at the edge of every band is still a legal row");
+        }
+    }
+
+    [Fact]
+    public void Restore_AcceptsTheStateAClockRewindLeaves_PhaseEnteredAfterLastTick()
+    {
+        // A clock restart (DF-28 runtime reset) then a Tick rewinds LastTick without a transition, so the phase-entered
+        // minute is legitimately ahead of the last tick — restoring that row must not fail the exercise closed.
+        var live = Advanced();
+        live.Tick(new FakeScenarioClock(0));
+        var snapshot = live.ToSnapshot();
+        snapshot.PhaseEnteredScenarioMinute.Should().BeGreaterThan(snapshot.LastTickScenarioMinute, "the fixture must rewind");
+
+        var restored = Fresh(live.ExerciseId, live.Id);
+        restored.Restore(snapshot);
+
+        restored.ToSnapshot().Should().Be(snapshot);
+    }
+
+    [Fact]
+    public void Restore_ThenTickAtTheBandCeiling_DoesNotOverflow()
+    {
+        var exercise = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        const int max = int.MaxValue / 4;
+        var restored = Fresh(exercise, id);
+        restored.Restore(new StorylineRuntimeSnapshot(
+            exercise, id, StorylinePhase.Escalating, 50, 0.1, null, max, 0, -1440, null, "Standard"));
+
+        var result = restored.Tick(new FakeScenarioClock(max));
+
+        result.ElapsedScenarioMinutes.Should().Be(max + 1440, "the band keeps the elapsed arithmetic inside int");
+        restored.MinutesSinceLastOfficialResponse.Should().BePositive("the silence sum must not wrap negative");
+    }
+
     private static IEnumerable<(string Reason, StorylineRuntimeSnapshot Snapshot)> InvalidSnapshots(Guid exercise, Guid id)
     {
         var valid = new StorylineRuntimeSnapshot(
@@ -90,6 +143,17 @@ public sealed class StorylineRestoreTests
         yield return ("negative silence", valid with { MinutesSinceLastOfficialResponse = -1 });
         yield return ("negative phase-entered", valid with { PhaseEnteredScenarioMinute = -1 });
         yield return ("negative last reaction", valid with { LastEngineReactionScenarioMinute = -1 });
+        yield return ("int.MinValue last tick", valid with { LastTickScenarioMinute = int.MinValue });
+        yield return ("last tick below the pre-StartEx band", valid with { LastTickScenarioMinute = -1441 });
+        yield return ("last tick above the restore band", valid with { LastTickScenarioMinute = (int.MaxValue / 4) + 1 });
+        yield return ("int.MaxValue last tick", valid with { LastTickScenarioMinute = int.MaxValue });
+        yield return ("silence above the restore band", valid with { MinutesSinceLastOfficialResponse = (int.MaxValue / 4) + 1 });
+        yield return ("phase-entered above the restore band", valid with { PhaseEnteredScenarioMinute = int.MaxValue });
+        yield return ("last reaction after the last tick", valid with { LastEngineReactionScenarioMinute = 9 });
+        yield return ("last reaction far ahead", valid with { LastEngineReactionScenarioMinute = int.MaxValue });
+        yield return (
+            "positive last reaction with a pre-StartEx last tick",
+            valid with { LastTickScenarioMinute = -5, LastEngineReactionScenarioMinute = 1 });
         yield return ("undefined phase", valid with { Phase = (StorylinePhase)99 });
         yield return ("blank curve", valid with { CurveName = " " });
         yield return ("foreign exercise", valid with { ExerciseId = Guid.NewGuid() });

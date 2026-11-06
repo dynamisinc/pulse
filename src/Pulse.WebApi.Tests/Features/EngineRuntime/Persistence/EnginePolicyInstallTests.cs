@@ -1,8 +1,11 @@
 namespace Pulse.WebApi.Tests.Features.EngineRuntime.Persistence;
 
 using System;
+using System.Linq;
 using FluentAssertions;
 using Pulse.Core.Features.Ambient.Models;
+using Pulse.Core.Features.Ambient.Services;
+using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Features.EngineRuntime;
 using Xunit;
 
@@ -123,6 +126,73 @@ public sealed class EnginePolicyInstallTests
         empty.Should().Throw<ArgumentException>();
         var nullPolicy = () => registry.InstallPersisted(a, null!);
         nullPolicy.Should().Throw<ArgumentNullException>();
+    }
+
+    // ---- Ambient: a corrupt row fails loudly, before anything is installed (Q7) ----------------------
+
+    private static (string Reason, AmbientTierPolicy Row)[] CorruptAmbientRows()
+    {
+        var valid = Policy(AmbientPolicyMode.Review);
+        var cap = RateGovernanceConfig.Default.MaxEnginePostsPerMinute;
+        return
+        [
+            ("undefined mode", valid with { Mode = (AmbientPolicyMode)3 }),
+            ("undefined autonomous-looking mode", valid with { Mode = (AmbientPolicyMode)(-1) }),
+            ("negative per-minute cap", valid with { MaxPerMinute = -1 }),
+            ("per-minute cap above the exercise cap", valid with { MaxPerMinute = cap + 1 }),
+            ("negative per-hour cap", valid with { MaxPerHour = -1 }),
+            ("per-hour cap above 60 x the exercise cap", valid with { MaxPerHour = (cap * 60) + 1 }),
+            ("topic outside the vocabulary", valid with { TopicAllowList = ["not-a-topic"] }),
+            ("empty persona id", valid with { PersonaAllowList = [Guid.Empty] }),
+            (
+                "over-long persona allow-list",
+                valid with
+                {
+                    PersonaAllowList = Enumerable.Range(0, AmbientPolicyValidator.MaxPersonaAllowListLength + 1)
+                        .Select(_ => Guid.NewGuid())
+                        .ToList(),
+                }),
+            ("null topic allow-list", valid with { TopicAllowList = null! }),
+            ("null persona allow-list", valid with { PersonaAllowList = null! }),
+            ("over-cap autonomous (would be held, not just demoted)", Policy(AmbientPolicyMode.Autonomous) with { MaxPerMinute = cap + 1 }),
+        ];
+    }
+
+    [Fact]
+    public void Install_RejectsEveryCorruptRow_AndInstallsNothing()
+    {
+        foreach (var (reason, corrupt) in CorruptAmbientRows())
+        {
+            var registry = new EngineAmbientPolicyRegistry();
+            var exercise = Guid.NewGuid();
+
+            var act = () => registry.InstallPersisted(exercise, corrupt);
+
+            act.Should().Throw<ArgumentException>($"a {reason} row must fail loudly so the rehydrator fails closed (Q7)");
+            registry.Get(exercise).Should().BeSameAs(AmbientTierPolicy.Off, $"a rejected {reason} row installs nothing");
+            registry.TrySet(exercise, AmbientTierPolicy.Off, Policy(AmbientPolicyMode.Review)).Should().BeTrue(
+                $"the slot is still the resting Off after a {reason} row, so a controller write is not blocked");
+        }
+    }
+
+    [Fact]
+    public void Install_AcceptsARowAtTheCapBoundaries_AndEmptyAllowLists()
+    {
+        var registry = new EngineAmbientPolicyRegistry();
+        var exercise = Guid.NewGuid();
+        var cap = RateGovernanceConfig.Default.MaxEnginePostsPerMinute;
+        var edge = Policy(AmbientPolicyMode.Review) with
+        {
+            MaxPerMinute = cap,
+            MaxPerHour = cap * 60,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+        };
+
+        var result = registry.InstallPersisted(exercise, edge);
+
+        result.Installed.Should().BeTrue("a row exactly at the caps is a row the settings POST would have accepted");
+        registry.Get(exercise).Should().BeSameAs(edge);
     }
 
     // ---- Tier policy: restored exactly (Q5) --------------------------------------------------------

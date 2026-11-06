@@ -22,6 +22,15 @@ public sealed class Storyline
     internal const double MinSentiment = -1.0;
     internal const double MaxSentiment = 1.0;
 
+    // Restore bounds for the persisted scenario-minute fields (engine-runtime story 07, S1). A real exercise clock reads
+    // 0…a few thousand minutes; the band only has to be wide enough never to reject a legal row and narrow enough that
+    // Tick's arithmetic over restored values cannot overflow. With every restored minute ≤ int.MaxValue / 4 (≈1,021
+    // years) and a clock reading in the same band, `minute - LastTickScenarioMinute` ≤ int.MaxValue / 4 + 1,440 and
+    // `MinutesSinceLastOfficialResponse += elapsed` ≤ int.MaxValue / 2 + 1,440 — both well inside int. The lower bound
+    // for LastTickScenarioMinute allows one day of pre-StartEx (negative) clock readings, which Tick stores as-is.
+    internal const int MaxRestorableScenarioMinute = int.MaxValue / 4;
+    internal const int MinRestorableLastTickScenarioMinute = -1440;
+
     // Fraction of intensity a matched official response sheds immediately (§6.2), before ongoing decay.
     private const double ResponseBendDownFactor = 0.25;
 
@@ -436,7 +445,9 @@ public sealed class Storyline
     /// <param name="snapshot">The persisted runtime state for THIS storyline.</param>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     /// <exception cref="ArgumentException">The snapshot belongs to another storyline or exercise, has an undefined phase, or a blank curve name.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A value is outside its canonical range (intensity/target 0–100, sentiment −1…+1, negative minutes).</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A value is outside its canonical range (intensity/target 0–100, sentiment −1…+1,
+    /// a minute field outside its restore band — silence / phase-entered / reaction 0…<c>int.MaxValue / 4</c>, last tick
+    /// −1,440…<c>int.MaxValue / 4</c>), or the last engine reaction is later than <c>Max(0, LastTickScenarioMinute)</c>.</exception>
     internal void Restore(StorylineRuntimeSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -470,14 +481,39 @@ public sealed class Storyline
                 nameof(snapshot), snapshot.Sentiment, $"Sentiment must be within {MinSentiment}…{MaxSentiment}.");
         }
 
-        ThrowIfNegative(snapshot.MinutesSinceLastOfficialResponse, nameof(snapshot.MinutesSinceLastOfficialResponse));
-        ThrowIfNegative(snapshot.PhaseEnteredScenarioMinute, nameof(snapshot.PhaseEnteredScenarioMinute));
+        ThrowIfOutOfRange(
+            snapshot.MinutesSinceLastOfficialResponse,
+            0,
+            MaxRestorableScenarioMinute,
+            nameof(snapshot.MinutesSinceLastOfficialResponse));
+        ThrowIfOutOfRange(
+            snapshot.PhaseEnteredScenarioMinute, 0, MaxRestorableScenarioMinute, nameof(snapshot.PhaseEnteredScenarioMinute));
+
+        // LastTickScenarioMinute may be negative (Tick stores a pre-StartEx clock reading) but is bounded so Tick's
+        // `minute - LastTickScenarioMinute` cannot overflow (an int.MinValue row would otherwise wrap).
+        ThrowIfOutOfRange(
+            snapshot.LastTickScenarioMinute,
+            MinRestorableLastTickScenarioMinute,
+            MaxRestorableScenarioMinute,
+            nameof(snapshot.LastTickScenarioMinute));
+
         if (snapshot.LastEngineReactionScenarioMinute is int reaction)
         {
-            ThrowIfNegative(reaction, nameof(snapshot.LastEngineReactionScenarioMinute));
+            // Cross-field order. A snapshot is taken at the end of a tick, and Tick clamps a reaction marker that is
+            // ahead of the clock back to Max(0, minute) — so a legal row always has reaction ≤ Max(0, LastTick). A
+            // marker further ahead would suppress the reaction-cadence gate for minutes that never happened.
+            ThrowIfOutOfRange(
+                reaction,
+                0,
+                Math.Max(0, snapshot.LastTickScenarioMinute),
+                nameof(snapshot.LastEngineReactionScenarioMinute));
         }
 
-        // LastTickScenarioMinute is deliberately unbounded below: Tick stores a pre-StartEx (negative) clock reading.
+        // PhaseEnteredScenarioMinute is deliberately NOT ordered against LastTickScenarioMinute: a clock restart (DF-28
+        // runtime reset, IExerciseClock.Start) followed by a Tick legally leaves PhaseEntered > LastTick (Tick rewinds
+        // LastTick without a transition), as does a pre-StartEx negative tick after Seed(0). PhaseEntered only feeds the
+        // clamped MinutesInPhase display, so a range bound is all it needs. Whether LastTick is ahead of / far behind the
+        // CURRENT clock needs the clock, which Restore does not have: that clamp belongs to the S4 rehydrator.
         Phase = snapshot.Phase;
         Intensity = snapshot.Intensity;
         Sentiment = snapshot.Sentiment;
@@ -497,14 +533,6 @@ public sealed class Storyline
         if (value < min || value > max)
         {
             throw new ArgumentOutOfRangeException(field, value, $"{field} must be within {min}…{max}.");
-        }
-    }
-
-    private static void ThrowIfNegative(int value, string field)
-    {
-        if (value < 0)
-        {
-            throw new ArgumentOutOfRangeException(field, value, $"{field} must not be negative.");
         }
     }
 

@@ -242,13 +242,30 @@ public sealed class EngineAmbientPolicyRegistry
     /// <para>Never raises: the only modes this can store are the persisted <c>Off</c>/<c>Review</c> or <c>Off</c>. No audit
     /// event is emitted here; the rehydrator records the restore in its single <c>engine.state_restored</c> event.</para>
     /// </remarks>
+    /// <para>
+    /// <b>A corrupt row fails loudly, before anything is installed.</b> The row is re-validated with the same
+    /// context-free rules the settings POST applies before <see cref="TrySet"/> (<see cref="AmbientPolicyValidator.Validate"/>):
+    /// a defined mode; caps of 0 or more, per-minute ≤ the exercise's <see cref="MaxEnginePostsPerMinute"/>, per-hour ≤ 60 ×
+    /// that cap; topics in the ambient vocabulary; at most <see cref="AmbientPolicyValidator.MaxPersonaAllowListLength"/>
+    /// non-empty persona ids; non-null allow-lists. The governed autonomy flag is NOT re-checked here: a persisted
+    /// <c>Autonomous</c> is never installed (it boots <c>Off</c>), and the held previous only comes back through the
+    /// settings POST, which checks the flag. Two rules need exercise data this seam does not have and are left to the S4
+    /// rehydrator / the existing runtime re-checks: every allow-listed persona is a persona of THIS exercise, and of an
+    /// ambient-eligible type (the loop's eligible cast and the publish re-check already ignore any other id). The
+    /// per-minute cap is read through <see cref="MaxEnginePostsPerMinute"/> — the exercise's loop when it is registered,
+    /// otherwise the default config — so S4 must install the ambient policy after the loop registration if an exercise's
+    /// cap can ever differ from the default.
+    /// </para>
     /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
     /// <param name="persisted">The policy read from the exercise's persisted row.</param>
     /// <returns>Whether it was installed, the policy <see cref="Get"/> now returns, and any withheld Autonomous policy.</returns>
+    /// <exception cref="ArgumentException"><paramref name="persisted"/> has an undefined mode, a null allow-list, or fails
+    /// <see cref="AmbientPolicyValidator.Validate"/> (a corrupt row; the rehydrator fails closed, Q7).</exception>
     internal AmbientPolicyInstallResult InstallPersisted(Guid exerciseId, AmbientTierPolicy persisted)
     {
         EnsureScoped(exerciseId);
         ArgumentNullException.ThrowIfNull(persisted);
+        ValidatePersisted(exerciseId, persisted);
 
         var raise = persisted.Mode == AmbientPolicyMode.Autonomous;
         var install = raise ? persisted with { Mode = AmbientPolicyMode.Off } : persisted;
@@ -310,6 +327,34 @@ public sealed class EngineAmbientPolicyRegistry
         EnsureScoped(exerciseId);
         var registration = _loops?.Active.FirstOrDefault(loop => loop.ExerciseId == exerciseId);
         return registration?.PersonasByHandle.Values.FirstOrDefault(persona => persona.InstanceId == personaId)?.Dossier.Type;
+    }
+
+    private void ValidatePersisted(Guid exerciseId, AmbientTierPolicy persisted)
+    {
+        if (!Enum.IsDefined(persisted.Mode))
+        {
+            throw new ArgumentException($"'{(int)persisted.Mode}' is not a defined ambient-policy mode.", nameof(persisted));
+        }
+
+        if (persisted.TopicAllowList is null || persisted.PersonaAllowList is null)
+        {
+            throw new ArgumentException("A persisted ambient policy needs both allow-lists (empty = none).", nameof(persisted));
+        }
+
+        // The same pure rules the settings POST runs before TrySet. Autonomy authorization is passed as granted on purpose:
+        // a persisted Autonomous is installed as Off, never armed (see InstallPersisted's remarks).
+        var validation = AmbientPolicyValidator.Validate(
+            AmbientPolicyModes.ToLiteral(persisted.Mode),
+            persisted.MaxPerMinute,
+            persisted.MaxPerHour,
+            persisted.TopicAllowList,
+            persisted.PersonaAllowList.Select(id => id.ToString()).ToList(),
+            MaxEnginePostsPerMinute(exerciseId),
+            autonomyAuthorized: true);
+        if (!validation.IsValid)
+        {
+            throw new ArgumentException($"The persisted ambient policy is invalid: {validation.Error}", nameof(persisted));
+        }
     }
 
     private static void EnsureScoped(Guid exerciseId)
