@@ -102,8 +102,8 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         }
 
         var orgIds = await _dbContext.Enrollments
-            .Active()
             .AsNoTracking()
+            .Active() // #576: a revoked (soft-deleted) enrollment provisions nothing.
             .Where(e => e.Role == EnrollmentRoles.Pio && e.PersonaId != null)
             .Select(e => e.PersonaId!.Value)
             .Distinct()
