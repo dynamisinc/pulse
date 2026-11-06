@@ -241,7 +241,6 @@ public sealed class EngineAmbientPolicyRegistry
     /// </para>
     /// <para>Never raises: the only modes this can store are the persisted <c>Off</c>/<c>Review</c> or <c>Off</c>. No audit
     /// event is emitted here; the rehydrator records the restore in its single <c>engine.state_restored</c> event.</para>
-    /// </remarks>
     /// <para>
     /// <b>A corrupt row fails loudly, before anything is installed.</b> The row is re-validated with the same
     /// context-free rules the settings POST applies before <see cref="TrySet"/> (<see cref="AmbientPolicyValidator.Validate"/>):
@@ -256,6 +255,7 @@ public sealed class EngineAmbientPolicyRegistry
     /// otherwise the default config — so S4 must install the ambient policy after the loop registration if an exercise's
     /// cap can ever differ from the default.
     /// </para>
+    /// </remarks>
     /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
     /// <param name="persisted">The policy read from the exercise's persisted row.</param>
     /// <returns>Whether it was installed, the policy <see cref="Get"/> now returns, and any withheld Autonomous policy.</returns>

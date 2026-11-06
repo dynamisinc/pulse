@@ -112,6 +112,25 @@ public sealed class StorylineRestoreTests
         restored.ToSnapshot().Should().Be(snapshot);
     }
 
+    [Theory]
+    [InlineData(8, 9, 8)]
+    [InlineData(-5, 1, 0)]
+    [InlineData(100, 400, 100)]
+    public void Restore_ClampsAReactionMarkerAheadOfTheLastTick_AsTickDoes(int lastTick, int reaction, int expected)
+    {
+        // A runtime reset racing a tick can leave reaction > LastTick on a HEALTHY exercise (the driver records the
+        // reaction at the minute it read before Tick); the next Tick would clamp it, so a restore clamps it too rather
+        // than failing the exercise closed.
+        var exercise = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var restored = Fresh(exercise, id);
+
+        restored.Restore(new StorylineRuntimeSnapshot(
+            exercise, id, StorylinePhase.Escalating, 50, 0.1, null, 5, 0, lastTick, reaction, "Standard"));
+
+        restored.LastEngineReactionScenarioMinute.Should().Be(expected);
+    }
+
     [Fact]
     public void Restore_ThenTickAtTheBandCeiling_DoesNotOverflow()
     {
@@ -149,11 +168,7 @@ public sealed class StorylineRestoreTests
         yield return ("int.MaxValue last tick", valid with { LastTickScenarioMinute = int.MaxValue });
         yield return ("silence above the restore band", valid with { MinutesSinceLastOfficialResponse = (int.MaxValue / 4) + 1 });
         yield return ("phase-entered above the restore band", valid with { PhaseEnteredScenarioMinute = int.MaxValue });
-        yield return ("last reaction after the last tick", valid with { LastEngineReactionScenarioMinute = 9 });
-        yield return ("last reaction far ahead", valid with { LastEngineReactionScenarioMinute = int.MaxValue });
-        yield return (
-            "positive last reaction with a pre-StartEx last tick",
-            valid with { LastTickScenarioMinute = -5, LastEngineReactionScenarioMinute = 1 });
+        yield return ("last reaction above the restore band", valid with { LastEngineReactionScenarioMinute = int.MaxValue });
         yield return ("undefined phase", valid with { Phase = (StorylinePhase)99 });
         yield return ("blank curve", valid with { CurveName = " " });
         yield return ("foreign exercise", valid with { ExerciseId = Guid.NewGuid() });

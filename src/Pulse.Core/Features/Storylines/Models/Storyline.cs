@@ -447,7 +447,8 @@ public sealed class Storyline
     /// <exception cref="ArgumentException">The snapshot belongs to another storyline or exercise, has an undefined phase, or a blank curve name.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A value is outside its canonical range (intensity/target 0–100, sentiment −1…+1,
     /// a minute field outside its restore band — silence / phase-entered / reaction 0…<c>int.MaxValue / 4</c>, last tick
-    /// −1,440…<c>int.MaxValue / 4</c>), or the last engine reaction is later than <c>Max(0, LastTickScenarioMinute)</c>.</exception>
+    /// −1,440…<c>int.MaxValue / 4</c>). A last engine reaction later than <c>Max(0, LastTickScenarioMinute)</c> is clamped
+    /// to it, as <see cref="Tick"/> does, not rejected.</exception>
     internal void Restore(StorylineRuntimeSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -499,15 +500,17 @@ public sealed class Storyline
 
         if (snapshot.LastEngineReactionScenarioMinute is int reaction)
         {
-            // Cross-field order. A snapshot is taken at the end of a tick, and Tick clamps a reaction marker that is
-            // ahead of the clock back to Max(0, minute) — so a legal row always has reaction ≤ Max(0, LastTick). A
-            // marker further ahead would suppress the reaction-cadence gate for minutes that never happened.
-            ThrowIfOutOfRange(
-                reaction,
-                0,
-                Math.Max(0, snapshot.LastTickScenarioMinute),
-                nameof(snapshot.LastEngineReactionScenarioMinute));
+            ThrowIfOutOfRange(reaction, 0, MaxRestorableScenarioMinute, nameof(snapshot.LastEngineReactionScenarioMinute));
         }
+
+        // A reaction marker ahead of LastTick is CLAMPED back to Max(0, LastTick), exactly as Tick clamps it after a
+        // rewind — not rejected. A healthy exercise can leave one: the driver records the reaction at the minute it read
+        // BEFORE Tick, so a runtime reset racing the tick ends it with reaction > LastTick until the next Tick self-heals
+        // it. Failing a restore on that transient state would fail a healthy exercise closed. A marker further ahead
+        // would otherwise suppress the reaction-cadence gate for minutes that never happened.
+        var restoredReaction = snapshot.LastEngineReactionScenarioMinute is int marker
+            ? Math.Min(marker, Math.Max(0, snapshot.LastTickScenarioMinute))
+            : (int?)null;
 
         // PhaseEnteredScenarioMinute is deliberately NOT ordered against LastTickScenarioMinute: a clock restart (DF-28
         // runtime reset, IExerciseClock.Start) followed by a Tick legally leaves PhaseEntered > LastTick (Tick rewinds
@@ -521,7 +524,7 @@ public sealed class Storyline
         MinutesSinceLastOfficialResponse = snapshot.MinutesSinceLastOfficialResponse;
         PhaseEnteredScenarioMinute = snapshot.PhaseEnteredScenarioMinute;
         LastTickScenarioMinute = snapshot.LastTickScenarioMinute;
-        LastEngineReactionScenarioMinute = snapshot.LastEngineReactionScenarioMinute;
+        LastEngineReactionScenarioMinute = restoredReaction;
         CurveName = snapshot.CurveName.Trim();
     }
 
