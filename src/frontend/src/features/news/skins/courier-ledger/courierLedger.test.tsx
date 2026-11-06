@@ -204,13 +204,30 @@ describe('fonts', () => {
 /** The only imports a data-only skin source may make: F13, its own tokens, its own fonts. */
 const ALLOWED_IMPORT = /^(@\/features\/channels|\.\/tokens|\.\/fonts\/[a-z0-9-]+\.woff2\?url)$/
 
+/** Every module specifier: `… from 'x'` (any import/export, multi-line too) and `import 'x'`. */
+const MODULE_SPECIFIER = /\bfrom\s*['"]([^'"]+)['"]|^\s*import\s*['"]([^'"]+)['"]/gm
+
 describe('zero layout code', () => {
+  it('finds multi-line, side-effect and re-export specifiers (guard self-check)', () => {
+    const sample = [
+      'import {',
+      '  a,',
+      "} from '@mui/material'",
+      "import './x.css'",
+      "export { b } from 'react'",
+    ].join('\n')
+    const found = [...sample.matchAll(MODULE_SPECIFIER)].map(m => m[1] ?? m[2] ?? '')
+    expect(found).toEqual(['@mui/material', './x.css', 'react'])
+    expect(found.some(spec => ALLOWED_IMPORT.test(spec))).toBe(false)
+  })
+
   it('has sources that import no React, MUI, CSS or layout module', () => {
     const sources = import.meta.glob('./*.ts', { query: '?raw', import: 'default', eager: true })
     const code = Object.entries(sources).filter(([path]) => !path.includes('.test.'))
     expect(code.map(([path]) => path).sort()).toEqual(['./index.ts', './tokens.ts'])
     for (const [path, raw] of code) {
-      const imports = [...String(raw).matchAll(/^import .* from '([^']+)'/gm)].map(m => m[1])
+      const imports = [...String(raw).matchAll(MODULE_SPECIFIER)].map(m => m[1] ?? m[2] ?? '')
+      expect(imports.length, path).toBeGreaterThan(0)
       for (const spec of imports) {
         expect(spec, path).toMatch(ALLOWED_IMPORT)
       }
