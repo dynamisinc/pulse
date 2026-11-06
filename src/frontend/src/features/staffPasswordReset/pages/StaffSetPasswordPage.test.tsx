@@ -145,7 +145,7 @@ describe('StaffSetPasswordPage', () => {
     expect(screen.getByText('At least 12 characters')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Show passwords' }))
     expect(field).toHaveAttribute('type', 'text')
-    expect(screen.getByRole('button', { name: 'Hide passwords' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Show passwords' })).toHaveAttribute(
       'aria-pressed',
       'true',
     )

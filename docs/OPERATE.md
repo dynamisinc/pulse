@@ -320,8 +320,10 @@ SELECT [ExerciseId], COUNT(*) FROM [Enrollments] WHERE [IsLead] = 1 GROUP BY [Ex
 -- expect no rows
 ```
 
-**Deploy order: after A3 (#670) is applied, backend only, in a quiet window.** A2's migration sorts after A3's
-(`20261030173000_A3SetupContentParticipantName`); deploy it only once A3 is on UAT. The frontend is unaffected (no wire shape changes for existing routes). The
+**Deploy order: after A3 (#670) is applied, in a quiet window; backend and frontend from the same merge.** A2's migration
+sorts after A3's (`20261030173000_A3SetupContentParticipantName`); deploy it only once A3 is on UAT. Existing routes keep
+their wire shapes, but the admin reset link points at the new `/staff/reset` page, so the frontend must be serving
+before any org admin issues a link (a backend-only deploy hands out links that land on the SPA fallback). The
 migration takes brief schema locks on `Enrollments`, `Exercises`, `People` and `MediaAssets`. The new routes are
 `POST /api/auth/password/reset` (pre-auth) and `POST /api/org/people/{personId}/password-reset` (org admin). Email is
 not sent anywhere yet: the admin reset returns the link once, for the admin to hand over.
