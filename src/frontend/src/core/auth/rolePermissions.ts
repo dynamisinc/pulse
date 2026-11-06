@@ -32,6 +32,8 @@
  *     reopenExercise, freezeTiers           controller             (not planner)
  *   editExerciseSettings (settings, chrome,
  *     practice mode), setLeadController     planner
+ *   assignStaff (grant / change role / remove /
+ *     list an exercise's staff; planner Staff tab) orgAdmin, planner (not controller/evaluator)
  *   manageViewOnlyCodes, manageAccounts     planner, controller    (not evaluator)
  *   editContent (inject create/update/delete/
  *     reorder/import, persona edit)         planner, controller
@@ -67,6 +69,7 @@ export type StaffAction =
   | 'freezeTiers'
   | 'editExerciseSettings'
   | 'setLeadController'
+  | 'assignStaff'
   | 'manageViewOnlyCodes'
   | 'manageAccounts'
   | 'editContent'
@@ -107,6 +110,7 @@ const ROLE_RULES: Readonly<Partial<Record<StaffAction, readonly SessionRole[]>>>
   freezeTiers: ['controller'],
   editExerciseSettings: ['planner'],
   setLeadController: ['planner'],
+  assignStaff: ['orgAdmin', 'planner'],
   manageViewOnlyCodes: PLANNER_OR_CONTROLLER,
   manageAccounts: PLANNER_OR_CONTROLLER,
   editContent: PLANNER_OR_CONTROLLER,

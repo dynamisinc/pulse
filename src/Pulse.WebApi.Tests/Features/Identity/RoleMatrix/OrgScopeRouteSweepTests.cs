@@ -69,6 +69,14 @@ public sealed class OrgScopeRouteSweepTests
         ["GET /api/org/people"] = "the org people directory (#574): OrgAdminOnly on an org-scope session, the caller's organization only (InOrganization)",
         ["GET /api/org/people/{personId:guid}"] = "one person in the org directory (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
         ["PATCH /api/org/people/{personId:guid}"] = "org-admin grant/revoke and disable/enable (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
+        ["GET /api/org/exercises/{exerciseId:guid}/enrollments"] =
+            "story 20 (#575a): an exercise's staff list; for an org admin the exercise is resolved InOrganization (a foreign id is the bare 404)",
+        ["POST /api/org/exercises/{exerciseId:guid}/enrollments"] =
+            "story 20 (#575a): grant a staff role on an exercise; for an org admin the exercise is resolved InOrganization (a foreign id is the bare 404)",
+        ["PATCH /api/staff/enrollments/{id:guid}"] =
+            "story 20 (#575a): change a staff role; for an org admin the enrollment's exercise is joined to the caller's organization (a foreign id is the bare 404)",
+        ["DELETE /api/staff/enrollments/{id:guid}"] =
+            "story 20 (#575a): revoke a staff role; for an org admin the enrollment's exercise is joined to the caller's organization (a foreign id is the bare 404)",
     };
 
     /// <summary>

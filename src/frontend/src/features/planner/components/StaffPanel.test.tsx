@@ -1,0 +1,366 @@
+/**
+ * features/planner/components/StaffPanel.test.tsx
+ * ---------------------------------------------------------------------------
+ * Story 20 (#575a): the planner Staff section. The service is mocked (real
+ * `StaffAssignmentError` kept) so the panel is driven through its seam. Covers: list + lead
+ * marker as text, grant from candidates, role change (always confirmed: it signs the person out),
+ * remove and make-lead confirms (with the swamped-mode, lead-removal and self-change warnings),
+ * the polite success announcements, Make lead gated by `setLeadController`, every 409/404
+ * message, refetch after each mutation, that a non-assigning role gets nothing, and that a
+ * successful self-demote / self-remove on an exercise-bound session ends the (server-revoked)
+ * session and goes to sign-in.
+ */
+import type { ReactNode } from 'react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { ThemeProvider } from '@mui/material/styles'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cobraTheme } from '@/theme/cobraTheme'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+import { StaffPanel } from './StaffPanel'
+import * as service from '../services/staffAssignmentService'
+import { endSession } from '@/core/auth/endSession'
+import type { StaffRoster } from '../types/staff'
+
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+vi.mock('@/core/auth/endSession', () => ({
+  endSession: vi.fn(() => Promise.resolve()),
+  resetClientSession: vi.fn(),
+}))
+vi.mock('@/core/exerciseContext', () => ({
+  useOptionalExerciseContext: () => ({ exerciseId: 'ex-1' }),
+}))
+vi.mock('../services/staffAssignmentService', async importOriginal => {
+  const actual = await importOriginal<typeof import('../services/staffAssignmentService')>()
+  return {
+    ...actual,
+    getStaffRoster: vi.fn(),
+    grantStaffRole: vi.fn(),
+    changeStaffRole: vi.fn(),
+    removeStaff: vi.fn(),
+    makeStaffLead: vi.fn(),
+  }
+})
+
+const svc = vi.mocked(service)
+const { StaffAssignmentError } = service
+
+const ROSTER: StaffRoster = {
+  exerciseId: 'ex-1',
+  enrollments: [
+    { id: 'e1', personId: 'person-stub', displayName: 'Pat Planner', email: 'pat@x.org',
+      role: 'planner', isLead: false },
+    { id: 'e2', personId: 'p2', displayName: 'Cora Lead', email: null, role: 'controller',
+      isLead: true },
+    { id: 'e3', personId: 'p3', displayName: 'Carl Controller', email: 'carl@x.org',
+      role: 'controller', isLead: false },
+    { id: 'e4', personId: 'p4', displayName: 'Eve Eval', email: null, role: 'evaluator',
+      isLead: false },
+  ],
+  candidates: [{ personId: 'p9', displayName: 'Newt Newcomer', email: 'newt@x.org' }],
+}
+
+function renderPanel() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={cobraTheme}>
+        <MemoryRouter initialEntries={['/staff/plan/settings']}>
+          <Routes>
+            <Route path="/staff/plan/settings" element={children} />
+            <Route path="/login" element={<div data-testid="login-page" />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>
+  )
+  return render(<StaffPanel />, { wrapper: Wrapper })
+}
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
+  svc.getStaffRoster.mockResolvedValue(ROSTER)
+})
+
+describe('StaffPanel', () => {
+  it('lists staff and marks the lead with text and an icon', async () => {
+    renderPanel()
+    const row = await screen.findByTestId('staff-row-e2')
+    const marker = within(row).getByTestId('staff-lead-marker')
+    expect(marker).toHaveTextContent('Lead')
+    expect(marker.querySelector('svg')).not.toBeNull()
+    expect(screen.getAllByTestId('staff-lead-marker')).toHaveLength(1)
+    expect(screen.getByRole('columnheader', { name: 'Role' })).toBeInTheDocument()
+    expect(screen.getByRole('rowheader', { name: /Pat Planner \(you\)/ })).toBeInTheDocument()
+  })
+
+  it('offers Make lead to non-lead controllers only', async () => {
+    renderPanel()
+    await screen.findByTestId('staff-row-e2')
+    expect(screen.getAllByRole('button', { name: /^Make .* lead$/ })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Make Carl Controller lead' })).toBeInTheDocument()
+  })
+
+  it('shows empty and loading states', async () => {
+    svc.getStaffRoster.mockResolvedValue({ ...ROSTER, enrollments: [], candidates: [] })
+    renderPanel()
+    expect(screen.getByText(/Loading staff/)).toBeInTheDocument()
+    expect(await screen.findByTestId('staff-empty')).toBeInTheDocument()
+    expect(screen.getByTestId('staff-no-candidates')).toBeInTheDocument()
+  })
+
+  it('an org admin (assignStaff but not setLeadController) is offered no Make lead', async () => {
+    setStubSession({ role: 'orgAdmin' })
+    renderPanel()
+    await screen.findByTestId('staff-row-e3')
+    expect(screen.queryByRole('button', { name: /^Make .* lead$/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Carl Controller' })).toBeInTheDocument()
+  })
+
+  it('grants a role to a candidate, refetches and announces it', async () => {
+    svc.grantStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e2')
+    const status = screen.getByTestId('staff-status')
+    expect(status).toHaveAttribute('role', 'status')
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    await userEvent.selectOptions(screen.getByLabelText('Person'), 'p9')
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'evaluator')
+    await userEvent.click(screen.getByRole('button', { name: 'Add staff' }))
+    await waitFor(() => expect(svc.grantStaffRole).toHaveBeenCalledWith('ex-1', 'p9', 'evaluator'))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(status).toHaveTextContent('Newt Newcomer added as Evaluator.')
+  })
+
+  it('confirms a role change (the person is signed out), then refetches and announces', async () => {
+    svc.changeStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e4')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Eve Eval'), 'controller')
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(
+      'Eve Eval will be signed out of this exercise and must sign in again as Controller.')
+    expect(dialog).not.toHaveTextContent(/lead controller/)
+    expect(svc.changeStaffRole).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change role' }))
+    await waitFor(() => expect(svc.changeStaffRole).toHaveBeenCalledWith('e4', 'controller'))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('staff-status')).toHaveTextContent('Eve Eval is now a Controller.')
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+  })
+
+  it('cancelling a role change does nothing', async () => {
+    renderPanel()
+    await screen.findByTestId('staff-row-e3')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Carl Controller'), 'evaluator')
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Cancel' }))
+    expect(svc.changeStaffRole).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Role for Carl Controller')).toHaveValue('controller')
+  })
+
+  it('changing the lead\'s role warns there will be no lead, and announces', async () => {
+    svc.changeStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e2')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Cora Lead'), 'evaluator')
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(
+      'Cora Lead will be signed out of this exercise and must sign in again as Evaluator.')
+    expect(dialog).toHaveTextContent(
+      'This person is the lead controller. The exercise will have no lead, and swamped mode '
+      + 'turns off.')
+    expect(svc.changeStaffRole).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change role' }))
+    await waitFor(() => expect(svc.changeStaffRole).toHaveBeenCalledWith('e2', 'evaluator'))
+    expect(await screen.findByTestId('staff-status'))
+      .toHaveTextContent('Cora Lead is now an Evaluator.')
+  })
+
+  it('removing the lead warns there will be no lead', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e2')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Cora Lead' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(
+      'This person is the lead controller. The exercise will have no lead, and swamped mode '
+      + 'turns off.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.removeStaff).toHaveBeenCalledWith('e2'))
+    await waitFor(() => expect(screen.getByTestId('staff-status'))
+      .toHaveTextContent('Removed Cora Lead.'))
+  })
+
+  it('removing a non-lead does not carry the lead warning', async () => {
+    renderPanel()
+    await screen.findByTestId('staff-row-e3')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Carl Controller' }))
+    expect(await screen.findByRole('alertdialog')).not.toHaveTextContent(/lead controller/)
+  })
+
+  it('removes only after confirming, then refetches', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e4')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Eve Eval' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(svc.removeStaff).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.removeStaff).toHaveBeenCalledWith('e4'))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.getByTestId('staff-status')).toHaveTextContent('Removed Eve Eval.')
+  })
+
+  it('cancelling the remove confirm does nothing', async () => {
+    renderPanel()
+    await screen.findByTestId('staff-row-e4')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Eve Eval' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Cancel' }))
+    expect(svc.removeStaff).not.toHaveBeenCalled()
+  })
+
+  it('make lead warns that swamped mode turns off, then sets the lead', async () => {
+    svc.makeStaffLead.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e3')
+    await userEvent.click(screen.getByRole('button', { name: 'Make Carl Controller lead' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Changing the lead turns swamped mode off.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Make lead' }))
+    await waitFor(() => expect(svc.makeStaffLead).toHaveBeenCalledWith('e3'))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('staff-status'))
+      .toHaveTextContent('Carl Controller is now the lead controller.')
+  })
+
+  it('warns when removing yourself', async () => {
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Pat Planner' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent(/signed out of it/)
+  })
+
+  it('warns and confirms before demoting yourself', async () => {
+    svc.changeStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Pat Planner'), 'evaluator')
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Change your role to Evaluator?')
+    expect(dialog).toHaveTextContent(
+      'You keep a staff role in this exercise as Evaluator, but you lose planner access and will '
+      + 'be signed out now.')
+    expect(dialog).not.toHaveTextContent(/lose your staff role/)
+    expect(svc.changeStaffRole).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change role' }))
+    await waitFor(() => expect(svc.changeStaffRole).toHaveBeenCalledWith('e1', 'evaluator'))
+  })
+
+  it('after a successful self-demote, ends the revoked session and goes to sign-in', async () => {
+    svc.changeStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Pat Planner'), 'controller')
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Change role' }))
+    expect(await screen.findByTestId('login-page')).toBeInTheDocument()
+    expect(vi.mocked(endSession)).toHaveBeenCalledTimes(1)
+    expect(svc.changeStaffRole).toHaveBeenCalledWith('e1', 'controller')
+    expect(screen.queryByTestId('staff-panel')).not.toBeInTheDocument()
+  })
+
+  it('after a successful self-remove, ends the revoked session and goes to sign-in', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Pat Planner' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByTestId('login-page')).toBeInTheDocument()
+    expect(vi.mocked(endSession)).toHaveBeenCalledTimes(1)
+    expect(svc.removeStaff).toHaveBeenCalledWith('e1')
+  })
+
+  it('a refused self-demote (last planner) keeps the session and explains', async () => {
+    svc.changeStaffRole.mockRejectedValue(new StaffAssignmentError('x', 409, 'last-planner'))
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Pat Planner'), 'evaluator')
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Change role' }))
+    expect(await screen.findByTestId('staff-error'))
+      .toHaveTextContent('An exercise must keep at least one planner.')
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('login-page')).not.toBeInTheDocument()
+  })
+
+  it('removing someone else does not sign you out', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e4')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Eve Eval' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.getByTestId('staff-panel')).toBeInTheDocument()
+  })
+
+  it('an org admin on an org-scope session removing their own row stays signed in', async () => {
+    // The server only revokes sessions minted on THAT exercise; an org-scope session is not one.
+    setStubSession({ role: 'orgAdmin' })
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Pat Planner' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.getByTestId('staff-panel')).toBeInTheDocument()
+  })
+
+  const CASES: ReadonlyArray<readonly [number, string | undefined, string]> = [
+    [409, 'last-planner', 'An exercise must keep at least one planner.'],
+    [409, 'conflicting-enrollment', 'That person already has a role in this exercise.'],
+    [409, 'lead-changed-retry', 'The lead changed while you were working. Refresh and try again.'],
+    [409, 'lead-conflict', 'The lead changed while you were working. Refresh and try again.'],
+    [409, 'not-a-controller', 'Only a controller can be the lead.'],
+    [404, undefined, 'That person or role no longer exists here.'],
+  ]
+  for (const [status, code, message] of CASES) {
+    it(`maps ${status} ${code ?? ''} to its message and refetches`, async () => {
+      svc.removeStaff.mockRejectedValue(new StaffAssignmentError('x', status, code))
+      renderPanel()
+      await screen.findByTestId('staff-row-e4')
+      await userEvent.click(screen.getByRole('button', { name: 'Remove Eve Eval' }))
+      await userEvent.click(within(await screen.findByRole('alertdialog'))
+        .getByRole('button', { name: 'Remove' }))
+      const err = await screen.findByTestId('staff-error')
+      expect(err).toHaveTextContent(message)
+      expect(err.querySelector('svg')).not.toBeNull()
+      expect(screen.getByTestId('staff-error-region')).toHaveAttribute('role', 'alert')
+      await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    })
+  }
+
+  for (const role of ['controller', 'evaluator', 'participant'] as const) {
+    it(`${role} gets no Staff panel and no fetch`, () => {
+      setStubSession({ role })
+      renderPanel()
+      expect(screen.queryByTestId('staff-panel')).not.toBeInTheDocument()
+    })
+  }
+})

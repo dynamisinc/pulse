@@ -66,3 +66,9 @@ export type {
   AccountImportRowResult,
   AccountImportRowStatus,
 } from './types'
+
+// identity-auth-roles story 20 (#575a) — the planner Staff section (assign / role / remove / lead).
+// Self-contained panel mounted from the page registry; gated by `can('assignStaff')`.
+export { StaffPanel } from './components/StaffPanel'
+export { useStaffRoster, useStaffMutations } from './hooks/useStaffAssignment'
+export type { StaffRole, StaffEnrollment, StaffCandidate, StaffRoster } from './types/staff'
