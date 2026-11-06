@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Channels;
 
 using Microsoft.AspNetCore.Routing;
 using Pulse.WebApi.Features.Channels.Alerts;
+using Pulse.WebApi.Features.Channels.Content.Read;
 using Pulse.WebApi.Features.Channels.Outlets;
 
 /// <summary>
@@ -24,6 +25,7 @@ public static class ChannelsEndpointRouteBuilderExtensions
 
         endpoints.MapOutlets(); // story 03: /api/outlets*
         endpoints.MapChannelAlerts(); // story 10: GET /api/alerts/history; POST /api/alerts, /api/alerts/{id}/clear
+        endpoints.MapContentRead(); // story 06: GET /api/channels/{news|press|weather}/content*, GET /api/link-previews
 
         return endpoints;
     }

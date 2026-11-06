@@ -1,22 +1,18 @@
 /**
  * features/participant-shell/components/AlertBar/AlertsHistory.tsx
  * ---------------------------------------------------------------------------
- * The alerts "Details" view content (PRT-012) — what the alert bar's
- * "Details →" link opens at {@link ALERTS_PATH}.
+ * The alerts history view (PRT-012) — what the alert bar's "Details →" link
+ * opens at {@link ALERTS_PATH} for an alert with no source item.
  *
- * The bar can only show ONE alert at a time (the ticker rotates; the
- * emergency band shows the emergency and a "+N more" chip), so this view is
- * where a participant reads EVERY active alert in full: severity chip
- * (icon + LABEL — never color-only, NFR-001), the complete message, and the
- * scenario time it went active (COR-053 — never wall-clock).
+ * Data: `GET /alerts/history` via `useAlertsHistory()` (channels-foundation
+ * story 11, #707) — EVERY alert of the exercise, cleared and expired included,
+ * REVERSE-CHRONOLOGICAL (newest first, the server's order), one page at a
+ * time with "Show older alerts". The bar shows what is active now; this is the
+ * record. It is refreshed by every `AlertsChanged` push (`useAlerts()`).
  *
- * Ordering: most severe first (emergency → advisory → info), then newest
- * first within a severity — the order a participant should act on them.
- *
- * Data: the SAME `useAlerts()` seam the bar reads, so the view and the bar
- * can never disagree about what is active. A full alert HISTORY (expired /
- * cleared alerts) needs the backend's `/alerts` feed and is out of scope;
- * until then this lists the active set.
+ * Each entry: severity chip (icon + LABEL — never color-only, NFR-001), the
+ * complete message verbatim (WX-011), the scenario time it was issued (COR-053
+ * — never wall-clock), and "Details →" to its source item when it has one.
  *
  * Ownership: the shell owns the CONTENT (alert data + severity vocabulary);
  * the mounted channel owns the ROUTE and its frame (back header) — see
@@ -30,8 +26,9 @@ import type { CSSProperties } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { SeverityChip } from './SeverityChip'
-import { useAlerts } from './useAlerts'
-import { sortAlertsForHistory } from './sortAlertsForHistory'
+import { AlertDetailsLink } from './AlertDetailsLink'
+import { useAlertsHistory } from './useAlertsHistory'
+import { touchTargetCss } from '../touchTarget'
 
 const sectionStyle: CSSProperties = {
   boxSizing: 'border-box',
@@ -86,37 +83,93 @@ const emptyStyle: CSSProperties = {
   color: '#5a6470',
 }
 
+const detailsLinkStyle: CSSProperties = {
+  fontFamily: "'Figtree', system-ui, sans-serif",
+  fontWeight: 600,
+  fontSize: '13px',
+  // #0b5cad on white is ~6.6:1 — clears WCAG 2.1 AA for normal text.
+  color: '#0b5cad',
+}
+
+const loadMoreStyle: CSSProperties = {
+  marginTop: '12px',
+  padding: '8px 14px',
+  border: '1px solid #c4c9cf',
+  borderRadius: '8px',
+  background: '#ffffff',
+  color: '#1f2328',
+  font: "600 14px 'Figtree', system-ui, sans-serif",
+  cursor: 'pointer',
+}
+
+/** Real 44 px targets on coarse pointers (mobile-tablet story 05). */
+const TOUCH_TARGET_CLASS = 'pulse-alerts-history-hit'
+const TOUCH_TARGET_STYLES = touchTargetCss(`.${TOUCH_TARGET_CLASS}`)
+
 export function AlertsHistory() {
-  const alerts = useAlerts()
+  const { alerts, isLoading, isError, hasMore, isLoadingMore, loadMore } = useAlertsHistory()
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
-  const sorted = sortAlertsForHistory(alerts)
 
   return (
     <section
       aria-labelledby="pulse-alerts-history-heading"
+      aria-busy={isLoading || isLoadingMore}
       style={sectionStyle}
       data-testid="pulse-alerts-history"
     >
+      <style>{TOUCH_TARGET_STYLES}</style>
       <h1 id="pulse-alerts-history-heading" style={headingStyle}>
         Alerts
       </h1>
-      {sorted.length === 0 ? (
+      {isLoading ? (
+        <p style={emptyStyle} data-testid="pulse-alerts-history-loading">
+          Loading alerts…
+        </p>
+      ) : isError ? (
+        <p style={emptyStyle} data-testid="pulse-alerts-history-error">
+          Alerts can’t be shown right now.
+        </p>
+      ) : alerts.length === 0 ? (
         <p style={emptyStyle} data-testid="pulse-alerts-history-empty">
-          No active alerts.
+          No alerts have been issued.
         </p>
       ) : (
-        <ul style={listStyle}>
-          {sorted.map(alert => (
-            <li key={alert.id} style={itemStyle} data-testid="pulse-alerts-history-item">
-              <SeverityChip severity={alert.severity} />
-              <p style={messageStyle}>{alert.message}</p>
-              <time dateTime={alert.scenarioTime} style={timeStyle}>
-                {format(alert.scenarioTime)}
-              </time>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul style={listStyle}>
+            {alerts.map(alert => (
+              <li key={alert.id} style={itemStyle} data-testid="pulse-alerts-history-item">
+                <SeverityChip severity={alert.severity} />
+                <p style={messageStyle}>{alert.message}</p>
+                <time dateTime={alert.scenarioTime} style={timeStyle}>
+                  {format(alert.scenarioTime)}
+                </time>
+                {typeof alert.href === 'string' && (
+                  <AlertDetailsLink
+                    href={alert.href}
+                    className={TOUCH_TARGET_CLASS}
+                    style={detailsLinkStyle}
+                    testId="pulse-alerts-history-details"
+                  >
+                    Details →
+                  </AlertDetailsLink>
+                )}
+              </li>
+            ))}
+          </ul>
+          {hasMore && (
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={isLoadingMore}
+              className={TOUCH_TARGET_CLASS}
+              style={loadMoreStyle}
+              data-testid="pulse-alerts-history-more"
+            >
+              {isLoadingMore ? 'Loading older alerts…' : 'Show older alerts'}
+            </button>
+          )}
+        </>
       )}
     </section>
   )
