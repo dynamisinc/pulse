@@ -64,6 +64,7 @@ public sealed class BootstrapService
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
     private const string SchemaVersion = "v0";
+    private const int MaxSlugCollisionOrdinal = 1000;
     private const string BootstrapActorId = "bootstrap";
     private const string BootstrappedEventType = "exercise.bootstrapped";
     private const string ExerciseEntityType = "exercise";
@@ -380,6 +381,13 @@ public sealed class BootstrapService
         var slug = baseSlug;
         for (var ordinal = 2; await SlugTakenAsync(slug, cancellationToken); ordinal++)
         {
+            // Bounded (#660 review S-3): a pathological table fails loudly instead of probing forever.
+            if (ordinal > MaxSlugCollisionOrdinal)
+            {
+                throw new InvalidOperationException(
+                    $"No free organization slug for '{baseSlug}' within {MaxSlugCollisionOrdinal} collision suffixes.");
+            }
+
             slug = OrganizationSlug.WithCollisionSuffix(baseSlug, ordinal);
         }
 

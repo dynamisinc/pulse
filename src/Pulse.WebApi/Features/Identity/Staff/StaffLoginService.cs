@@ -204,7 +204,7 @@ public sealed class StaffLoginService
         if (passwordPerson is not null)
         {
             // The Pulse password verified: clear the counter, as the org sign-in does (saved with whichever event follows).
-            StaffSignInLockout.RecordSuccess(passwordPerson);
+            await StaffSignInLockout.RecordSuccessAsync(_dbContext, passwordPerson, cancellationToken);
         }
 
         var identity = authentication.Identity;
