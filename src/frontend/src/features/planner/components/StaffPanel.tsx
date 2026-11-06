@@ -287,7 +287,7 @@ export function StaffPanel() {
               <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
                 <Box
                   component="caption"
-                  sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden',
+                  sx={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden',
                     clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}
                 >
                   Staff in this exercise
