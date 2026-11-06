@@ -72,6 +72,7 @@ const SETTINGS: ExerciseSettings = {
   exerciseId: '6f0a1c52-9d4b-4f3a-8a01-2c7d9e5b1a44',
   name: 'Atlanta CIE 2026',
   worldName: 'Metro Atlanta',
+  participantName: 'Atlanta Coastal Exercise',
   locale: null,
   timeZone: 'America/New_York',
   scheduledStartAt: '2026-03-01T13:00:00.0000000+00:00',
@@ -95,6 +96,7 @@ const SETTINGS: ExerciseSettings = {
 const UNTOUCHED_BODY = {
   name: 'Atlanta CIE 2026',
   worldName: 'Metro Atlanta',
+  participantName: 'Atlanta Coastal Exercise',
   locale: null,
   timeZone: 'America/New_York',
   scheduledStartAt: '2026-03-01T13:00:00.000Z',
@@ -787,6 +789,64 @@ describe('ExerciseSettingsPanel — accessibility (NFR-001)', () => {
     await user.click(saveButton())
 
     expect(describedByText(end)).toMatch(/must not come before the start/i)
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('ExerciseSettingsPanel — participant-facing name (story 09)', () => {
+  it('shows the field with helper text saying participants never see the internal name', async () => {
+    await renderLoadedPanel({ section: 'identity' })
+
+    const field = screen.getByLabelText('Participant-facing name')
+    expect(field).toHaveValue('Atlanta Coastal Exercise')
+    expect(field).toHaveAttribute('maxlength', '80')
+    expect(describedByText(field)).toMatch(/never see the internal exercise name/i)
+  })
+
+  it('round-trips an edit through the PUT body, keeping every other field', async () => {
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'identity' })
+
+    const field = screen.getByLabelText('Participant-facing name')
+    await user.clear(field)
+    await user.type(field, '  Coastal Surge  ')
+    await user.click(saveButton())
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
+    expect(submittedBody()).toEqual({ ...UNTOUCHED_BODY, participantName: 'Coastal Surge' })
+  })
+
+  it('ALWAYS sends participantName, as null when emptied', async () => {
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'identity' })
+
+    await user.clear(screen.getByLabelText('Participant-facing name'))
+    await user.click(saveButton())
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
+    expect(submittedBody()).toHaveProperty('participantName', null)
+  })
+
+  it('sends it even when the planner saves from another section', async () => {
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'theming' })
+
+    await user.click(saveButton())
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
+    expect(submittedBody().participantName).toBe('Atlanta Coastal Exercise')
+  })
+
+  it('blocks a name over 80 characters on the field and sends nothing', async () => {
+    const user = userEvent.setup()
+    await renderLoadedPanel({ section: 'identity' })
+
+    const field = screen.getByLabelText('Participant-facing name')
+    // `fireEvent` bypasses the input's maxLength, as a programmatic value would.
+    fireEvent.change(field, { target: { value: 'x'.repeat(81) } })
+    await user.click(saveButton())
+
+    expect(describedByText(field)).toMatch(/80 characters or fewer/i)
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 })

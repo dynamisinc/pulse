@@ -40,7 +40,8 @@ const MIXED: ExerciseReadiness = {
     { id: 'schedule-set', label: 'Schedule set', status: 'open', detail: 'No start time yet.' },
     { id: 'chrome-valid', label: 'Chrome valid', status: 'ok', detail: null },
     { id: 'participant-access', label: 'Participants can get in', status: 'open', detail: null },
-    { id: 'participant-name', label: 'Participant name', status: 'notChecked', detail: 'Arrives later' },
+    { id: 'participant-name', label: 'Participant name', status: 'open', detail: 'No name set.' },
+    { id: 'sign-in-methods', label: 'Sign-in on', status: 'notChecked', detail: 'Arrives later' },
     { id: 'brand-new-check', label: 'A check from the future', status: 'open', detail: null },
   ],
   warnings: [
@@ -89,10 +90,10 @@ describe('ReadinessPanel', () => {
 
     expect(within(row('controller-enrolled')).getByText('Done')).toBeInTheDocument()
     expect(within(row('schedule-set')).getByText('Needs attention')).toBeInTheDocument()
-    expect(within(row('participant-name')).getByText('Not checked yet')).toBeInTheDocument()
-    expect(within(row('participant-name')).getByText('Arrives later')).toBeInTheDocument()
+    expect(within(row('sign-in-methods')).getByText('Not checked yet')).toBeInTheDocument()
+    expect(within(row('sign-in-methods')).getByText('Arrives later')).toBeInTheDocument()
 
-    for (const id of ['controller-enrolled', 'schedule-set', 'participant-name']) {
+    for (const id of ['controller-enrolled', 'schedule-set', 'sign-in-methods']) {
       const icon = row(id).querySelector('svg')
       expect(icon).not.toBeNull()
       expect(icon).toHaveAttribute('aria-hidden', 'true')
@@ -108,7 +109,7 @@ describe('ReadinessPanel', () => {
     const icons = new Set([
       iconOf('controller-enrolled'),
       iconOf('schedule-set'),
-      iconOf('participant-name'),
+      iconOf('sign-in-methods'),
     ])
     expect(icons.size).toBe(3)
   })
@@ -130,8 +131,9 @@ describe('ReadinessPanel', () => {
     mockGet.mockResolvedValue(MIXED)
     renderPanel()
 
-    // 3 open (schedule-set, participant-access, brand-new-check); 1 notChecked excluded.
-    expect(await screen.findByText('3 blocking items open')).toBeInTheDocument()
+    // 4 open (schedule-set, participant-access, participant-name, brand-new-check);
+    // the 1 notChecked is excluded.
+    expect(await screen.findByText('4 blocking items open')).toBeInTheDocument()
     expect(screen.getByTestId('readiness-summary')).toHaveAttribute('role', 'status')
   })
 
@@ -176,7 +178,19 @@ describe('ReadinessPanel', () => {
     // mapped but done -> no link; unmapped (warning) -> no link; notChecked unmapped -> none
     expect(within(row('chrome-valid')).queryByRole('link')).toBeNull()
     expect(within(row('lead-controller')).queryByRole('link')).toBeNull()
-    expect(within(row('participant-name')).queryByRole('link')).toBeNull()
+    expect(within(row('sign-in-methods')).queryByRole('link')).toBeNull()
+  })
+
+  it('links the open participant-name item to the Identity section (story 09)', async () => {
+    mockGet.mockResolvedValue(MIXED)
+    renderPanel()
+    await screen.findByTestId('readiness-blocking')
+
+    expect(within(row('participant-name')).getByText('Needs attention')).toBeInTheDocument()
+    expect(within(row('participant-name')).getByRole('link')).toHaveAttribute(
+      'href',
+      '/staff/plan?section=identity',
+    )
   })
 
   it('shows an error with a working retry', async () => {
@@ -199,7 +213,7 @@ describe('ReadinessPanel', () => {
     const user = userEvent.setup()
     mockGet.mockResolvedValueOnce(MIXED)
     renderPanel()
-    await screen.findByText('3 blocking items open')
+    await screen.findByText('4 blocking items open')
 
     mockGet.mockResolvedValueOnce(READY)
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
