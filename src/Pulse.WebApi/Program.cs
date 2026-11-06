@@ -30,6 +30,7 @@ using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.Press;                  // press-room 01
 using Pulse.WebApi.Features.Weather;                // weather-source 01
+using Pulse.WebApi.Features.Portal.Resources;       // exercise-portal 04
 using Pulse.WebApi.Features.News;                   // news-network 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
@@ -304,6 +305,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 // schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
 builder.Services.AddChannels();
 builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01), zones (02); read, delivery follow
+builder.Services.AddPortalResources();          // exercise-portal 04: Resources shelf service + sanitizer profile
 builder.Services.AddPress();                    // press-room (E5): release kind, seam defaults, org newsrooms (01)
 builder.Services.AddNewsChannel();              // news-network (E4): article kind descriptor + article-rich body profile (01)
 
@@ -556,6 +558,7 @@ app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapRuntimeStateReset();   // demo-feedback/18 POST /api/steering/runtime-state/reset (S-5; controller only)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
+app.MapPortalResources();     // exercise-portal 04: /api/portal/resources*
 app.MapChannels();             // channels-foundation 03+ (/api/outlets*, 10: /api/alerts*; later stories add routes inside MapChannels)
 app.MapWeather();              // weather-source 02+ (/api/weather/zones*; later weather stories add routes inside MapWeather)
 
