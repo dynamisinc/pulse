@@ -203,7 +203,7 @@ public sealed partial class AlertService : IAlertRaiser
         var time = await _reader.ReadTimeAsync(exerciseId, cancellationToken);
         if (!time.ScenarioKnown)
         {
-            // No scenario now (no clock and no posts, or the exercise row is gone): never expire against
+            // No scenario now (no running clock and no posts): never expire against
             // the wall clock (COR-053). The sweep retries once scenario time is known again.
             return 0;
         }

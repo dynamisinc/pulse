@@ -60,22 +60,6 @@ public sealed class ScenarioNowResolverTests
             World.AddMinutes(3), "a running clock is authoritative (live, or rehydrated by demo-feedback/18)");
     }
 
-    [Fact]
-    public async Task RunningClock_AnswersWithoutTouchingTheDatabase()
-    {
-        // A model-only context: any query would throw (there is no server). The clock tier must not query.
-        var exerciseId = Guid.NewGuid();
-        var options = new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options;
-        await using var context = new PulseDbContext(options);
-        var clock = new ExerciseClockService(new ManualTimeProvider(WallNow));
-        clock.Start(exerciseId, World, TimeZoneInfo.Utc);
-
-        var resolver = Resolver(context, clock);
-
-        (await resolver.GetAsync(exerciseId, WallNow)).Should().Be(World, "the clock tier is in memory");
-        (await resolver.FindAsync(exerciseId)).Should().Be(World);
-    }
-
     [RequiresDockerFact]
     public async Task NoClock_NoPosts_ReturnsTheCallersWallClock_AndFindReturnsNull()
     {

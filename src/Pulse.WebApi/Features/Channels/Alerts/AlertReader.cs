@@ -196,9 +196,7 @@ public sealed class AlertReader
             .FirstOrDefaultAsync(cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
-
-        // A missing exercise row has no scenario now of its own: stay unknown rather than read its posts.
-        var known = row is null ? null : await _scenarioNow.FindAsync(exerciseId, cancellationToken);
+        var known = await _scenarioNow.FindAsync(exerciseId, cancellationToken);
         var timeZone = string.IsNullOrWhiteSpace(row?.TimeZone) ? FallbackTimeZone : row.TimeZone;
         return new AlertEventTime(now, known ?? now, timeZone, ScenarioKnown: known is not null);
     }

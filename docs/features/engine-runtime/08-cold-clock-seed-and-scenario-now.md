@@ -100,7 +100,7 @@ the report) stamp the resolver's value. Static guard: a test fails if production
   `PauseTierEndpointsTests.Post_Freeze_OnAColdClock_WithNoPosts_StartsItAtWallClockNow`,
   `PauseTierEndpointsTests.Post_Freeze_OnARunningClock_NeverRestartsOrMovesIt`.
 - AC-3 (resolver): `ScenarioNowResolverTests.RunningClock_Wins_OverALaterPost`,
-  `ScenarioNowResolverTests.RunningClock_AnswersWithoutTouchingTheDatabase`,
+  `ScenarioNowResolverModelTests.RunningClock_AnswersWithoutTouchingTheDatabase`,
   `ScenarioNowResolverTests.NoClock_ReturnsTheExercisesLatestPost_IncludingATakenDownOne`,
   `ScenarioNowResolverTests.NoClock_NoPosts_ReturnsTheCallersWallClock_AndFindReturnsNull`,
   `StaffLoginServiceTests.Login_WrongSecret_FailureEventScenarioTime_IsResolvedOnlyAfterAuthentication` (CLK-5).
