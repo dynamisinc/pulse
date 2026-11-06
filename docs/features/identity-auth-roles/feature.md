@@ -52,6 +52,8 @@ non-negotiables (staff vs participant worlds).
 | 24 | Image re-encode and EXIF strip (SkiaSharp) — A2, Tier-2 | NFR-004, NFR-009 | Not Started | #579 |
 | 25 | Audit refused attribution attempts (#389) — A5 | COR-018, XC-004, NFR-009 | Not Started | #389 |
 | 26 | Cache-Control: no-store on auth routes (#485) — A5 | NFR-009, COR-012 | Not Started | #485 |
+| 27 | Org sign-in page (email + password, org choice, lands org admins on Exercise Management) — priority, Tier-2 | COR-077, COR-074, COR-076 | Not Started | #835 |
+| 28 | Staff console host (`console.<domain>` with `/o/{slug}`: config, DNS, hosting, UAT) — priority, Tier-2 | COR-077, COR-008, COR-009 | Not Started | #836 |
 
 ## Dependencies
 
