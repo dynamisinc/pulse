@@ -75,7 +75,7 @@ export function OutletMasthead({
   // Text on the skin's band fill is black or white, whichever is AA (F13 `onColor`).
   const fillStyle = fill === null
     ? undefined
-    : ({ '--news-masthead-on-fill': onColor(fill) } as CSSProperties)
+    : ({ '--news-masthead-fill': fill, '--news-masthead-on-fill': onColor(fill) } as CSSProperties)
   const NameTag = nameAs
   const tagline = outlet.tagline?.trim() ?? ''
 

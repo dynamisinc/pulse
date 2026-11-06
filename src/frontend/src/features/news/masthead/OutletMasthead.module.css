@@ -196,7 +196,8 @@
 
 /* The skin's own band fill (ext.news.mastheadFill); text is the derived on-fill colour. */
 .root[data-fill='true'] .band {
-  background: var(--pulse-skin-ext-news-masthead-fill, var(--pulse-skin-accent, #1f4e79));
+  /* The fill and its on-colour are set together inline, so they can never disagree. */
+  background: var(--news-masthead-fill, var(--pulse-skin-accent, #1f4e79));
   color: var(--news-masthead-on-fill, var(--pulse-skin-on-accent, #ffffff));
 }
 

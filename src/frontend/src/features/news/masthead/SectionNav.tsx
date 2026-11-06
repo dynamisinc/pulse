@@ -68,7 +68,10 @@ function navEntries(
   return [home, ...sections]
 }
 
-/** Whether the always-shown row layout (≥768px, see the stylesheet) applies. */
+/**
+ * Whether the always-shown row layout applies.
+ * Keep in sync with the 768px breakpoint in SectionNav.module.css.
+ */
 function isWideViewport(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches
 }
@@ -79,7 +82,10 @@ export function SectionNav({ outlet, current }: SectionNavProps) {
   // an article link, the back button) closes it without an effect.
   const location = useLocation()
   const [openAt, setOpenAt] = useState<string | null>(null)
-  const open = openAt === location.key
+  // Cleared during render (no effect) once the location moves on, so a Back
+  // to the location it was opened at cannot reopen it.
+  if (openAt !== null && openAt !== location.key) setOpenAt(null)
+  const open = openAt !== null && openAt === location.key
   const listId = useId()
   const toggleRef = useRef<HTMLButtonElement>(null)
   const coarse = useCoarsePointer()

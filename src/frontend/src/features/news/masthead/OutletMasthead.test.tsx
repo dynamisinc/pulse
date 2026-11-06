@@ -5,7 +5,7 @@
  */
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Link, MemoryRouter } from 'react-router-dom'
+import { Link, MemoryRouter, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NEUTRAL_SKIN_TOKENS,
@@ -136,6 +136,7 @@ describe('OutletMasthead: one component, skin-selected variants (NWS-002)', () =
     const root = masthead(container)
     expect(root.dataset.fill).toBe('true')
     expect(root.style.getPropertyValue('--news-masthead-on-fill')).toBe('#ffffff')
+    expect(root.style.getPropertyValue('--news-masthead-fill')).toBe('#0f2749')
     unmount()
     const plain = renderMasthead({ tokens: variantTokens('tv-bar') })
     expect(masthead(plain.container).dataset.fill).toBe('false')
@@ -252,7 +253,7 @@ describe('SectionNav: category nav (NWS-003, NFR-001)', () => {
 
   it('keeps list semantics on the unstyled list', () => {
     renderMasthead()
-    expect(within(screen.getByRole('navigation')).getByRole('list')).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation')).getByRole('list')).toHaveAttribute('role', 'list')
   })
 
   it('skips blank and duplicate categories', () => {
@@ -318,6 +319,55 @@ describe('SectionNav: mobile-first disclosure', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await user.click(screen.getByRole('link', { name: 'Elsewhere' }))
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('stays closed when Back returns to the location it was opened at', async () => {
+    const user = userEvent.setup()
+    function Back() {
+      const navigate = useNavigate()
+      return <button type="button" onClick={() => navigate(-1)}>Back</button>
+    }
+    render(
+      <MemoryRouter initialEntries={['/news/metro-desk-9']}>
+        <SkinScope scopeId="outlet-metro-desk-9" tokens={variantTokens('tv-bar')}>
+          <OutletMasthead outlet={OUTLET} />
+          <Link to="/news/metro-desk-9/some-article">Elsewhere</Link>
+          <Back />
+        </SkinScope>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: 'Sections' })
+    await user.click(toggle)
+    await user.click(screen.getByRole('link', { name: 'Elsewhere' }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('leaves focus alone on a wide viewport, where the toggle is not shown', async () => {
+    const user = userEvent.setup()
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(min-width: 768px)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+    try {
+      renderMasthead()
+      const toggle = screen.getByRole('button', { name: 'Sections' })
+      await user.click(toggle)
+      const home = screen.getByRole('link', { name: 'Home' })
+      home.focus()
+      await user.keyboard('{Escape}')
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(home).toHaveFocus()
+    } finally {
+      window.matchMedia = original
+    }
   })
 
   it('returns focus to the toggle when the current entry is followed', async () => {
