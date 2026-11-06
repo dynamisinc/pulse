@@ -261,7 +261,10 @@ internal sealed class TestKindDescriptor : IContentKindDescriptor
             : PayloadValidationResult.Valid);
     }
 
-    public JsonObject ProjectPayload(JsonObject payload) => payload;
+    /// <summary>The participant projection; identity unless a test sets it (staff content preview, story 07).</summary>
+    public Func<JsonObject, JsonObject>? Project { get; set; }
+
+    public JsonObject ProjectPayload(JsonObject payload) => Project?.Invoke(payload) ?? payload;
 
     public PublishOptions? ResolvePublishOptions(ContentItem item) => Derive?.Invoke(item);
 }
