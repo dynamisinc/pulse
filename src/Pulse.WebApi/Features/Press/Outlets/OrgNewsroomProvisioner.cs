@@ -102,6 +102,7 @@ public sealed partial class OrgNewsroomProvisioner : IOrgNewsroomProvisioner
         }
 
         var orgIds = await _dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .Where(e => e.Role == EnrollmentRoles.Pio && e.PersonaId != null)
             .Select(e => e.PersonaId!.Value)
