@@ -4,10 +4,11 @@
  * D3-P2). Every value is a skin variable (accent rule, headline face, rule weight,
  * spacing) with a neutral fallback, so each outlet's pull quote follows its token file.
  * The quote stays a real `<blockquote>` read once by assistive tech (no hidden copy), and
- * it never overflows the column on a phone.
+ * it never overflows the column on a phone. Every rule carries `:where(:not(pulse-post *))`
+ * so nothing reaches an embedded post placed inside a pull quote (specificity unchanged).
  */
 
-.scope :global(blockquote.pull-quote) {
+.scope :global(blockquote.pull-quote):where(:not(pulse-post *)) {
   box-sizing: border-box;
   max-width: 100%;
   margin: calc(var(--pulse-skin-space, 8px) * 3) 0;
@@ -24,11 +25,11 @@
   overflow-wrap: anywhere;
 }
 
-.scope :global(blockquote.pull-quote) > :where(p) {
+.scope :global(blockquote.pull-quote) > :where(p):where(:not(pulse-post *)) {
   margin: 0;
 }
 
-.scope :global(blockquote.pull-quote) cite {
+.scope :global(blockquote.pull-quote) cite:where(:not(pulse-post *)) {
   display: block;
   margin-top: var(--pulse-skin-space, 8px);
   font-family: var(--pulse-skin-font-kicker, var(--pulse-skin-font-body, inherit));
@@ -39,12 +40,12 @@
   text-transform: none;
 }
 
-.scope :global(blockquote.pull-quote) cite::before {
+.scope :global(blockquote.pull-quote) cite:where(:not(pulse-post *))::before {
   content: '\2014\00a0';
 }
 
 @media (max-width: 599.95px) {
-  .scope :global(blockquote.pull-quote) {
+  .scope :global(blockquote.pull-quote):where(:not(pulse-post *)) {
     font-size: 1.2em;
   }
 }

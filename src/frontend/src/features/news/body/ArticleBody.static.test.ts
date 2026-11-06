@@ -115,30 +115,34 @@ function collapseGroups(selector: string): string {
 }
 
 describe('nothing in the body stylesheets cascades into an embedded post (SOC-002/004)', () => {
+  // A floor per file, so a parser regression that scans almost nothing still fails.
   it.each([
-    ['SanitizedBody', readSrcFile('features/channels/primitives/body/SanitizedBody.module.css')],
-    ['ArticleBody', readSrcFile('features/news/body/ArticleBody.module.css')],
-    ['PullQuote', readSrcFile('features/news/body/PullQuote.module.css')],
-  ])('%s: every descendant selector excludes the pulse-post subtree or targets a direct child', (_name, css) => {
+    ['SanitizedBody', readSrcFile('features/channels/primitives/body/SanitizedBody.module.css'), 10],
+    ['ArticleBody', readSrcFile('features/news/body/ArticleBody.module.css'), 6],
+    ['PullQuote', readSrcFile('features/news/body/PullQuote.module.css'), 5],
+  ] as const)('%s: every descendant selector excludes the pulse-post subtree or targets a direct child', (_name, css, minScanned) => {
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? []
     const selectors = rules
       .filter(rule => !rule.trim().startsWith('@'))
       .flatMap(selectorList)
-      // A rule on a single class (the container, a host, a scroll region) reaches nothing inside.
-      .filter(selector => /\s/.test(selector.replace(/\([^)]*\)/g, '')))
-    expect(selectors.length).toBeGreaterThan(0)
+      // Combinators spaced out, so `.body>*>p` is scanned like `.body > * > p`.
+      .map(selector => selector.replace(/\s*([>+~])\s*/g, ' $1 '))
+      // A single-compound rule (the container, a host, a scroll region) reaches nothing inside.
+      .filter(selector => /\s/.test(collapseGroups(selector)))
+    expect(selectors.length).toBeGreaterThanOrEqual(minScanned)
     for (const selector of selectors) {
-      const excluded = selector.includes(':where(:not(pulse-post *))')
-      // `.x <container> > child…`: a direct child of the body cannot be inside a <pulse-post>.
+      // The exclusion must sit on the LAST compound (only pseudo-classes / -elements after it),
+      // or a descendant written after it would still reach inside an embed.
+      const excluded = /:where\(:not\(pulse-post \*\)\)(::?[\w-]+)*$/.test(selector)
+      // `.x <container> > child…`: a direct child of the body cannot be inside a <pulse-post>
+      // (only ArticleBody mounts a SanitizedBody; an embed never renders one).
       const onBody = selector.includes(":global([data-testid='sanitized-body'])")
       const shape = collapseGroups(selector)
       const directChild = onBody && /^\.\w+\s+:global\[\]\s*>\s*[^\s>]+$/.test(shape)
       // The body container itself (a custom property only).
       const container = onBody && /^\.\w+\s+:global\[\]$/.test(shape)
-      // The embed host, the hidden new-tab note, and the pull quote (React content never has
-      // the class; the sanitizer only lets authors put it on a body blockquote).
+      // The embed host itself, and the hidden new-tab note (only ever on the body's own links).
       const knownSafe = /^\.body (pulse-post|\[data-new-tab-note\])$/.test(selector)
-        || /blockquote\.pull-quote/.test(selector)
       expect(excluded || directChild || container || knownSafe, selector).toBe(true)
     }
   })
