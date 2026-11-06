@@ -266,6 +266,12 @@ public sealed class RoleMatrixTests
         Probe("POST /api/outlets/reorder", ControllerOnly);
         Probe("POST /api/outlets/defaults", ControllerOnly);
 
+        // exercise-portal 04 (#770): Resources shelf authoring is planner + controller (story AC "Staff CRUD").
+        Probe("POST /api/portal/resources", PlannerOrController);
+        Probe("PUT /api/portal/resources/{id:guid}", PlannerOrController);
+        Probe("DELETE /api/portal/resources/{id:guid}", PlannerOrController);
+        Probe("POST /api/portal/resources/reorder", PlannerOrController);
+
         // weather-source 02 (#753): weather zone writes are controller-only (story AC "Staff CRUD").
         Probe("POST /api/weather/zones", ControllerOnly);
         Probe("PUT /api/weather/zones/{id:guid}", ControllerOnly);
