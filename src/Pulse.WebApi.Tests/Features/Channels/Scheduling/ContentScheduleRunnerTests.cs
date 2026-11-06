@@ -519,6 +519,21 @@ public sealed class ContentScheduleRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task AStagedExerciseWithARunningClock_KeepsTheCadence_SoGoingLivePublishesWithoutAWake()
+    {
+        var id = await ScheduleAsync("2033-09-04T08:10:00Z");
+        _harness.Clock.Jump(_harness.ExerciseId, 30);
+        SetStatus(_harness.ExerciseId, "staged");
+
+        (await Runner().SweepAsync()).Should().Be(
+            (0, 1), "StartEx is not a clock change and wakes nothing, so the runner must not sleep through it");
+
+        SetStatus(_harness.ExerciseId, "live");
+        (await Runner().SweepAsync()).Should().Be((1, 0), "the next cadence sweep publishes it");
+        (await _harness.ItemAsync(id)).Status.Should().Be("published");
+    }
+
+    [Fact]
     public async Task AnItemInAnExerciseWithNoRunningClock_LeavesTheRunnerAsleep()
     {
         using (var b = _harness.In(_harness.OtherExerciseId))

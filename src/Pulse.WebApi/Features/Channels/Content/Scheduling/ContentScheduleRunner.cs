@@ -225,18 +225,29 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         var waiting = 0;
         foreach (var group in scheduled.GroupBy(item => item.ExerciseId))
         {
-            // Blocked exercises (not live, frozen, scenario time unknown) leave nothing WAITING: none of their items can
-            // come due until a lifecycle start or a clock change, and a clock change wakes the runner.
-            if (!exercises.TryGetValue(group.Key, out var exercise)
-                || !ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires
-                || pauseTiers.GetTier(group.Key) == PauseTier.Freeze
+            if (!exercises.TryGetValue(group.Key, out var exercise))
+            {
+                continue;
+            }
+
+            var running = clock.IsRunning(group.Key);
+
+            // Not live (staged, lifecycle-paused, ...): nothing publishes, but going live or resuming is NOT a clock change
+            // and wakes nothing, so while this exercise's clock runs its items stay WAITING and the cadence continues.
+            if (!ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires)
+            {
+                waiting += running ? group.Count() : 0;
+                continue;
+            }
+
+            // Frozen, or scenario time unknown: nothing can come due until a clock change, which wakes the runner.
+            if (pauseTiers.GetTier(group.Key) == PauseTier.Freeze
                 || clock.IsFrozen(group.Key)
                 || (clock.CurrentScenarioTime(group.Key) ?? exercise.CurrentScenarioTime) is not { } scenarioNow)
             {
                 continue;
             }
 
-            var running = clock.IsRunning(group.Key);
             foreach (var item in group)
             {
                 if (item.ScheduledScenarioTime > scenarioNow)
