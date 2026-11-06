@@ -43,6 +43,12 @@ public static partial class ExerciseSettingsFieldRules
     /// <summary>Maximum participant-visible world-name length (matches the column width).</summary>
     public const int MaxWorldNameLength = 200;
 
+    /// <summary>
+    /// Maximum participant-facing exercise-name length (exercise-build-golive/09, §8.4; matches the column width
+    /// <see cref="Exercise.MaxParticipantNameLength"/>).
+    /// </summary>
+    public const int MaxParticipantNameLength = Exercise.MaxParticipantNameLength;
+
     /// <summary>Maximum BCP-47 locale-tag length (matches the column width).</summary>
     public const int MaxLocaleLength = 35;
 
@@ -91,6 +97,18 @@ public static partial class ExerciseSettingsFieldRules
     /// <returns><c>true</c> when the world name is valid or absent.</returns>
     public static bool TryNormalizeWorldName(string? raw, out string? worldName, [NotNullWhen(false)] out string? error) =>
         TryNormalizeOptionalText(raw, "worldName", MaxWorldNameLength, out worldName, out error);
+
+    /// <summary>
+    /// Trims, strips markup and length-checks the OPTIONAL participant-facing exercise name (exercise-build-golive/09,
+    /// §8.4). An absent/blank value clears it (<c>null</c>: participant surfaces then show the brand alone, never the
+    /// internal name); a value that is entirely markup is rejected rather than stored as an empty name.
+    /// </summary>
+    /// <param name="raw">The raw participant name from the request body.</param>
+    /// <param name="participantName">The sanitized participant name, or <c>null</c> to clear it.</param>
+    /// <param name="error">A human-readable reason on failure.</param>
+    /// <returns><c>true</c> when the participant name is valid or absent.</returns>
+    public static bool TryNormalizeParticipantName(string? raw, out string? participantName, [NotNullWhen(false)] out string? error) =>
+        TryNormalizeOptionalText(raw, "participantName", MaxParticipantNameLength, out participantName, out error);
 
     /// <summary>
     /// Trims, strips markup and length-checks the OPTIONAL participant-visible brand name. Rejecting an
@@ -656,6 +674,7 @@ public sealed class ExerciseSettingsService
 
         if (!ExerciseSettingsFieldRules.TryNormalizeName(request.Name, out var name, out error) ||
             !ExerciseSettingsFieldRules.TryNormalizeWorldName(request.WorldName, out var worldName, out error) ||
+            !ExerciseSettingsFieldRules.TryNormalizeParticipantName(request.ParticipantName, out var participantName, out error) ||
             !ExerciseSettingsFieldRules.TryNormalizeLocale(request.Locale, out var locale, out error) ||
             !ExerciseSettingsFieldRules.TryNormalizeTimeZone(request.TimeZone, out var timeZone, out error) ||
             !ExerciseSettingsFieldRules.TryNormalizeInstant(request.ScheduledStartAt, "scheduledStartAt", out var startAt, out error) ||
@@ -693,6 +712,7 @@ public sealed class ExerciseSettingsService
         {
             Name = name,
             WorldName = worldName,
+            ParticipantName = participantName,
             Locale = locale,
             TimeZone = timeZone,
             ScheduledStartAt = startAt,
@@ -715,6 +735,7 @@ public sealed class ExerciseSettingsService
     {
         exercise.Name = validated.Name;
         exercise.WorldName = validated.WorldName;
+        exercise.ParticipantName = validated.ParticipantName;
         exercise.Locale = validated.Locale;
         exercise.TimeZone = validated.TimeZone;
         exercise.ScheduledStartAt = validated.ScheduledStartAt;
@@ -734,6 +755,8 @@ public sealed class ExerciseSettingsService
         public required string Name { get; init; }
 
         public string? WorldName { get; init; }
+
+        public string? ParticipantName { get; init; }
 
         public string? Locale { get; init; }
 

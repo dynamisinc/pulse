@@ -74,9 +74,8 @@ would refuse the request. Ask your organization administrator to create the exer
 
 1. Open **Exercise Management**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
-   **Players can see this name**: it appears on the player sign-in page, on printed sign-in cards and
-   in link emails. Use a name that is safe for players to read, with no internal codes or notes. The
-   *world name*, which you set later, does not hide it.
+   This is an internal name: **players never see it**. What players see is the *participant-facing
+   name*, which you set later in **Exercise Settings > Identity & schedule**.
 3. Leave **Hostname (optional)** blank unless Dynamis support has given you a specific web address
    for this exercise. When it is blank, Pulse allocates a hostname for you. A hostname must be
    unique across the whole platform. If yours is taken, Pulse says so under the field and keeps
@@ -140,8 +139,13 @@ button. You can move between the three sections before you save and nothing is l
 the form with unsaved changes, the section list shows a notice.
 
 1. Select **Identity & schedule** and fill in:
-   - **Exercise name**: what your planning team calls the exercise. **Players can see it** (sign-in
-     page, cards and emails), and the world name does not replace it. Keep it player-safe.
+   - **Exercise name**: what your planning team calls the exercise. It is internal. **Players never
+     see it**, so internal codes and notes are fine here.
+   - **Participant-facing name**: the name players see for this exercise, on the sign-in page, on
+     printed sign-in cards, in link emails and next to the brand in the exercise. Up to 80
+     characters. Keep it player-safe. It is **required before you can stage**: the Readiness
+     section shows a blocking item, with a link here, until it is set. If you leave it blank, players
+     see no exercise name at all. Pulse never shows them the internal name instead.
    - **World name**: the place players think they are in, for example "Metro Atlanta".
    - **Locale**: how dates and numbers are written for players, for example `en-US`.
    - **Time zone**: one zone for the whole exercise, written like `America/New_York`. Every date and
@@ -482,8 +486,8 @@ on colour.
 - **Blocking** items must be done before the exercise can be staged. For example: at least one
   controller is enrolled, participants can get in (an account or the view-only code), every
   participant account has a persona, the time zone and start time are set, and the compliance
-  chrome and watermark are valid. Staging is refused while any blocking item needs attention
-  (see [Staging the exercise](#staging-the-exercise)).
+  chrome and watermark are valid, and the participant-facing name is set. Staging is refused while any blocking
+  item needs attention (see [Staging the exercise](#staging-the-exercise)).
 - **Warnings** are worth a look but never stop you. For example: the run sheet is empty, there is no
   opening feed, the noise pool is empty, some personas have no avatar, no evaluator is enrolled, or
   no lead controller is set. Without a lead controller, swamped mode and autonomy raises are
@@ -495,7 +499,7 @@ Each row shows one of three states:
 |---|---|
 | **Done** | This item is in place. |
 | **Needs attention** | This item is not in place yet. Where there is a screen that fixes it, the row has a link to it. |
-| **Not checked yet** | Pulse cannot check this item yet, so it does not block. The participant-facing exercise name and the participant sign-in methods arrive in a later release. |
+| **Not checked yet** | Pulse cannot check this item yet, so it does not block. The participant sign-in methods arrive in a later release. |
 
 The list updates after you save settings, compliance chrome, practice mode or an account import. It
 also refreshes when you return to the browser tab. Select **Refresh** to check again at any time.
@@ -533,8 +537,8 @@ Work through this list the day before the exercise and again on the morning.
 
 **Exercise setup**
 
-- [ ] **Exercise Settings > Identity & schedule**: the world name and time zone are right, and the
-  exercise name is safe for players to see.
+- [ ] **Exercise Settings > Identity & schedule**: the participant-facing name is set and safe for
+  players to read, and the world name and time zone are right.
 - [ ] **Theming & outlets**: the brand name and colours look right to players.
 - [ ] **Compliance chrome**: the banners or the watermark (or both) are on, with the right wording.
 - [ ] **Practice / sandbox** matches the event: on for a rehearsal, off for the real exercise.

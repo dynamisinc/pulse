@@ -58,4 +58,12 @@ public sealed class Follow : IExerciseScoped
     /// onto a participant-facing response (XC-002).
     /// </summary>
     public DateTimeOffset CreatedWallClock { get; set; }
+
+    /// <summary>
+    /// Whether this edge is SETUP content (created while the exercise was in <c>build</c>) rather than conduct
+    /// (ADMIN-IDENTITY-MODEL §5.4): reset keeps setup follows and duplicate copies only them. <c>NOT NULL
+    /// DEFAULT 0</c>: existing rows were backfilled by the A3 migration (<c>A3SetupContentParticipantName</c>);
+    /// the write-path stamp is exercise-build-golive/01. Staff-world only (XC-002).
+    /// </summary>
+    public bool IsSetupContent { get; set; }
 }
