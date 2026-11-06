@@ -369,7 +369,9 @@ public sealed class OrganizationScopeSweepTests
         // story 20 (#575a): +3 in EnrollmentService — the last-planner guard's lock statement and its under-lock re-read
         // (both confined to the target's exercise, just resolved by FindReachableAsync inside the caller's own scope /
         // InOrganization exercise), and the Staff tab list read (the exercise just resolved by FindReachableExerciseAsync).
-        ["TenantChecked"] = 16,
+        // identity-auth-roles/19 (#574): OrgPeopleService's enrollments summary — the listed people's enrollments, inner-
+        // joined to the caller's InOrganization-bounded exercises (1).
+        ["TenantChecked"] = 17,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

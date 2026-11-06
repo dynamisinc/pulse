@@ -10,8 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Credentials;
 using Pulse.WebApi.Features.Identity.Enrollments;
+using Pulse.WebApi.Features.Org.PeopleDirectory;
 using Pulse.WebApi.Tests.Features.Identity.Credentials;
 using Pulse.WebApi.Tests.Features.Identity.Enrollments;
+using Pulse.WebApi.Tests.Features.Org.PeopleDirectory;
 using Xunit;
 
 /// <summary>
@@ -135,8 +137,10 @@ public sealed class CompositionRootWiringTests
         // the allow-list — a person of the caller's own organization, never an organization or staff-user id.
         // story 20 (#575a): the exercise staff list + grant (GET / POST /api/org/exercises/{exerciseId}/enrollments) join
         // it — an exercise of the caller's own organization (org admin) or the caller's own resolved exercise (planner).
+        // identity-auth-roles/19 (#574): the org directory's GET/PATCH /api/org/people/{personId} join it the same way.
+        var personIdRoutes = CredentialEndpoints.PersonIdRoutes.Concat(OrgPeopleEndpoints.PersonIdRoutes).ToList();
         var allowListed = ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes
-            .Concat(CredentialEndpoints.PersonIdRoutes)
+            .Concat(personIdRoutes)
             .Concat(EnrollmentEndpoints.ExerciseIdRoutes)
             .ToList();
 
@@ -151,7 +155,7 @@ public sealed class CompositionRootWiringTests
         {
             var parameter = endpoint.RoutePattern.Parameters.Should().ContainSingle(
                 "{0} takes exactly one route value", endpoint.RoutePattern.RawText).Which;
-            var isPersonRoute = CredentialEndpoints.PersonIdRoutes.Any(route => route.Route == endpoint.RoutePattern.RawText);
+            var isPersonRoute = personIdRoutes.Any(route => route.Route == endpoint.RoutePattern.RawText);
             parameter.Name.Should().Be(
                 isPersonRoute ? "personId" : "exerciseId",
                 "never an organization or staff-user id on the org tier");
@@ -168,6 +172,9 @@ public sealed class CompositionRootWiringTests
         CredentialEndpointsHttpTests.PersonIdCallers.Keys.Should().BeEquivalentTo(
             CredentialEndpoints.PersonIdRoutes,
             "every allow-listed person-id (method, route) must be driven by the foreign-tenant 404 test");
+        OrgPeopleEndpointTests.PersonIdCallers.Keys.Should().BeEquivalentTo(
+            OrgPeopleEndpoints.PersonIdRoutes,
+            "every allow-listed org-directory person-id (method, route) must be driven by the foreign-tenant 404 test");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)

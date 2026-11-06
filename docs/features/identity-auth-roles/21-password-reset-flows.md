@@ -51,3 +51,9 @@ Policy unit tests; token lifecycle tests (single use, expiry, voiding); anti-enu
 - `CredentialCompositionRootWiringTests` (both) — Program.cs wiring; the reset route is pre-auth and the admin route is not.
 - Staff reset page, two worlds + a11y + token handling: `src/frontend/src/features/staffPasswordReset/pages/StaffSetPasswordPage.test.tsx` (COBRA staff page; token read from the fragment and stripped; live regions; policy-code messages)
 - User guide: `docs/guide/getting-started.md` ("Setting or resetting your password") and `docs/guide/troubleshooting.md` (set-password page messages)
+
+### Test linkage — admin-reset UI half (shipped in #574 / PR #668)
+The org admin's "Reset link" action in the people directory is this story's **admin-reset UI half** (AC "Admin reset", staff half). It shipped with story 19 (#574) because the #576 backend already existed. Org admin only (`can('manageOrgPeople')`); unavailable, with a visible text reason, for org-admin and disabled rows (the server's `target-is-org-admin` / `person-disabled` 409s are still mapped); the link is shown once with a Copy button and is not kept in the React Query cache (`gcTime: 0`); success is announced in a polite status region.
+- `src/frontend/src/features/orgDirectory/pages/OrgDirectoryPage.test.tsx` (reset-link create, show, copy and announce; 409 `target-is-org-admin` mapping; disabled with a reason on org-admin and disabled rows)
+- `src/frontend/src/features/orgDirectory/services/orgPeopleService.test.ts` ("returns the reset url")
+- Story 19 (`19-org-directory.md`, "Story 21 linkage") records the same linkage.
