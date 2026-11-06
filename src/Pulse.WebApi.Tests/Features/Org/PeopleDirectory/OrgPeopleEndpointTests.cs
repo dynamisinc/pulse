@@ -332,6 +332,45 @@ public sealed class OrgPeopleEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task DisableThenEnable_NeverRevivesALinkIssuedBeforeTheDisable()
+    {
+        // #668 review W-001: a disable voids every outstanding reset / invite link in its own transaction, so a later
+        // Enable cannot bring a pre-disable link back to life.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (_, adminToken) = await SeedAdminAsync(org);
+        var (target, _) = await _world.SeedPersonAsync(org);
+        var reset = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org);
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        using (var disable = await PatchAsync(client, target, "{\"disabled\":true}"))
+        {
+            disable.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        using (var enable = await PatchAsync(client, target, "{\"disabled\":false}"))
+        {
+            enable.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        await using (var read = _world.ReadContext())
+        {
+            (await read.CredentialTokens.AsNoTracking().SingleAsync(t => t.Id == reset.Token.Id)).UsedAt
+                .Should().NotBeNull("the disable voided the outstanding link");
+            (await read.OrgAuditEvents.IgnoreQueryFilters().AsNoTracking()
+                    .SingleAsync(a => a.SubjectPersonId == target && a.Kind == OrgPeopleService.DisabledKind))
+                .Payload.Should().Contain("\"tokensVoided\":1");
+        }
+
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using var redeem = await anonymous.PostAsJsonAsync(
+            new Uri("/api/auth/password/reset", UriKind.Relative),
+            new { token = reset.RawToken, newPassword = CredentialTestWorld.NewPassword });
+        redeem.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a pre-disable link stays dead after Enable");
+        (await redeem.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"invalid-token\"}");
+    }
+
+    [RequiresDockerFact]
     public async Task Revoke_RevokesOnlyTheOrgScopeSessions_TheirAccessAndRefreshTokens401_AndKeepsEnrollments()
     {
         var (org, _) = await _world.SeedOrganizationAsync();
