@@ -511,7 +511,7 @@ public sealed partial class OrgStaffLoginService
         // left alone; the verified ones proved the password.
         foreach (var (person, _) in verified)
         {
-            StaffSignInLockout.RecordSuccess(person);
+            await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
         }
 
         await PurgeSpentChoicesAsync(now, cancellationToken);
@@ -595,7 +595,7 @@ public sealed partial class OrgStaffLoginService
     {
         if (Person.IsOrgAdmin(person.OrgRole))
         {
-            StaffSignInLockout.RecordSuccess(person);
+            await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
             staffUser.LastLoginAt = now;
             AddAudit(organizationId, SignInAuditKind, SuccessOutcome, person.Id, "{\"scope\":\"org\"}", now);
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -615,7 +615,7 @@ public sealed partial class OrgStaffLoginService
             return OrgStaffLoginResult.Rejected();
         }
 
-        StaffSignInLockout.RecordSuccess(person);
+        await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
         staffUser.LastLoginAt = now;
 
         // An exercise-scoped sign-in stays the exercise's XC-004 login event (§7.5), as on the exercise-bound path.
