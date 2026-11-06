@@ -28,8 +28,9 @@ internal static class TestScenarioNow
             timeProvider ?? TimeProvider.System);
 
     /// <summary>
-    /// Puts an exercise's world at <paramref name="scenarioTime"/> the way engine-runtime/08 reads it: one post carrying
-    /// that scenario instant (the retired <c>Exercise.CurrentScenarioTime</c> column is never read). A <c>null</c> time
+    /// Puts an exercise's world at <paramref name="scenarioTime"/> the way engine-runtime/08 reads it: one CONTROLLER post
+    /// carrying that scenario instant (participant posts never move the world's time, review CR-001; the retired
+    /// <c>Exercise.CurrentScenarioTime</c> column is never read). A <c>null</c> time
     /// seeds nothing, so the resolver falls through to the wall clock exactly as an unset column used to.
     /// </summary>
     /// <param name="seed">An unscoped seeding context (the post carries its own exercise id).</param>
@@ -51,7 +52,7 @@ internal static class TestScenarioNow
             AuthorPersonaId = Guid.NewGuid(),
             Body = "The world's latest post (engine-runtime/08 scenario now).",
             CreatedScenarioTime = at,
-            Origin = "participant",
+            Origin = "controller-as-persona",
             ActingHumanId = "human-world-time",
             CreatedWallClock = DateTimeOffset.UtcNow,
         });

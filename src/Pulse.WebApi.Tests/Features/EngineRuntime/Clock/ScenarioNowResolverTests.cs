@@ -44,6 +44,30 @@ public sealed class ScenarioNowResolverTests
     }
 
     [RequiresDockerFact]
+    public async Task NoClock_IgnoresParticipantPosts_EvenALaterOne_AndAParticipantOnlyWorldFallsToTheWallClock()
+    {
+        // Review CR-001: on a cold clock a participant post carries the CLIENT's instant (the mock clock's wall
+        // new Date(), or anything at all), so it must never become the world's time, the seed's start or a cold stamp.
+        var exerciseId = Guid.NewGuid();
+        await AddPostAsync(exerciseId, World);
+        await AddPostAsync(exerciseId, World.AddYears(3), origin: "participant");
+        await AddPostAsync(exerciseId, new DateTimeOffset(9999, 12, 31, 0, 0, 0, TimeSpan.Zero), origin: "participant");
+
+        var participantOnly = Guid.NewGuid();
+        await AddPostAsync(participantOnly, World.AddDays(1), origin: "participant");
+
+        await using var context = _fixture.CreateContext();
+        var resolver = Resolver(context, new ExerciseClockService(new ManualTimeProvider(WallNow)));
+
+        (await resolver.GetAsync(exerciseId, WallNow)).Should().Be(
+            World, "only staff-authored and server-paced posts say where the world is");
+        (await resolver.FindAsync(participantOnly)).Should().BeNull("a world of participant posts only has no scenario now of its own");
+        (await resolver.GetAsync(participantOnly, WallNow)).Should().Be(WallNow);
+        (await context.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
+            3, "the participant rows exist: the predicate excludes them, the table is not empty");
+    }
+
+    [RequiresDockerFact]
     public async Task RunningClock_Wins_OverALaterPost()
     {
         var exerciseId = Guid.NewGuid();
@@ -113,9 +137,16 @@ public sealed class ScenarioNowResolverTests
             "an exercise with no posts and no clock has no scenario now of its own, whatever other exercises hold");
     }
 
-    /// <summary>Adds one post to <paramref name="exerciseId"/> at <paramref name="scenarioTime"/> through an unscoped context.</summary>
+    /// <summary>
+    /// Adds one post to <paramref name="exerciseId"/> at <paramref name="scenarioTime"/> through an unscoped context. The
+    /// default origin is a staff one (controller-as-persona): only non-participant posts say where the world is (CR-001).
+    /// </summary>
     internal static async Task AddPostAsync(
-        MsSqlContainerFixture fixture, Guid exerciseId, DateTimeOffset scenarioTime, bool deleted = false)
+        MsSqlContainerFixture fixture,
+        Guid exerciseId,
+        DateTimeOffset scenarioTime,
+        bool deleted = false,
+        string origin = "controller-as-persona")
     {
         await using var seed = fixture.CreateContext();
         seed.Posts.Add(new Post
@@ -125,7 +156,7 @@ public sealed class ScenarioNowResolverTests
             AuthorPersonaId = Guid.NewGuid(),
             Body = "where the world is",
             CreatedScenarioTime = scenarioTime,
-            Origin = "participant",
+            Origin = origin,
             ActingHumanId = "human-scenario-now",
             CreatedWallClock = WallNow,
             DeletedAt = deleted ? scenarioTime.AddMinutes(1) : null,
@@ -133,8 +164,9 @@ public sealed class ScenarioNowResolverTests
         await seed.SaveChangesAsync();
     }
 
-    private Task AddPostAsync(Guid exerciseId, DateTimeOffset scenarioTime, bool deleted = false) =>
-        AddPostAsync(_fixture, exerciseId, scenarioTime, deleted);
+    private Task AddPostAsync(
+        Guid exerciseId, DateTimeOffset scenarioTime, bool deleted = false, string origin = "controller-as-persona") =>
+        AddPostAsync(_fixture, exerciseId, scenarioTime, deleted, origin);
 
     /// <summary>The resolver over <paramref name="context"/>; the request scope (if any) lives on the context's filter.</summary>
     private static ScenarioNowResolver Resolver(PulseDbContext context, IExerciseClock clock) =>

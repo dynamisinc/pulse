@@ -9,9 +9,9 @@
 > publish funnel (`ContentPublishService.ClockAsync`), the alert source (`AlertReader.ReadTimeAsync`, which also gates
 > scenario-time expiry), outlets (`OutletService`), weather zones (`WeatherZoneService`), the go-live readiness
 > opening-feed check (`ExerciseReadinessService`), and the steering-lever recorder (`EngineSteeringLeverRecorder`,
-> #618). The index migration was regenerated as `20261106151929_EngineRuntimeScenarioNowPostIndex`; it sorts after
-> the queued A3 (`20261030173000`) and A2 (`20261030174000`) migrations, so the model snapshot needs a textual
-> re-merge once those land.
+> #618). The index migration was regenerated as `20261106151929_EngineRuntimeScenarioNowPostIndex`. It sorts after
+> the queued A3 migration (`20261030173000`) and BEFORE the A2 PR's `20261106153923_A2CredentialFoundation`, so
+> whichever of this PR and A2 merges second needs a textual re-merge of the model snapshot.
 
 ## Context
 
@@ -37,12 +37,12 @@ change that, nor the engine-state work in [07](07-engine-state-survives-restart.
 ## Decisions
 
 - **CLK-1 · A cold clock starts at the world's latest post.** Starting a clock that isn't running (the engine seed,
-  or a freeze on a cold clock) uses the latest `CreatedScenarioTime` among the exercise's posts. With no posts, it
-  uses wall-clock now. A fresh exercise behaves as today; a 2033 world continues from 2033. StartEx (COR-043) will
+  or a freeze on a cold clock) uses the latest `CreatedScenarioTime` among the exercise's non-participant posts
+  (CLK-6). With no such posts, it uses wall-clock now. A fresh exercise behaves as today; a 2033 world continues from 2033. StartEx (COR-043) will
   replace this when it is built.
 - **CLK-2 · "Scenario now" has one source; the placeholder is retired.** One resolver gives the exercise's scenario
-  now: the running clock (live, or rehydrated by story 18), else the latest post's scenario time, else wall-clock
-  now. Every reader of `Exercise.CurrentScenarioTime` / `ExerciseFacts.StoredScenarioTime` uses it instead. The
+  now: the running clock (live, or rehydrated by story 18), else the world's latest NON-participant post's scenario
+  time (CLK-6), else wall-clock now. Every reader of `Exercise.CurrentScenarioTime` / `ExerciseFacts.StoredScenarioTime` uses it instead. The
   column stays in the schema, unused and documented as retired, for a later migration to drop. Nothing writes
   it.
 - **CLK-3 · One index serves the resolver (review W-1).** The resolver's post tier is one
@@ -60,6 +60,23 @@ change that, nor the engine-state work in [07](07-engine-state-survives-restart.
   endpoint, a first bootstrap) stamps `now` (an unsaved exercise has no clock and no posts). The roster link-email
   batch resolves once per batch, not per recipient. The report's viewed event reuses the latest post the report
   already read (clock, else that post, else now) rather than querying again.
+- **CLK-6 · A client can never set the world's time (review CR-001, 2026-11-06).** With no clock running, a
+  participant's post keeps its client-supplied scenario time (the frontend mock clock sends its wall `new Date()`).
+  Three guards keep that value from becoming the exercise's clock epoch:
+  1. The resolver's post tier counts only non-participant posts (`Origin != participant`, the shared
+     `ChannelVocabulary.OriginParticipant`): controller-as-persona, engine, inject and noise posts say where the world
+     is; a participant's post never moves the seed start, a cold freeze's start or a cold stamp.
+  2. `PostIngestService` refuses a `scenarioTime` more than 100 years either side of the server's now with a 400
+     (`scenarioTime must be within 100 years of the current date.`), for every origin and clock state, exactly as it
+     already refuses an unparseable one. 100 years admits any exercise world in use (2026 to 2033 in tests and seeds)
+     and keeps every stored instant thousands of years inside the `DateTimeOffset` range.
+  3. `ExerciseClockService` refuses, with `ArgumentOutOfRangeException`, a `Start` or `Restore` outside year 2 to
+     9000, a restored anchor whose elapsed would pass year 9000, and a `Jump` past it. The failure happens once, at
+     the call, with the clock unchanged (the rehydrator logs and skips that one row), never on every read.
+- **CLK-7 · Alert expiry runs only on a started clock (review W-3, 2026-11-06).** The alert source stamps issue and
+  clear times from the resolver, but it decides EXPIRY (the 5 s sweep and the active read) only when the exercise's
+  clock is started (running or frozen), the pre-08 rule. A cold clock's latest-post instant does not advance, so
+  expiring against it would hand an irreversible decision to whichever post landed last.
 
 ## Acceptance Criteria
 
@@ -81,7 +98,9 @@ change that, nor the engine-state work in [07](07-engine-state-survives-restart.
 
 ## Out of Scope
 
-StartEx / EndEx (COR-043, COR-054); time jumps (COR-051); dropping the column; client-supplied post scenario times.
+StartEx / EndEx (COR-043, COR-054); time jumps (COR-051); dropping the column. Client-supplied post scenario times
+stay accepted on a cold clock (only bounded and excluded from the resolver, CLK-6); replacing them with a server
+time is not this story's change.
 
 ## Tests
 
@@ -104,6 +123,22 @@ the report) stamp the resolver's value. Static guard: a test fails if production
   `ScenarioNowResolverTests.NoClock_ReturnsTheExercisesLatestPost_IncludingATakenDownOne`,
   `ScenarioNowResolverTests.NoClock_NoPosts_ReturnsTheCallersWallClock_AndFindReturnsNull`,
   `StaffLoginServiceTests.Login_WrongSecret_FailureEventScenarioTime_IsResolvedOnlyAfterAuthentication` (CLK-5).
+- CLK-6 (review CR-001): `ScenarioNowResolverModelTests.NoClock_IgnoresParticipantPosts_EvenALaterOrAnOverflowingOne`,
+  `ScenarioNowResolverTests.NoClock_IgnoresParticipantPosts_EvenALaterOne_AndAParticipantOnlyWorldFallsToTheWallClock`,
+  `PostIngestServerClockTests.OnAColdClock_AParticipantPostDatedLaterThanTheWorld_NeverMovesTheScenarioNow_OrTheClockStartedFromIt`,
+  `PostIngestServerClockTests.AnOverflowingScenarioTime_IsRefusedAt400_AndNothingIsWritten`,
+  `PostIngestServerClockTests.TheScenarioTimeWindow_IsAHundredYearsEitherSideOfTheServersNow_AndOverflowSafe`,
+  `ExerciseClockServiceTests.Start_RefusesAnInstantNearTheEdgesOfTheRange_AndLeavesTheClockUnstarted`,
+  `ExerciseClockServiceTests.Start_AtTheBounds_IsAccepted_AndReadsKeepWorkingAsWallTimePasses`,
+  `ExerciseClockServiceTests.Jump_PastTheCeiling_IsRefused_AndTheClockIsUnchanged`,
+  `ExerciseClockServiceTests.Restore_RefusesAPoisonedAnchor_SoTheRehydratorSkipsThatRowInsteadOfEveryReadFailing`;
+  the seed and freeze cold-clock tests above also seed a later participant post (and, for the freeze, a 9999 one)
+  that must not move the start; `ExerciseReportScopeEndpointTests.ViewedEvent_StampsTheScenarioNowResolver_TheLatestPost_WithNoClock`
+  seeds a later participant post that must not move the stamp.
+- CLK-7 (review W-3): `AlertServiceTests.Sweep_NeverExpiresAgainstTheWallClock_WhenNoScenarioTimeIsKnown`,
+  `AlertEndpointsTests.Active_IsOrderedBySeverityThenNewest_AndDropsExpiredOnScenarioTime_OnRealSql` (a later post on a
+  cold clock expires nothing; starting the clock does), `AlertEndpointsTests.Sweep_ExpiresEachExerciseInItsOwnScope_OnRealSql`
+  (expires on started clocks).
 - AC-4 (no reader; telemetry spot checks): `RetiredScenarioTimeSourceGuardTests.NoProductionCode_ReadsTheRetiredScenarioTimePlaceholder`
   (+ its two self-tests), `ParticipantLoginServiceTests.Login_Success_IssuesParticipantSession_EmitsSuccessTelemetry_RecordsLastLogin`,
   `ExerciseSettingsServiceTests.UpdateAsync_StampsTheExercisesScenarioNow_TheRunningClock_ElseTheLatestPost_ElseNow`,
@@ -122,7 +157,34 @@ the report) stamp the resolver's value. Static guard: a test fails if production
   reads the exercise row).
 - Readers added on main after 10/19 (2026-11-06 rebuild):
   `ContentPublishServiceTests.WithNoStartedClock_TheExercisesLatestPost_IsTheFallback_ThenNow` (the content funnel),
-  `AlertEndpointsTests` (`PinScenarioTimeAsync` now puts each world at a post; expiry is still never decided on the
-  wall clock), `ExerciseReadinessServiceTests.OpeningFeed_ComparesAgainstTheScenarioStart_NotTheRealWorldScheduledStart`
+  `AlertEndpointsTests` (issue/clear stamps come from the resolver; expiry runs only on a started clock, CLK-7, and
+  never on the wall clock), `ExerciseReadinessServiceTests.OpeningFeed_ComparesAgainstTheScenarioStart_NotTheRealWorldScheduledStart`
   and `ExerciseReadinessServiceTests.OpeningFeed_CountsAnyLiveTopLevelPost_WhenNoClockRuns` (the opening-feed bound is
   the running clock, else the latest post), and the weather-zone harness (a resolver over its stub clock).
+
+## Known limitations / open questions (for Tom)
+
+The 2026-11-06 adversarial review raised both of these. Neither is changed here.
+
+- **W-1 · Cold-clock stamps no longer advance.** With no clock running, `ScenarioNowResolver.FindAsync` /
+  `GetAsync` (`src/Pulse.WebApi/Features/EngineRuntime/Clock/ScenarioNowResolver.cs:56-81`) return the same
+  `MAX(CreatedScenarioTime)` of the world's non-participant posts until another such post lands. Every cold-clock
+  telemetry stamp taken in that interval therefore carries the SAME scenario instant: logins, settings changes,
+  lifecycle transitions, report views, alert issue/clear stamps. Before this story each carried its own wall-clock
+  now, so the stamps advanced. Scenario: a seeded 2033 world sits in Staged for an hour of familiarisation with no
+  clock started. Every participant login, roster change and settings save in that hour is stamped 2033-06-14 09:00
+  (the last seeded post). Only wall-clock time keeps the order inside that hour. Since CLK-6, participant posts
+  no longer advance it either. Open question: is a frozen cold stamp acceptable until StartEx, or should a cold clock
+  add the wall time elapsed since the latest post?
+- **W-2 · After a DF-28 runtime reset the reaction loop restarts the clock at the seed-time start.**
+  `PauseTierRegistry.ResetAsync` clears the clock (`src/Pulse.WebApi/Features/EngineRuntime/Steering/PauseTierRegistry.cs:409`).
+  On its next tick, `ReactionLoopHost.EnsureClockStarted`
+  (`src/Pulse.WebApi/Features/EngineRuntime/ReactionLoopHost.cs:142`, `:209-213`) starts it again at
+  `registration.ScenarioStart`. `EngineContentSeedService` captured that value ONCE from `IScenarioNow` at seed time
+  (`src/Pulse.WebApi/Features/Ops/EngineContentSeed/EngineContentSeedService.cs:194`, stored at `:282`). Scenario: a
+  world seeded at 2033-06-14 09:00 runs for three hours (posts up to 12:00), then the controller resets the runtime.
+  The clock restarts at 09:00, so new posts are stamped three scenario hours BEFORE posts already in the feed, and
+  the newest-first order inverts. Before this story the restart used the seed-time wall clock, which was just as
+  stale, so the problem is not new. Open question: should the loop restart a cleared clock at `IScenarioNow`
+  (where the world is now) rather than at the registration's seed-time start? That needs a scoped resolver from the
+  singleton host.

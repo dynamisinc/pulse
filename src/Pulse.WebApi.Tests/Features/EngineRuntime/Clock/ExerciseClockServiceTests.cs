@@ -279,4 +279,80 @@ public sealed class ExerciseClockServiceTests
         FluentActions.Invoking(() => clock.Start(Guid.Empty, ScenarioStart, TimeZoneInfo.Utc))
             .Should().Throw<ArgumentException>("a clock must name an exercise (COR-001)");
     }
+
+    // ---- review CR-001: an instant that would overflow is refused once, never at every read ---------------------
+
+    [Fact]
+    public void Start_RefusesAnInstantNearTheEdgesOfTheRange_AndLeavesTheClockUnstarted()
+    {
+        var clock = new ExerciseClockService(new ManualTimeProvider(DateTimeOffset.UnixEpoch));
+        var exerciseId = Guid.NewGuid();
+
+        foreach (var instant in new[]
+        {
+            new DateTimeOffset(9999, 12, 31, 0, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.MaxValue,
+            ExerciseClockService.MaxScenarioInstant.AddTicks(1),
+            DateTimeOffset.MinValue,
+            ExerciseClockService.MinScenarioInstant.AddTicks(-1),
+        })
+        {
+            FluentActions.Invoking(() => clock.Start(exerciseId, instant, TimeZoneInfo.Utc))
+                .Should().Throw<ArgumentOutOfRangeException>("{0} would overflow start + elapsed on a later read", instant)
+                .Which.ParamName.Should().Be("scenarioStart");
+            clock.CurrentScenarioTime(exerciseId).Should().BeNull("a refused Start changes nothing");
+        }
+    }
+
+    [Fact]
+    public void Start_AtTheBounds_IsAccepted_AndReadsKeepWorkingAsWallTimePasses()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var clock = new ExerciseClockService(time);
+        var high = Guid.NewGuid();
+        var low = Guid.NewGuid();
+        var minus = TimeZoneInfo.CreateCustomTimeZone("Test-12", TimeSpan.FromHours(-12), "Test-12", "Test-12");
+
+        clock.Start(high, ExerciseClockService.MaxScenarioInstant, TimeZoneInfo.Utc);
+        clock.Start(low, ExerciseClockService.MinScenarioInstant, minus);
+        time.Advance(TimeSpan.FromDays(365 * 10));
+
+        clock.CurrentScenarioTime(high).Should().Be(ExerciseClockService.MaxScenarioInstant.AddDays(365 * 10));
+        clock.CurrentScenarioTime(low).Should().NotBeNull("a negative-offset zone near the lower bound does not underflow");
+    }
+
+    [Fact]
+    public void Jump_PastTheCeiling_IsRefused_AndTheClockIsUnchanged()
+    {
+        var clock = new ExerciseClockService(new ManualTimeProvider(DateTimeOffset.UnixEpoch));
+        var exerciseId = Guid.NewGuid();
+        var start = ExerciseClockService.MaxScenarioInstant.AddMinutes(-10);
+        clock.Start(exerciseId, start, TimeZoneInfo.Utc);
+        clock.Freeze(exerciseId);
+
+        FluentActions.Invoking(() => clock.Jump(exerciseId, 11)).Should().Throw<ArgumentOutOfRangeException>();
+        clock.CurrentScenarioTime(exerciseId).Should().Be(start, "a refused jump banks nothing");
+
+        clock.Jump(exerciseId, 10);
+        clock.CurrentScenarioTime(exerciseId).Should().Be(ExerciseClockService.MaxScenarioInstant, "up to the ceiling is fine");
+    }
+
+    [Fact]
+    public void Restore_RefusesAPoisonedAnchor_SoTheRehydratorSkipsThatRowInsteadOfEveryReadFailing()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var clock = new ExerciseClockService(time);
+        var exerciseId = Guid.NewGuid();
+
+        var poisoned = new ExerciseClockAnchor(
+            new DateTimeOffset(9999, 12, 31, 0, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc, TimeSpan.Zero, time.GetUtcNow(), Frozen: true);
+        FluentActions.Invoking(() => clock.Restore(exerciseId, poisoned)).Should().Throw<ArgumentOutOfRangeException>();
+        clock.CurrentScenarioTime(exerciseId).Should().BeNull();
+
+        var overElapsed = new ExerciseClockAnchor(
+            ExerciseClockService.MaxScenarioInstant.AddDays(-1), TimeZoneInfo.Utc, TimeSpan.FromDays(2), time.GetUtcNow(), Frozen: true);
+        FluentActions.Invoking(() => clock.Restore(exerciseId, overElapsed)).Should().Throw<ArgumentOutOfRangeException>(
+            "a start inside the window whose banked elapsed passes the ceiling is refused too");
+        clock.CurrentScenarioTime(exerciseId).Should().BeNull();
+    }
 }

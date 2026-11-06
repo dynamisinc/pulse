@@ -173,6 +173,11 @@ public sealed class PauseTierEndpointsTests
         await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddMinutes(-30));
         await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest);
         await ScenarioNowResolverTests.AddPostAsync(_fixture, Guid.NewGuid(), latest.AddYears(3));
+        // Review CR-001: a participant's later post (a client instant — the mock clock's wall date, or 9999) never moves
+        // the freeze's start.
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddYears(1), origin: "participant");
+        await ScenarioNowResolverTests.AddPostAsync(
+            _fixture, exerciseId, new DateTimeOffset(9999, 12, 31, 0, 0, 0, TimeSpan.Zero), origin: "participant");
         await using var host = await StartHostAsync(exerciseId);
 
         var response = await host.Client.PostAsJsonAsync(

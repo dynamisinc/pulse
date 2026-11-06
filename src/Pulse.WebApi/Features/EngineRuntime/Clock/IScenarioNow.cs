@@ -5,8 +5,9 @@ namespace Pulse.WebApi.Features.EngineRuntime.Clock;
 /// <list type="number">
 ///   <item><description>the running exercise clock (<see cref="IExerciseClock.CurrentScenarioTime"/>: live, or
 ///   rehydrated after a restart by demo-feedback/18);</description></item>
-///   <item><description>else the latest <c>CreatedScenarioTime</c> among THAT exercise's posts (where the world
-///   is);</description></item>
+///   <item><description>else the latest <c>CreatedScenarioTime</c> among THAT exercise's NON-participant posts (where
+///   the world is; a participant's post carries a client-supplied instant on a cold clock and never moves the world's
+///   time — review CR-001);</description></item>
 ///   <item><description>else wall-clock now.</description></item>
 /// </list>
 /// Every former reader of the retired <c>Exercise.CurrentScenarioTime</c> placeholder reads this instead, and a cold
@@ -14,7 +15,7 @@ namespace Pulse.WebApi.Features.EngineRuntime.Clock;
 /// </summary>
 /// <remarks>
 /// <para><b>Cost.</b> The database is touched only when no clock is running: then ONE <c>MAX(CreatedScenarioTime)</c>
-/// query over the exercise's posts. With a running clock the answer is in memory.</para>
+/// query over the exercise's non-participant posts. With a running clock the answer is in memory.</para>
 /// <para><b>Isolation (COR-001).</b> Callers pass a SERVER-resolved exercise id only (the request's
 /// <c>IExerciseContext</c> scope, a server-issued session's bound exercise, an ops-resolved exercise), never a client
 /// field. The post read is confined to that one exercise, so another exercise's posts never inform its scenario
@@ -23,8 +24,8 @@ namespace Pulse.WebApi.Features.EngineRuntime.Clock;
 public interface IScenarioNow
 {
     /// <summary>
-    /// The exercise's scenario now when it has one: the running clock, else its latest post's scenario time, else
-    /// <c>null</c> (no clock and no posts). For callers whose own last fallback is not wall-clock now.
+    /// The exercise's scenario now when it has one: the running clock, else its latest non-participant post's scenario
+    /// time, else <c>null</c> (no clock and no such posts). For callers whose own last fallback is not wall-clock now.
     /// </summary>
     /// <param name="exerciseId">A server-resolved exercise id. <see cref="Guid.Empty"/> yields <c>null</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -32,7 +33,7 @@ public interface IScenarioNow
     Task<DateTimeOffset?> FindAsync(Guid exerciseId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The exercise's scenario now: the running clock, else its latest post's scenario time, else
+    /// The exercise's scenario now: the running clock, else its latest non-participant post's scenario time, else
     /// <paramref name="wallClockNow"/> — the caller's ONE server clock read for the operation, so an exercise with no
     /// clock and no posts stamps exactly the instant it stamped before this resolver existed.
     /// </summary>

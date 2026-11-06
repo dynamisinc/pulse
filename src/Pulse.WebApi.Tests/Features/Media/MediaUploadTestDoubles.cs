@@ -162,7 +162,7 @@ internal sealed class UploadHarness : IDisposable
                     AuthorPersonaId = Guid.NewGuid(),
                     Body = "The world's latest post.",
                     CreatedScenarioTime = ExerciseScenarioTime,
-                    Origin = "participant",
+                    Origin = "controller-as-persona", // participant posts never move the world's time (CR-001)
                     ActingHumanId = "human-world-time",
                     CreatedWallClock = ExerciseScenarioTime,
                 });

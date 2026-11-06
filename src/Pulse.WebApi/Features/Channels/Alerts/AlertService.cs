@@ -203,8 +203,9 @@ public sealed partial class AlertService : IAlertRaiser
         var time = await _reader.ReadTimeAsync(exerciseId, cancellationToken);
         if (!time.ScenarioKnown)
         {
-            // No scenario now (no running clock and no posts): never expire against
-            // the wall clock (COR-053). The sweep retries once scenario time is known again.
+            // No started clock: never expire — not against the wall clock (COR-053), and not against a cold clock's
+            // latest-post instant either (review W-3: it does not advance, and an expiry stamp is irreversible). The
+            // sweep retries once the clock is started.
             return 0;
         }
 

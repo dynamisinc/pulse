@@ -290,6 +290,8 @@ public sealed class EngineContentSeedServiceTests
         await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddHours(-2));
         await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest);
         await ScenarioNowResolverTests.AddPostAsync(_fixture, Guid.NewGuid(), latest.AddYears(2)); // another exercise
+        // Review CR-001: a participant's later post (a client instant on a cold clock) never moves the seed's start.
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddDays(30), origin: "participant");
         var registry = new ReactionLoopRegistry();
         var wallNow = new DateTimeOffset(2026, 10, 19, 15, 0, 0, TimeSpan.Zero);
 

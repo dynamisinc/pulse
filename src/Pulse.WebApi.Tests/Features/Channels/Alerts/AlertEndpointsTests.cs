@@ -91,7 +91,15 @@ public sealed class AlertEndpointsTests
         // The clock is not started and the exercise has no posts: expiry is never decided on wall time (COR-053).
         (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
 
-        await PinScenarioTimeAsync(host, host.Time.GetUtcNow(), exercise.ExerciseId);
+        // Review W-3: a cold clock's latest post is the STAMP, never an expiry decision — a later post moves nothing.
+        await using (var seed = host.Db(exerciseId: null))
+        {
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.ExerciseId, host.Time.GetUtcNow());
+        }
+
+        (await ActiveIdsAsync(host)).Should().Equal(expiring, advisory, info);
+
+        StartClocksAt(host, host.Time.GetUtcNow(), exercise.ExerciseId);
 
         (await ActiveIdsAsync(host)).Should().Equal(advisory, info);
         var history = await host.Client.GetFromJsonAsync<JsonElement>("/api/alerts/history");
@@ -172,8 +180,8 @@ public sealed class AlertEndpointsTests
         host.ActAs(b.ExerciseId, b.StaffUserId);
         var bId = await RaiseOkAsync(host, new { severity = "emergency", headline = "B", expiresScenarioTime = expires });
 
-        // The exercise clocks are not started here, so put each world at a later post: the sweep never expires on wall time.
-        await PinScenarioTimeAsync(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
+        // Expiry runs only on a started clock (review W-3; never on wall time, COR-053): start both past the expiry.
+        StartClocksAt(host, host.Time.GetUtcNow().AddMinutes(11), a.ExerciseId, b.ExerciseId);
 
         var sweeper = ActivatorUtilities.CreateInstance<AlertExpirySweeper>(host.Services);
         (await sweeper.SweepAsync()).Should().BeGreaterThanOrEqualTo(2, "other tests' exercises may share the database");
@@ -293,15 +301,14 @@ public sealed class AlertEndpointsTests
     }
 
     /// <summary>
-    /// Puts each exercise's world at <paramref name="scenarioTime"/>: one post at that instant, which is the scenario now
-    /// when the clock is not started (engine-runtime/08, CLK-2).
+    /// Starts each exercise's native clock at <paramref name="scenarioTime"/>: the only scenario time alert expiry is
+    /// decided against (review W-3 — a cold clock's latest post stamps, it never expires).
     /// </summary>
-    private static async Task PinScenarioTimeAsync(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
+    private static void StartClocksAt(InjectTestHost host, DateTimeOffset scenarioTime, params Guid[] exerciseIds)
     {
-        await using var db = host.Db(exerciseId: null);
         foreach (var exerciseId in exerciseIds)
         {
-            await TestScenarioNow.SeedWorldTimeAsync(db, exerciseId, scenarioTime);
+            host.Clock.Start(exerciseId, scenarioTime, TimeZoneInfo.Utc);
         }
     }
 

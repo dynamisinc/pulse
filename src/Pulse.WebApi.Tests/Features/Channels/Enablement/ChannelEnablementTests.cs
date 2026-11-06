@@ -215,7 +215,7 @@ public sealed class ChannelEnablementTests : IDisposable
             new ConstantChromeConfigProjection(),
             new ConstantShellVariantProjection(),
             new ConstantOverlayStateProjection(),
-            new AlertReader(context, scope, TestScenarioNow.Over(context), TimeProvider.System));
+            new AlertReader(context, scope, TestScenarioNow.Over(context), new ExerciseClockService(TimeProvider.System), TimeProvider.System));
     }
 
     private PulseDbContext NewContext(Guid? exerciseId) =>

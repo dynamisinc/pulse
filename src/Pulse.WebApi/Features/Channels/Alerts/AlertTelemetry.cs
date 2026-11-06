@@ -169,8 +169,9 @@ public static class AlertTelemetry
 /// <param name="ScenarioTime">The exercise scenario instant.</param>
 /// <param name="TimeZone">The exercise IANA time zone.</param>
 /// <param name="ScenarioKnown">
-/// False when the exercise had no scenario now (no running clock and no posts; engine-runtime/08), so
-/// <paramref name="ScenarioTime"/> is the wall-clock fallback. The expiry sweep never expires against it.
+/// True only when the exercise's clock is started (running or frozen). False otherwise: <paramref name="ScenarioTime"/>
+/// is then the cold-clock stamp (the world's latest non-participant post, engine-runtime/08) or the wall-clock fallback,
+/// and neither the expiry sweep nor the active read ever expires against it (review W-3; COR-053).
 /// </param>
 public sealed record AlertEventTime(
     DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone, bool ScenarioKnown = true)

@@ -23,6 +23,20 @@ using System.Collections.Concurrent;
 /// </summary>
 public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersistence
 {
+    /// <summary>
+    /// The earliest instant a clock may start at (review CR-001). Year 2, not year 1: converting an instant within a day
+    /// of <see cref="DateTimeOffset.MinValue"/> into a negative-offset exercise time zone underflows.
+    /// </summary>
+    public static readonly DateTimeOffset MinScenarioInstant = new(2, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// The latest instant a clock may start at, and the ceiling no jump may carry scenario time past (review CR-001).
+    /// Year 9000 leaves ~999 years of headroom below <see cref="DateTimeOffset.MaxValue"/>, so the running read
+    /// (<c>start + elapsed</c>, then a time-zone conversion) can never overflow on wall time alone — the failure is
+    /// refused once, at <see cref="Start"/> / <see cref="Restore"/> / <see cref="Jump"/>, never thrown on every read.
+    /// </summary>
+    public static readonly DateTimeOffset MaxScenarioInstant = new(9000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     private readonly TimeProvider _timeProvider;
     private readonly IExerciseClockChangeSink _changeSink;
     private readonly IExerciseClockChangeObserver[] _observers;
@@ -68,10 +82,15 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
     }
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="scenarioStart"/> is outside <see cref="MinScenarioInstant"/>..<see cref="MaxScenarioInstant"/>
+    /// (review CR-001: refused here, before any state changes, so no read can ever overflow).
+    /// </exception>
     public void Start(Guid exerciseId, DateTimeOffset scenarioStart, TimeZoneInfo timeZone)
     {
         RequireExercise(exerciseId);
         ArgumentNullException.ThrowIfNull(timeZone);
+        RequireScenarioInstantInRange(scenarioStart, TimeSpan.Zero, nameof(scenarioStart));
 
         _clocks[exerciseId] = new ExerciseClockState(
             scenarioStart,
@@ -98,6 +117,9 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
     }
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The jump would carry scenario time past <see cref="MaxScenarioInstant"/> (review CR-001); the clock is unchanged.
+    /// </exception>
     public void Jump(Guid exerciseId, int scenarioMinutes)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinutes);
@@ -126,6 +148,11 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
         _clocks.TryGetValue(exerciseId, out var state) ? state.Anchor() : null;
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The anchor's scenario start is outside <see cref="MinScenarioInstant"/>..<see cref="MaxScenarioInstant"/>, or its
+    /// start plus the restored elapsed passes <see cref="MaxScenarioInstant"/> (review CR-001: a poisoned persisted
+    /// anchor is refused once here — the rehydrator logs and skips that one row — rather than failing every read).
+    /// </exception>
     public void Restore(Guid exerciseId, ExerciseClockAnchor anchor)
     {
         RequireExercise(exerciseId);
@@ -139,6 +166,7 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
         var banked = anchor.ElapsedAtAnchor < TimeSpan.Zero ? TimeSpan.Zero : anchor.ElapsedAtAnchor;
         var downtime = utcNow - anchor.WallAnchorUtc;
         var elapsed = anchor.Frozen || downtime < TimeSpan.Zero ? banked : banked + downtime;
+        RequireScenarioInstantInRange(anchor.ScenarioStart, elapsed, nameof(anchor));
 
         // Re-anchored at NOW in this process (monotonic + UTC together); deliberately no SINK notification (the row
         // it came from is already current) — only the observers hear it, so connected clients learn the restored state.
@@ -203,6 +231,23 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
         }
 
         return state;
+    }
+
+    /// <summary>
+    /// Refuses a scenario start outside <see cref="MinScenarioInstant"/>..<see cref="MaxScenarioInstant"/>, or one whose
+    /// <paramref name="elapsed"/> already carries it past the ceiling (review CR-001).
+    /// </summary>
+    private static void RequireScenarioInstantInRange(DateTimeOffset scenarioStart, TimeSpan elapsed, string paramName)
+    {
+        if (scenarioStart < MinScenarioInstant || scenarioStart > MaxScenarioInstant
+            || elapsed > MaxScenarioInstant - scenarioStart)
+        {
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                scenarioStart,
+                $"A scenario clock must start between {MinScenarioInstant:O} and {MaxScenarioInstant:O} and stay below "
+                + "the upper bound; an instant outside that window would overflow the clock's scenario-time arithmetic.");
+        }
     }
 
     private static void RequireExercise(Guid exerciseId)
@@ -301,7 +346,9 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
         {
             lock (_gate)
             {
-                _scenarioElapsedAtAnchor = ElapsedNoLock(timeProvider) + TimeSpan.FromMinutes(scenarioMinutes);
+                var elapsed = ElapsedNoLock(timeProvider) + TimeSpan.FromMinutes(scenarioMinutes);
+                RequireScenarioInstantInRange(_scenarioStart, elapsed, nameof(scenarioMinutes));
+                _scenarioElapsedAtAnchor = elapsed;
                 ReanchorNoLock(timeProvider);
             }
         }

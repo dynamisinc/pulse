@@ -2,9 +2,11 @@ namespace Pulse.WebApi.Features.EngineRuntime.Clock;
 
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.Channels.Contracts;
 
 /// <summary>
-/// The native <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2): running clock → latest post → wall-clock now.
+/// The native <see cref="IScenarioNow"/> (engine-runtime/08, CLK-2): running clock → the world's latest NON-participant
+/// post → wall-clock now.
 /// Scoped, matching the <see cref="PulseDbContext"/> unit of work it reads posts through.
 /// </summary>
 /// <remarks>
@@ -17,6 +19,12 @@ using Pulse.WebApi.Data;
 /// another exercise) the request's filter would wrongly hide the exercise's rows. One branch means one query shape to
 /// review and test. Safe because the id is server-resolved (see <see cref="IScenarioNow"/>), never a client field, and
 /// the query returns one aggregate instant of that exercise only. <see cref="Guid.Empty"/> reads nothing.</para>
+/// <para><b>Participant posts never move the world's time (review CR-001).</b> With no clock running, a participant's
+/// post carries the CLIENT's scenario instant (the frontend's mock clock sends its wall <c>new Date()</c>), so letting it
+/// into this tier would let any participant drag the seed / cold-freeze start and every cold stamp to an instant of their
+/// choosing — today's date in a past-dated world, or one near <see cref="DateTimeOffset.MaxValue"/>. Only staff-authored
+/// and server-paced posts (controller-as-persona, engine, inject, noise) say where the world is. The predicate is
+/// <c>Origin != participant</c> (the shared origin vocabulary, <see cref="ChannelVocabulary.OriginParticipant"/>).</para>
 /// <para>Soft-deleted posts count: the report's "now" already takes the latest of every post, and a takedown does not
 /// move the world's time back.</para>
 /// </remarks>
@@ -72,7 +80,9 @@ public sealed class ScenarioNowResolver : IScenarioNow
     public async Task<DateTimeOffset> GetAsync(Guid exerciseId, CancellationToken cancellationToken = default) =>
         await FindAsync(exerciseId, cancellationToken).ConfigureAwait(false) ?? _timeProvider.GetUtcNow();
 
-    /// <summary>The latest <c>CreatedScenarioTime</c> among the exercise's posts, or <c>null</c> when it has none.</summary>
+    /// <summary>
+    /// The latest <c>CreatedScenarioTime</c> among the exercise's NON-participant posts, or <c>null</c> when it has none.
+    /// </summary>
     private Task<DateTimeOffset?> LatestPostScenarioTimeAsync(Guid exerciseId, CancellationToken cancellationToken)
     {
         // IgnoreQueryFilters() + the EXPLICIT predicate on every path: the predicate is the isolation guarantee (one
@@ -80,7 +90,7 @@ public sealed class ScenarioNowResolver : IScenarioNow
         return _dbContext.Posts
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(post => post.ExerciseId == exerciseId)
+            .Where(post => post.ExerciseId == exerciseId && post.Origin != ChannelVocabulary.OriginParticipant)
             .MaxAsync(post => (DateTimeOffset?)post.CreatedScenarioTime, cancellationToken);
     }
 }

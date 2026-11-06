@@ -335,9 +335,11 @@ public sealed class ExerciseReportScopeEndpointTests
         var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
         var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
         var otherPersona = await _report.PersonaAsync(otherExerciseId, "resident", "Resident");
-        await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
-        await _seed.PostAsync(exerciseId, persona, 90, p => p.Origin = "participant");
-        await _seed.PostAsync(otherExerciseId, otherPersona, 600, p => p.Origin = "participant");
+        await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "engine");
+        await _seed.PostAsync(exerciseId, persona, 90, p => p.Origin = "controller-as-persona");
+        // Review CR-001: a participant's LATER post carries a client instant on a cold clock and never moves the world.
+        await _seed.PostAsync(exerciseId, persona, 300, p => p.Origin = "participant");
+        await _seed.PostAsync(otherExerciseId, otherPersona, 600, p => p.Origin = "engine");
         await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId, utcNow: Now);
 
         using (await GetJsonAsync(host, token, string.Empty))
