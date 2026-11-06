@@ -67,6 +67,11 @@ public sealed class OrgScopeRouteSweepTests
         ["POST /api/org/exercises/{exerciseId:guid}/archive"] = "org-admin exercise archive, resolved InOrganization (a foreign id is the bare 404)",
         ["POST /api/org/people/{personId:guid}/password-reset"] =
             "identity-auth-roles/21: the org admin's staff reset link for a person of the caller's own organization (InOrganization; a foreign id is the bare 404)",
+        ["GET /api/org/people"] = "identity-auth-roles/19: the org people directory, bounded by the caller's organization (InOrganization)",
+        ["GET /api/org/people/{personId:guid}"] =
+            "identity-auth-roles/19: one directory person of the caller's own organization (InOrganization; a foreign id is the bare 404)",
+        ["PATCH /api/org/people/{personId:guid}"] =
+            "identity-auth-roles/19: org-admin grant/revoke and disable/enable of a person of the caller's own organization (InOrganization; a foreign id is the bare 404)",
     };
 
     /// <summary>
