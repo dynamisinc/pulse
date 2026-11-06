@@ -33,6 +33,31 @@ public interface IGenerationProviderCutRegistry
 }
 
 /// <summary>
+/// The startup-only seam that re-marks an exercise as cut to Fake from a persisted row (engine-runtime story 07,
+/// inventory row 1) — WITHOUT the controller audit that accompanies <see cref="IGenerationProviderCutRegistry.Cut"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why a separate, internal interface.</b> <see cref="IGenerationProviderCutRegistry.Cut"/>'s contract is "returns
+/// <c>true</c> on the one call that changed the state", and its caller emits exactly ONE XC-004 audit event for that
+/// transition. A restore at boot is not a controller cutting the provider, so it must not reuse <c>Cut</c> (a caller
+/// could reasonably audit its <c>true</c>). <c>Seed</c> only ever LOWERS egress (it can add a cut, never remove one),
+/// so it cannot be used to re-enable a live provider. Kept off the public interface so the existing implementers
+/// (test doubles) are unaffected and so only <c>Pulse.WebApi</c>'s rehydrator (via <c>InternalsVisibleTo</c>) can reach
+/// it; it resolves by pattern-matching the registered <see cref="IGenerationProviderCutRegistry"/>.
+/// </para>
+/// </remarks>
+internal interface IGenerationProviderCutSeed
+{
+    /// <summary>
+    /// Marks <paramref name="exerciseId"/> as cut to Fake (idempotent) from persisted state at startup. Emits nothing and
+    /// returns nothing to audit; the rehydrator records the restore in its single <c>engine.state_restored</c> event.
+    /// </summary>
+    /// <param name="exerciseId">The exercise to mark cut (COR-001); must not be empty.</param>
+    void Seed(Guid exerciseId);
+}
+
+/// <summary>
 /// The default in-memory <see cref="IGenerationProviderCutRegistry"/> — one independently-settable cut per
 /// exercise, keyed by <c>exerciseId</c>, so a cut on one exercise can never move another's provider resolution
 /// (COR-001). Registered as a singleton by <c>AddEngineGeneration</c>, the sibling of
@@ -45,13 +70,14 @@ public interface IGenerationProviderCutRegistry
 /// follows for <c>auto</c>).
 /// </para>
 /// <para>
-/// <b>Process memory, honestly (out of scope: persistence).</b> Like every other autonomy/tier lever it sits
-/// beside, this state does NOT survive a restart: an App Service recycle returns every exercise to its
-/// startup-configured provider. <c>GET /api/engine/settings</c> reports that fact explicitly rather than
-/// pretending the value is durable.
+/// <b>Process memory, honestly.</b> Like every other autonomy/tier lever it sits beside, this state does NOT
+/// survive a restart on its own: an App Service recycle returns every exercise to its startup-configured provider.
+/// <c>GET /api/engine/settings</c> reports that fact explicitly rather than pretending the value is durable.
+/// Engine-runtime story 07 adds the startup <see cref="IGenerationProviderCutSeed"/> seam its rehydrator uses to
+/// re-mark persisted cuts (the store and rehydrator themselves live in <c>Pulse.WebApi</c>).
 /// </para>
 /// </remarks>
-public sealed class GenerationProviderCutRegistry : IGenerationProviderCutRegistry
+public sealed class GenerationProviderCutRegistry : IGenerationProviderCutRegistry, IGenerationProviderCutSeed
 {
     private readonly ConcurrentDictionary<Guid, byte> _cuts = new();
 
@@ -79,6 +105,18 @@ public sealed class GenerationProviderCutRegistry : IGenerationProviderCutRegist
     {
         EnsureScoped(exerciseId);
         return _cuts.TryRemove(exerciseId, out _);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Engine-runtime story 07: the same idempotent add as <see cref="Cut"/>, but explicitly NOT a controller transition
+    /// — <see cref="Cut"/>'s one-audit-event-per-transition contract is unchanged. A later controller <see cref="Cut"/>
+    /// on a seeded exercise reports <c>false</c> (already cut), and only <see cref="Restore"/> lifts it.
+    /// </remarks>
+    void IGenerationProviderCutSeed.Seed(Guid exerciseId)
+    {
+        EnsureScoped(exerciseId);
+        _cuts.TryAdd(exerciseId, 0);
     }
 
     private static void EnsureScoped(Guid exerciseId)

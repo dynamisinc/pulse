@@ -209,6 +209,27 @@ public sealed class EngineTierPolicyRegistry
     }
 
     /// <summary>
+    /// STARTUP RESTORE ONLY (engine-runtime story 07, decision Q5): installs the exercise's persisted mode EXACTLY — the
+    /// tier policy is a cost and model-selection choice, not an egress raise, so it restores automatically. Implemented
+    /// as <see cref="TrySetMode"/> from the resting <see cref="TierPolicyMode.Auto"/>, so it is atomic with every other
+    /// writer and a mode a controller set before the load reached the exercise (newer than the row) is never overwritten.
+    /// </summary>
+    /// <remarks>No audit event is emitted here; the rehydrator records the restore in its single <c>engine.state_restored</c> event.</remarks>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="mode">The persisted mode (<see cref="TierPolicyMode.Auto"/> installs nothing — absence IS Auto).</param>
+    /// <returns><c>true</c> when the exercise now holds <paramref name="mode"/> from this call (or holds nothing for Auto); <c>false</c> when a newer live mode was kept.</returns>
+    /// <exception cref="ArgumentException"><paramref name="mode"/> is not a defined <see cref="TierPolicyMode"/> (a corrupt row; the rehydrator fails closed, Q7).</exception>
+    internal bool TryInstallPersisted(Guid exerciseId, TierPolicyMode mode)
+    {
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentException($"'{(int)mode}' is not a defined tier-policy mode.", nameof(mode));
+        }
+
+        return TrySetMode(exerciseId, TierPolicyMode.Auto, mode);
+    }
+
+    /// <summary>
     /// Applies the exercise's mode to a composed intent's tier: the exercise's forced tier when an override is
     /// set, otherwise <paramref name="composedTier"/> unchanged (the purpose-based decision the decide stage
     /// already made). This is the ONE read the reaction loop performs per burst.
