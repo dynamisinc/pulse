@@ -423,7 +423,7 @@ public sealed class CredentialEndpointsHttpTests
         using var anonymous = CredentialTestWorld.CreateClient(factory);
         using (var first = await anonymous.PostAsJsonAsync(ResetUri, new { token = used.RawToken, newPassword = CredentialTestWorld.NewPassword }))
         {
-            first.StatusCode.Should().Be(HttpStatusCode.NoContent, "an invite token sets the password too (precondition: now used)");
+            first.StatusCode.Should().Be(HttpStatusCode.OK, "an invite token sets the password too, answering its landing (#575b; precondition: now used)");
         }
 
         var bodies = new List<string>();

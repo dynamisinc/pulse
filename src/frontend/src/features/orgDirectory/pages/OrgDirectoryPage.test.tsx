@@ -14,6 +14,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { OrgDirectoryPage } from './OrgDirectoryPage'
 import {
+  inviteOrgPerson,
   issuePasswordResetLink,
   listOrgPeople,
   OrgPeopleError,
@@ -31,6 +32,7 @@ vi.mock('../services/orgPeopleService', async importOriginal => ({
   listOrgPeople: vi.fn(),
   updateOrgPerson: vi.fn(),
   issuePasswordResetLink: vi.fn(),
+  inviteOrgPerson: vi.fn(),
 }))
 
 const person = (over: Partial<OrgPerson>): OrgPerson => ({
@@ -316,5 +318,74 @@ describe('actions', () => {
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     await waitFor(() =>
       expect(screen.getByTestId('person-action-error').textContent).toContain('no longer in your organization'))
+  })
+})
+
+describe('invite person', () => {
+  const INVITE = 'https://app.example/staff/invite#token=zzz'
+
+  async function openDialog() {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite person' }))
+    return screen.findByTestId('invite-person-dialog')
+  }
+
+  function fill(email: string, name: string) {
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: email } })
+    fireEvent.change(screen.getByLabelText(/^Display name/), { target: { value: name } })
+    fireEvent.click(screen.getByTestId('invite-submit'))
+  }
+
+  it('creates an invite, shows the link once, copies it and refetches the list', async () => {
+    vi.mocked(inviteOrgPerson).mockResolvedValue({
+      personId: 'p-new', inviteUrl: INVITE, emailed: false, created: true,
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await openDialog()
+    const callsBefore = vi.mocked(listOrgPeople).mock.calls.length
+    fill(' new@example.org ', ' Nina New ')
+    expect((await screen.findByTestId('invite-link')).textContent).toBe(INVITE)
+    expect(inviteOrgPerson).toHaveBeenCalledWith({ email: 'new@example.org', displayName: 'Nina New' })
+    expect(screen.getByTestId('invite-link-panel').textContent).toContain('shown once')
+    expect(screen.getByTestId('invite-status').getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('invite-status').textContent).toBe('Invite link created for Nina New.')
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('Invite link created for Nina New.')
+    await waitFor(() =>
+      expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(callsBefore))
+    fireEvent.click(screen.getByTestId('copy-invite-link'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(INVITE))
+    await waitFor(() => expect(screen.getByTestId('invite-status').textContent).toContain('copied'))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByTestId('invite-person-dialog')).toBeNull())
+    expect(screen.queryByText(INVITE)).toBeNull()
+  })
+
+  it('validates email and display name before calling the server', async () => {
+    await openDialog()
+    fill('not-an-email', 'Nina')
+    expect(screen.getByTestId('invite-error').textContent).toContain('valid email')
+    fill('nina@example.org', '   ')
+    expect(screen.getByTestId('invite-error').textContent).toContain('display name')
+    expect(inviteOrgPerson).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [400, 'invalid-email', 'valid email'],
+    [400, 'invalid-display-name', 'display name'],
+    [409, 'already-active', 'already has a password'],
+    [409, 'person-disabled', 'disabled'],
+    [409, 'target-is-org-admin', 'another organization admin'],
+    [503, 'invite-link-unavailable', 'no sign-in address'],
+    [500, undefined, 'Something went wrong'],
+  ] as const)('maps %s %s to plain copy and keeps the form', async (status, code, text) => {
+    vi.mocked(inviteOrgPerson).mockRejectedValue(new OrgPeopleError('x', { status, code }))
+    await openDialog()
+    fill('nina@example.org', 'Nina')
+    await waitFor(() => expect(screen.getByTestId('invite-error').textContent).toContain(text))
+    expect(screen.getByTestId('invite-error').getAttribute('role')).toBe('alert')
+    expect(screen.queryByTestId('invite-link')).toBeNull()
+    expect(screen.getByLabelText(/^Email/)).toBeTruthy()
   })
 })

@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
+using Pulse.WebApi.Features.Identity.Credentials;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
@@ -19,6 +21,9 @@ using Pulse.WebApi.Features.Realtime;
 ///   <item><description><c>GET /api/org/people/{personId}</c> — one person.</description></item>
 ///   <item><description><c>PATCH /api/org/people/{personId}</c> — <c>{ "isOrgAdmin": bool }</c> or
 ///   <c>{ "disabled": bool }</c> (exactly one).</description></item>
+///   <item><description><c>POST /api/org/people/invite</c> — <c>{ "email", "displayName" }</c>: create (or reuse) the person
+///   and issue a single-use invite link, returned once (#575b, <see cref="OrgInviteService"/>). <c>Cache-Control:
+///   no-store</c>, including the filter's 401/403. Takes no id, so it is not on <see cref="PersonIdRoutes"/>.</description></item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -37,6 +42,9 @@ public static class OrgPeopleEndpoints
     /// <summary>One person of the caller's organization.</summary>
     public const string PersonRoute = "/api/org/people/{personId:guid}";
 
+    /// <summary>The org admin's staff invite (#575b).</summary>
+    public const string InviteRoute = "/api/org/people/invite";
+
     /// <summary>The org-tier routes of this slice that take a PERSON id (the allow-list).</summary>
     public static IReadOnlySet<(string Method, string Route)> PersonIdRoutes { get; } =
         new HashSet<(string Method, string Route)> { ("GET", PersonRoute), ("PATCH", PersonRoute) };
@@ -49,10 +57,14 @@ public static class OrgPeopleEndpoints
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<OrgPeopleService>();
+        services.AddScoped<OrgInviteService>();
 
         // Converge with the slices that already register these (TryAdd: same singletons / scoped services, any order).
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddScoped<StaffCallerContext>();
+        services.TryAddScoped<CredentialTokenService>();
+        services.TryAddSingleton<IPulseMailer, NullPulseMailer>();
+        services.TryAddSingleton<JoinUrlBuilder>();
         services.TryAddSingleton<SessionConnectionRegistry>();
         services.TryAddSingleton<ISessionConnectionRevoker, SessionConnectionRevoker>();
 
@@ -73,6 +85,11 @@ public static class OrgPeopleEndpoints
             .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
         endpoints.MapPatch(PersonRoute, UpdateAsync)
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
+
+        // no-store first, so it is on every answer (the filters run outermost-first): a 200 carries a bearer link.
+        endpoints.MapPost(InviteRoute, InviteAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
         return endpoints;
@@ -98,6 +115,29 @@ public static class OrgPeopleEndpoints
         [FromServices] OrgPeopleService service,
         CancellationToken cancellationToken) =>
         ToResult(await service.UpdateAsync(personId, request, cancellationToken));
+
+    private static async Task<IResult> InviteAsync(
+        [FromBody] InviteOrgPersonRequest? request,
+        [FromServices] OrgInviteService service,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.InviteAsync(request, cancellationToken);
+
+        return result.Outcome switch
+        {
+            OrgInviteOutcome.Ok when result.Invite is { } invite => Results.Ok(invite),
+            OrgInviteOutcome.Invalid => Results.BadRequest(new OrgPeopleErrorDto { Error = result.Error ?? OrgPeopleService.InvalidRequestError }),
+            OrgInviteOutcome.Unauthenticated => Results.Unauthorized(),
+            OrgInviteOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+            OrgInviteOutcome.Conflict => Results.Conflict(new OrgPeopleErrorDto { Error = result.Error ?? string.Empty }),
+            OrgInviteOutcome.Unavailable => Results.Json(
+                new OrgPeopleErrorDto { Error = result.Error ?? OrgInviteService.LinkUnavailableError },
+                statusCode: StatusCodes.Status503ServiceUnavailable),
+
+            // Unreachable: an Ok outcome always carries the invite. Fail closed rather than 200 an empty body.
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
 
     /// <summary>
     /// Maps a result to a status. <c>NotFound</c> is a BARE 404 with no body — the same for another customer's person as

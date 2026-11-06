@@ -92,6 +92,11 @@ public sealed class OrganizationScopeSweepTests
         @"//.*\borg-scope-exempt\(\s*(?<reason>\w+)\s*\)\s*:\s*(?<justification>\S.*)$",
         RegexOptions.CultureInvariant);
 
+    /// <summary>Matches a <c>namespace</c> or <c>using</c> directive line (not a <c>using var</c> / <c>using (</c> statement).</summary>
+    private static readonly Regex NamespaceDirective = new(
+        @"^\s*(?:global\s+)?(?:namespace\s+[\w.]+\s*[;{]?|using\s+(?:static\s+)?(?:\w+\s*=\s*)?[\w.]+\s*;)\s*$",
+        RegexOptions.CultureInvariant);
+
     /// <summary>Matches a line that is nothing but a <c>//</c> comment (leading whitespace allowed).</summary>
     private static readonly Regex CommentOnlyLine = new(@"^\s*//", RegexOptions.CultureInvariant);
 
@@ -191,7 +196,8 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/21: +1 for PasswordResetService — a by-id read of the person's OWN organization's name
         // (token.OrganizationId, stamped by the server at issue) for the password policy's context words. Still a
         // by-known-id lookup, never an enumeration.
-        // #602 L-5: +1 for BootstrapService.SlugTakenAsync — an EXISTENCE probe (AnyAsync, no row returned) by the unique
+        // #602 L-5: +1 for OrganizationSlugAllocator.IsTakenAsync (moved out of BootstrapService by #575b and shared with
+        // POST /api/ops/organizations; still one site) — an EXISTENCE probe (AnyAsync, no row returned) by the unique
         // slug, so a re-created default organization takes the backfill's -2/-3 suffix instead of tripping the index.
         ["TenantRoot"] = 3,
     };
@@ -374,7 +380,9 @@ public sealed class OrganizationScopeSweepTests
         // InOrganization exercise), and the Staff tab list read (the exercise just resolved by FindReachableExerciseAsync).
         // identity-auth-roles/19 (#574): OrgPeopleService's enrollments summary — the listed people's enrollments, inner-
         // joined to the caller's InOrganization-bounded exercises (1).
-        ["TenantChecked"] = 17,
+        // #575b: PasswordResetService.HasStaffGrantAsync — does the person whose invite was just redeemed hold an active
+        // staff enrollment (own-only, inner-joined to exercises of the token's own organization) (1).
+        ["TenantChecked"] = 18,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,
@@ -488,6 +496,14 @@ public sealed class OrganizationScopeSweepTests
             for (var i = 0; i < lines.Length; i++)
             {
                 var code = StripLineComment(lines[i]);
+
+                // A namespace or using directive names a NAMESPACE, never a DbSet (#575b: the
+                // Pulse.WebApi.Features.Ops.Organizations slice would otherwise read as an `.Organizations` access).
+                if (NamespaceDirective.IsMatch(code))
+                {
+                    continue;
+                }
+
                 foreach (Match match in pattern.Matches(code))
                 {
                     var chain = ReadExpressionChain(lines, i, match.Index + match.Length);

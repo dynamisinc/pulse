@@ -37,6 +37,7 @@ using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
 using Pulse.WebApi.Features.Ops.Bootstrap;
+using Pulse.WebApi.Features.Ops.Organizations; // #575b
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
 using Pulse.WebApi.Features.Ops.OrgAdminSeed;
 using Pulse.WebApi.Features.OrganizationResolution;
@@ -200,6 +201,7 @@ builder.Services.AddOrgPeople();     // #574 org directory: people list, org-adm
 // Authentication:Bootstrap:Secret is configured. No middleware/ordering constraint: the header secret is
 // the only gate, reusing the single app.UseRateLimiter() below.
 builder.Services.AddOpsBootstrap(builder.Configuration);
+builder.Services.AddOpsOrganizations(builder.Configuration); // #575b POST /api/ops/organizations (secret-gated org provisioning)
 
 // NON-PRODUCTION orgAdmin startup seeder — the missing half of the org tier. orgAdmin shipped as a real
 // server-side role with its own authorization filter and endpoints (Features/ExerciseLifecycleAdmin), but
@@ -526,6 +528,7 @@ app.MapDayWordEndpoints();                 // easy-login 05 POST /api/auth/word 
 app.MapRosterEndpoints();                  // easy-login 02 GET/POST /api/staff/roster, POST /api/staff/roster/import
 app.MapLinkCardEndpoints();                // easy-login 04 POST /api/staff/roster/cards
 app.MapLinkEmailEndpoints();               // easy-login 13 POST /api/staff/roster/email-links (503 until email is configured)
+app.MapOpsOrganizationEndpoints();        // #575b POST /api/ops/organizations (secret-gated org + first-admin invite; 404 when unconfigured)
 app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
 app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-content (secret-gated engine drive path; 404 when unconfigured)
 

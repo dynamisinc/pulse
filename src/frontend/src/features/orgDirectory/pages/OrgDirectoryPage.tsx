@@ -22,11 +22,13 @@ import {
   faChevronLeft,
   faChevronRight,
   faMagnifyingGlass,
+  faUserPlus,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
 import { useOptionalSession, usePermissions } from '@/core/auth'
-import { CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
+import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
+import { InvitePersonDialog } from '../components/InvitePersonDialog'
 import { OrgPeopleTable } from '../components/OrgPeopleTable'
 import { useOrgPeople } from '../hooks/useOrgPeople'
 
@@ -40,6 +42,7 @@ function Directory() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [announcement, setAnnouncement] = useState('')
+  const [inviting, setInviting] = useState(false)
   const people = useOrgPeople({ search, page, pageSize: DIRECTORY_PAGE_SIZE })
 
   const submit = (event: FormEvent) => {
@@ -73,7 +76,19 @@ function Directory() {
         >
           Search
         </CobraSecondaryButton>
+        <CobraPrimaryButton
+          type="button"
+          onClick={() => setInviting(true)}
+          startIcon={<FontAwesomeIcon icon={faUserPlus} aria-hidden="true" />}
+          sx={{ ml: 'auto' }}
+        >
+          Invite person
+        </CobraPrimaryButton>
       </Box>
+
+      {inviting && (
+        <InvitePersonDialog onClose={() => setInviting(false)} onSuccess={setAnnouncement} />
+      )}
 
       <div role="status" aria-live="polite" data-testid="org-people-status">{status}</div>
       <div role="status" aria-live="polite" data-testid="org-people-action-status">{announcement}</div>

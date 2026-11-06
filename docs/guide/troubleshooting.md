@@ -156,7 +156,7 @@ When a new version is ready, the player sees a small banner, **A fresh version i
 | Message | What it means | What to do |
 |---|---|---|
 | "Those credentials weren't recognized." | The username or secret is wrong. | Check both and try again. The secret field clears after a failed attempt. |
-| "You're not assigned to this exercise. Contact your planner." | Your username and secret are correct, but you have no role on the exercise at this address. | Check that you are using the right exercise address. Ask Dynamis support to assign you. |
+| "You're not assigned to this exercise. Contact your planner." | Your username and secret are correct, but you have no role on the exercise at this address. | Check that you are using the right exercise address. Ask your planner or org admin to assign you. |
 | "This address isn't configured for staff sign-in — check the URL your planner gave you." | The web address does not belong to an exercise. | Check the address. Staff sign-in is the exercise address followed by `/staff/login`. |
 
 **"This link is invalid or has expired."** (on the set-password page): a reset link works once, for 60
@@ -285,7 +285,8 @@ alerts"), for Dynamis staff.
 | For | Contact |
 |---|---|
 | Player questions on the day | Your exercise staff help point: **[to be filled in for your exercise]** |
-| Staff accounts, assignments, staging an exercise, view-only codes, email setup, server problems | Dynamis support: **[support contact to be confirmed]** |
+| Staging an exercise, view-only codes, email setup, server problems, a new organization | Dynamis support: **[support contact to be confirmed]** |
+| Staff accounts and assignments | Your org admin (**People** → **Invite person**) or your planner (**Staff**) |
 | Urgent problems during a live exercise | **[escalation contact to be confirmed]** |
 
 When you report a problem, include the exercise name, the time (in real time), what the person was

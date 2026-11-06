@@ -197,14 +197,17 @@ internal sealed class CredentialProbeFactory : WebApplicationFactory<Program>
     private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
     private readonly string? _frontendBaseUrl;
     private readonly Action<IServiceCollection>? _configureServices;
+    private readonly System.Collections.Generic.IReadOnlyDictionary<string, string?>? _settings;
 
     public CredentialProbeFactory(
         string connectionString,
         string? frontendBaseUrl = CredentialTestWorld.FrontendBaseUrl,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, string?>? settings = null)
     {
         _frontendBaseUrl = frontendBaseUrl;
         _configureServices = configureServices;
+        _settings = settings;
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
     }
 
@@ -214,8 +217,13 @@ internal sealed class CredentialProbeFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
-            new System.Collections.Generic.Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = _frontendBaseUrl ?? string.Empty }));
+        var settings = new System.Collections.Generic.Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = _frontendBaseUrl ?? string.Empty };
+        foreach (var (key, value) in _settings ?? new System.Collections.Generic.Dictionary<string, string?>())
+        {
+            settings[key] = value;
+        }
+
+        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
         if (_configureServices is not null)
         {
             builder.ConfigureTestServices(_configureServices);
