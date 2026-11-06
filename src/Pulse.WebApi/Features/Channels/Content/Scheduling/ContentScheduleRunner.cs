@@ -232,11 +232,14 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 
             var running = clock.IsRunning(group.Key);
 
-            // Not live (staged, lifecycle-paused, ...): nothing publishes, but going live or resuming is NOT a clock change
-            // and wakes nothing, so while this exercise's clock runs its items stay WAITING and the cadence continues.
+            // Not live: nothing publishes. Going live (StartEx, a resume) is NOT a clock change and wakes nothing, so while
+            // the clock of an exercise that can still GET to live (build, staged, paused) runs, its items stay WAITING and
+            // the cadence continues. A completed or archived exercise never goes live again, so it leaves the runner asleep.
             if (!ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires)
             {
-                waiting += running ? group.Count() : 0;
+                var canGoLive = ExerciseLifecycleStates.IsTransitionAllowed(exercise.Status, ExerciseLifecycleStates.Live)
+                    || ExerciseLifecycleStates.IsTransitionAllowed(exercise.Status, ExerciseLifecycleStates.Staged);
+                waiting += running && canGoLive ? group.Count() : 0;
                 continue;
             }
 

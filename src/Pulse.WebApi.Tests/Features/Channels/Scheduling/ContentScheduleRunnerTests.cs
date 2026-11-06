@@ -528,6 +528,9 @@ public sealed class ContentScheduleRunnerTests : IDisposable
         (await Runner().SweepAsync()).Should().Be(
             (0, 1), "StartEx is not a clock change and wakes nothing, so the runner must not sleep through it");
 
+        SetStatus(_harness.ExerciseId, "completed");
+        (await Runner().SweepAsync()).Waiting.Should().Be(0, "a completed exercise never goes live again: the runner may sleep");
+
         SetStatus(_harness.ExerciseId, "live");
         (await Runner().SweepAsync()).Should().Be((1, 0), "the next cadence sweep publishes it");
         (await _harness.ItemAsync(id)).Status.Should().Be("published");
