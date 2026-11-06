@@ -193,6 +193,45 @@ describe('liveOverlayStateStore — ended (read-only review)', () => {
     expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
   })
 
+  it('switching exercise drops the old ended snapshot at once and re-reads, with no push needed', async () => {
+    liveOverlayStateStore.bindExercise('exercise-a')
+    resolveGet(wireState({ ended: true, sequence: 3 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(true)
+
+    const getsBeforeSwitch = getMock.mock.calls.length
+    resolveGet(wireState({ ended: false, sequence: 1 }))
+    liveOverlayStateStore.bindExercise('exercise-b')
+
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+    await flush()
+    expect(getMock).toHaveBeenCalledTimes(getsBeforeSwitch + 1)
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+  })
+
+  it('a GET still in flight for the old exercise cannot latch the new one', async () => {
+    liveOverlayStateStore.bindExercise('exercise-a')
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+
+    let answerOldGet: (value: unknown) => void = () => undefined
+    getMock.mockReturnValueOnce(new Promise(resolve => {
+      answerOldGet = resolve
+    }))
+    connection.setState(HubConnectionState.Connected)
+    resolveGet(wireState({ ended: false, sequence: 1 }))
+    liveOverlayStateStore.bindExercise('exercise-b')
+    await flush()
+
+    answerOldGet({ data: wireState({ ended: true, sequence: 9 }) })
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+    connection.push(wireState({ ended: false, sequence: 10 }))
+    expect(liveOverlayStateStore.getSnapshot().ended).toBe(false)
+  })
+
   it('re-binding the SAME exercise keeps the latch', async () => {
     liveOverlayStateStore.bindExercise('exercise-a')
     resolveGet(wireState({ ended: true, sequence: 3 }))

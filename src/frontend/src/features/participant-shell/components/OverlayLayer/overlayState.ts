@@ -487,11 +487,24 @@ function onBecameVisible(listener: () => void): () => void {
  */
 function bindLiveExercise(exerciseId: string): void {
   if (exerciseId === liveExerciseId) return
+  const previous = liveExerciseId
   liveExerciseId = exerciseId
-  if (endedLatched && endedLatchedFor !== exerciseId) {
+  // A latch set before any bind (endedLatchedFor null) belongs to this first exercise: keep it.
+  if (endedLatched && endedLatchedFor !== null && endedLatchedFor !== exerciseId) {
     endedLatched = false
     endedLatchedFor = null
   }
+  if (endedLatched && endedLatchedFor === null) endedLatchedFor = exerciseId
+  // A SWITCH (not the first bind, which must not discard the seed GET): the snapshot is the old
+  // exercise's. Drop its `ended`, discard any GET still in flight for it (it would otherwise latch
+  // the new exercise), and re-read the new one.
+  if (previous === null) return
+  fetchGeneration += 1
+  if (liveSnapshot.ended) {
+    liveSnapshot = { ...liveSnapshot, ended: false }
+    notifyLive()
+  }
+  if (liveStarted) void refetchLive()
 }
 
 /**
@@ -501,7 +514,8 @@ function bindLiveExercise(exerciseId: string): void {
  * participant shell is mounted with live data); the GET is the same ordering-guarded `refetchLive`.
  */
 function relearnAfterRefusedWrite(): void {
-  if (liveStarted) void refetchLive()
+  // Once ended is latched there is nothing left to learn: a burst of refused writes costs no GETs.
+  if (liveStarted && !endedLatched) void refetchLive()
 }
 
 /**
@@ -681,5 +695,7 @@ export function useExerciseEnded(): boolean {
   // un-end the tab - see `endedLatchedFor`).
   const scope = useOptionalExerciseContext()
   if (settled) return state.ended
-  return state.ended || scope?.status === 'completed'
+  // The legacy `complete` literal is `completed` too: with `full` projected for both (F-1),
+  // this seed is the only thing hiding write controls before the overlay answers.
+  return state.ended || scope?.status === 'completed' || scope?.status === 'complete'
 }

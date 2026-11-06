@@ -55,8 +55,8 @@ describe('useExerciseEnded', () => {
     await waitFor(() => expect(result.current).toBe(true))
   })
 
-  it('seeds true from scope.status === completed BEFORE the overlay answer lands', async () => {
-    scope.status = 'completed'
+  it.each(['completed', 'complete'] as const)('seeds true from scope.status === %s BEFORE the overlay answer lands', async status => {
+    scope.status = status
     overlay.gate = new Promise<void>(resolve => { overlay.release = resolve })
     const { result } = run()
     expect(result.current).toBe(true)
