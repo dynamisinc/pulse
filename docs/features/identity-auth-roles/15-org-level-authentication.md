@@ -149,7 +149,7 @@ own stated practice (coin new IDs in the epic first, not in a downstream doc) â€
   empty organization to serve a console from) â€” that is real follow-on frontend work, tracked here as a
   named gap, not built by this story. This story's own AC1 is satisfiable by any request shape the backend
   accepts (e.g. a new endpoint, or the existing one with an optional `exerciseId`); it does not require or
-  imply a particular UI.
+  imply a particular UI. *Now tracked as story 27 (#835); the shared console host is story 28 (#836).*
 - **Provisioning the FIRST `orgAdmin` of a brand-new organization in a real (non-seeded) production
   deployment.** This remains unanswered after this story lands. `BootstrapService.CanonicalStaffRoles`
   (`src/Pulse.WebApi/Features/Ops/Bootstrap/BootstrapService.cs`, line ~82) accepts only

@@ -8,4 +8,5 @@
  */
 
 import './newsExtension'
+import './newsline7'
 import './courier-ledger'
