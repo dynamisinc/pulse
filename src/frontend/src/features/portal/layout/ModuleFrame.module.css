@@ -1,0 +1,102 @@
+/* features/portal/layout/ModuleFrame.module.css
+ * Skin variables (`--pulse-skin-*`, story F13) with neutral fallbacks: never a COBRA or
+ * stock-MUI look. No fixed widths, so a frame fits a 320 px column. */
+
+.frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-skin-space, 8px);
+  min-width: 0;
+  color: var(--pulse-skin-text, #1a1a1a);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pulse-skin-space, 8px);
+  border-bottom: var(--pulse-skin-rule-weight, 2px) solid var(--pulse-skin-rule, #c8c8c8);
+  padding-bottom: calc(var(--pulse-skin-space, 8px) / 2);
+}
+
+.heading {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--pulse-skin-font-hed, Georgia, serif);
+  font-size: 1.25rem;
+  line-height: 1.25;
+  text-transform: var(--pulse-skin-hed-transform, none);
+  font-variant-caps: var(--pulse-skin-hed-caps, normal);
+}
+
+.seeAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375em;
+  color: var(--pulse-skin-link, #0b57b0);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.seeAll:focus-visible {
+  outline: 3px solid var(--pulse-skin-link, #0b57b0);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.seeAllIcon {
+  font-size: 0.8em;
+}
+
+/* NFR-001: 44 px targets on touch. */
+@media (pointer: coarse) {
+  .seeAll {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+.body {
+  min-width: 0;
+}
+
+/* A quiet, static skeleton (no animation, so nothing to reduce under reduced motion). */
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-skin-space, 8px);
+}
+
+.skeletonLine,
+.skeletonLineShort {
+  display: block;
+  height: 0.875rem;
+  border-radius: var(--pulse-skin-radius, 4px);
+  background: var(--pulse-skin-rule, #c8c8c8);
+  opacity: 0.5;
+}
+
+.skeletonLineShort {
+  width: 60%;
+}
+
+/* Visually hidden, still read by assistive technology. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
