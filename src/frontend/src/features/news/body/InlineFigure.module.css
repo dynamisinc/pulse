@@ -1,0 +1,30 @@
+/*
+ * features/news/body/InlineFigure.module.css
+ * The caption treatment per `skin.media.captionStyle`. Fonts and colours only through the
+ * outlet skin's variables (FC-3b), with neutral fallbacks.
+ */
+
+.inline {
+  max-width: 100%;
+}
+
+.inline figcaption {
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+  color: var(--pulse-skin-text, #3d4451);
+}
+
+.inline[data-caption-style='italic-serif'] figcaption {
+  font-family: var(--pulse-skin-font-body, Georgia, serif);
+  font-style: italic;
+}
+
+.inline[data-caption-style='small-caps'] figcaption {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+
+.inline[data-caption-style='shouty'] figcaption {
+  font-family: var(--pulse-skin-font-hed, system-ui, sans-serif);
+  font-weight: 700;
+  text-transform: uppercase;
+}
