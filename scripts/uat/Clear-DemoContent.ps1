@@ -36,8 +36,10 @@
          vetoed and the items it archived) under $env:LOCALAPPDATA\Pulse\demo-restore\. Pass it to
          -RestoreManifest to put everything back. A restore refuses a manifest from another database. An
          archived item whose Inject # a live item holds by then (a newer import) stays archived and is
-         reported, because two live items can never share an Inject #. A restored item that was firing
-         publishes its remaining posts at once, unless PAUSE INJECTS or FREEZE is on; the restore says which.
+         reported, because two live items can never share an Inject #. A restored item that was firing is
+         put back firing by SQL, which does not wake the API's sleeping burst runner: Hold it, then Release it
+         in the console to resume its remaining posts (or wait for the runner's safety sweep, every 12 h by
+         default). The restore names each one.
 
     All of it is one transaction: everything is cleared and the manifest written, or nothing changes. The
     manifest is written just before the commit. If the commit itself fails, whether it landed is unknown, so
@@ -208,7 +210,7 @@ try {
             $restored = @(Invoke-Sql $RestoreItemSql ($parameters + @{ '@now' = $now }) -Transaction $transaction)
             if ($restored.Count -eq 1) {
                 $items++
-                if ($restored[0].Status -eq 'firing') { $notes.Add("Inject # $($item.externalRef) was firing when archived: it publishes its remaining posts now, unless PAUSE INJECTS or FREEZE is on.") }
+                if ($restored[0].Status -eq 'firing') { $notes.Add("Inject # $($item.externalRef) was firing when archived: Hold, then Release it in the console to resume its remaining posts (a SQL restore does not wake the burst runner).") }
                 continue
             }
             $holder = Invoke-Sql $TakenBySql $parameters -Transaction $transaction -Scalar

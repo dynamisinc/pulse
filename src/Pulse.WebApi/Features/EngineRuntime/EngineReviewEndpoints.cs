@@ -12,6 +12,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
+using Pulse.WebApi.Features.BackgroundWork;
+using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
 using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
@@ -96,6 +98,8 @@ public static class EngineReviewEndpoints
         services.RemoveAll<IProviderHealthListener>();
         services.AddSingleton<IProviderHealthListener, EngineAutonomyProviderHealthListener>();
 
+        // The tick sleeps while nothing counts down; countdown-starting writes wake it (see EngineReviewTickSignal).
+        services.AddWakeSignal<EngineReviewTickSignal>(wakeOnClockChange: true);
         services.AddHostedService<EngineReviewTickHost>();
 
         return services;

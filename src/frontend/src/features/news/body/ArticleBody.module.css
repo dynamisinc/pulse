@@ -1,0 +1,47 @@
+/*
+ * features/news/body/ArticleBody.module.css
+ * The article measure and paragraph rhythm. Fonts and colours come only from the outlet
+ * skin's variables (FC-3b); F14's `SanitizedBody` styles links (underlined) and headings.
+ */
+
+.articleBody {
+  width: 100%;
+  min-width: 0;
+  /* ~66 characters a line on desktop; the column is narrower than this on a phone. */
+  max-width: 66ch;
+  font-size: var(--pulse-skin-body-size, max(1rem, 16px));
+}
+
+.articleBody :global([data-testid='sanitized-body']) {
+  /* Paragraph rhythm scales with the skin's spacing (density.spacingScale x 8px). */
+  --news-body-gap: calc(var(--pulse-skin-space, 8px) * 2);
+}
+
+.articleBody :global([data-testid='sanitized-body']) > :where(p, ul, ol) {
+  margin: 0 0 var(--news-body-gap);
+}
+
+.articleBody :global([data-testid='sanitized-body']) > :where(h2, h3) {
+  color: var(--pulse-skin-text, #1b1f24);
+  text-transform: var(--pulse-skin-hed-transform, none);
+  font-variant-caps: var(--pulse-skin-hed-caps, normal);
+}
+
+.articleBody :global([data-testid='sanitized-body']) > h2 {
+  font-size: 1.375em;
+}
+
+.articleBody :global([data-testid='sanitized-body']) > h3 {
+  font-size: 1.15em;
+}
+
+/* The drop cap (skin `ext.news.dropCap`): the first letter of the first paragraph. */
+.dropCap :global([data-testid='sanitized-body']) > p:first-of-type::first-letter {
+  float: left;
+  margin: 0.05em 0.08em 0 0;
+  font-family: var(--pulse-skin-font-hed, inherit);
+  font-size: 3.4em;
+  font-weight: 700;
+  line-height: 0.85;
+  color: var(--pulse-skin-text, #1b1f24);
+}
