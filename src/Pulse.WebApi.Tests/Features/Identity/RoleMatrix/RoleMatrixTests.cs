@@ -216,6 +216,7 @@ public sealed class RoleMatrixTests
         Probe("PATCH /api/org/exercises/{exerciseId:guid}", OrgAdminOrPlanner);
         Probe("POST /api/org/exercises/{exerciseId:guid}/archive", OrgAdminOrPlanner);
         Probe("POST /api/org/people/{personId:guid}/password-reset", OrgAdminOnly); // identity-auth-roles/21 (§3.3 admin reset)
+        Probe("PATCH /api/org/people/{personId:guid}", OrgAdminOnly); // identity-auth-roles/19 (org directory: grant / disable)
 
         // ---- Configuration: planner only. Lead assignment: planner only. ----
         Probe("PUT /api/staff/exercise-settings", PlannerOnly);

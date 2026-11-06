@@ -102,6 +102,47 @@ public static class StaffChangeRecorder
             OccurredAt = now,
         });
     }
+
+    /// <summary>
+    /// The ORG-LEVEL overload (identity-auth-roles/19): stages ONLY the <see cref="OrgAuditEvent"/> of a change that
+    /// touches no exercise (grant/revoke <c>OrgRole</c>, disable/enable a person). No XC-004 <see cref="TelemetryEvent"/>
+    /// is staged: that table requires a real exercise (the write guard refuses <see cref="Guid.Empty"/>), and inventing
+    /// one would misattribute the change. The caller saves, in the same unit of work as the mutation.
+    /// </summary>
+    /// <param name="dbContext">The unit of work to stage into.</param>
+    /// <param name="organizationId">The organization the audit record is scoped to (the caller's server-resolved tenant).</param>
+    /// <param name="actor">The acting human, their role and session.</param>
+    /// <param name="subjectPersonId">The person the change is about.</param>
+    /// <param name="auditKind">The org-audit kind.</param>
+    /// <param name="payload">The opaque JSON payload (never a secret).</param>
+    /// <param name="now">The ONE server wall-clock read of the operation.</param>
+    public static void Stage(
+        PulseDbContext dbContext,
+        Guid organizationId,
+        StaffChangeActor actor,
+        Guid subjectPersonId,
+        string auditKind,
+        string payload,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentException.ThrowIfNullOrEmpty(auditKind);
+        ArgumentException.ThrowIfNullOrEmpty(payload);
+
+        dbContext.OrgAuditEvents.Add(new OrgAuditEvent
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            Kind = auditKind,
+            Outcome = SuccessOutcome,
+            ActorPersonId = actor.PersonId,
+            SubjectPersonId = subjectPersonId,
+            ExerciseId = null,
+            Payload = payload,
+            OccurredAt = now,
+        });
+    }
 }
 
 /// <summary>The human behind a staff change: their person id, their role and the session they acted through.</summary>

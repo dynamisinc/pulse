@@ -369,7 +369,9 @@ public sealed class OrganizationScopeSweepTests
         // enrollment, correlated to the InOrganization-bounded exercise rows of the same query (1).
         // identity-auth-roles/21 (adversarial review W1 on #665): +1 — EnrollmentService.SetLeadAsync re-reads its own
         // caller-reachable target inside the lead transaction to confirm it really became the live lead.
-        ["TenantChecked"] = 13,
+        // identity-auth-roles/19 (#574): OrgPeopleService's enrollments summary — the listed people's enrollments, inner-
+        // joined to the caller's InOrganization-bounded exercises (1).
+        ["TenantChecked"] = 14,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

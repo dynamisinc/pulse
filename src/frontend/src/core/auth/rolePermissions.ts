@@ -23,6 +23,9 @@
  *   renameExercise (org row)                orgAdmin, planner      (not controller)
  *   archiveExercise (lifecycle + org row)   orgAdmin, planner      (not controller)
  *   unarchiveExercise                       orgAdmin
+ *   manageOrgPeople (people directory: list,
+ *     grant/revoke org admin, disable/enable,
+ *     reset link; story 19)                 orgAdmin               (every other role refused)
  *   stageExercise / unstageExercise         planner
  *   startExercise, pauseExercise,
  *     resumeExercise, endExercise,
@@ -53,6 +56,7 @@ export type StaffAction =
   | 'renameExercise'
   | 'archiveExercise'
   | 'unarchiveExercise'
+  | 'manageOrgPeople'
   | 'stageExercise'
   | 'unstageExercise'
   | 'startExercise'
@@ -92,6 +96,7 @@ const ROLE_RULES: Readonly<Partial<Record<StaffAction, readonly SessionRole[]>>>
   renameExercise: ['orgAdmin', 'planner'],
   archiveExercise: ['orgAdmin', 'planner'],
   unarchiveExercise: ['orgAdmin'],
+  manageOrgPeople: ['orgAdmin'],
   stageExercise: ['planner'],
   unstageExercise: ['planner'],
   startExercise: ['controller'],
