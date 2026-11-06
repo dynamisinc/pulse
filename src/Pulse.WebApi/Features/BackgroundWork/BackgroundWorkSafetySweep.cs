@@ -32,6 +32,9 @@ public sealed partial class BackgroundWorkSafetySweep : BackgroundService
     /// <summary>The interval when none is configured.</summary>
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromHours(12);
 
+    /// <summary>The longest interval honoured; a longer configured value is clamped to it.</summary>
+    public static readonly TimeSpan MaxInterval = TimeSpan.FromDays(30);
+
     private readonly IReadOnlyList<WakeSignal> _signals;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BackgroundWorkSafetySweep> _logger;
@@ -74,7 +77,13 @@ public sealed partial class BackgroundWorkSafetySweep : BackgroundService
             return DefaultInterval;
         }
 
-        return interval > TimeSpan.Zero ? interval : Timeout.InfiniteTimeSpan;
+        if (interval <= TimeSpan.Zero)
+        {
+            return Timeout.InfiniteTimeSpan;
+        }
+
+        // Task.Delay throws past ~49.7 days, which would take the host down from ExecuteAsync.
+        return interval > MaxInterval ? MaxInterval : interval;
     }
 
     /// <summary>Wakes every registered signal once.</summary>

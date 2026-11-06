@@ -167,6 +167,27 @@ public sealed class IdleBackgroundWorkTests
     }
 
     [Fact]
+    public void Pacer_OnlyTheClockDecidesTheSleep_NotTheFreezeTier()
+    {
+        // Leaving Freeze unfreezes the clock (the wake) BEFORE the tier is written: a sweep in that gap sees tier Freeze
+        // over a running clock. Sleeping on it would spend the wake and leave noise silent until the safety sweep.
+        var clock = new ExerciseClockService(TimeProvider.System);
+        var tiers = new PauseTierRegistry(clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance);
+        var leavingFreeze = Guid.NewGuid();
+        var frozen = Guid.NewGuid();
+        var unstarted = Guid.NewGuid();
+        clock.Start(leavingFreeze, DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+        tiers.Restore(leavingFreeze, PauseTier.Freeze);
+        clock.Start(frozen, DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+        clock.Freeze(frozen);
+
+        WhiteNoiseService.IsTierOrClockStopped(tiers, clock, leavingFreeze).Should().BeTrue("nothing posts under Freeze");
+        WhiteNoisePacer.KeepsThePacerAwake(clock, leavingFreeze).Should().BeTrue("its clock is running");
+        WhiteNoisePacer.KeepsThePacerAwake(clock, frozen).Should().BeFalse();
+        WhiteNoisePacer.KeepsThePacerAwake(clock, unstarted).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Pacer_SleepsUnlessAnExerciseCanPost_AndWakesOnLevelAndClockChanges()
     {
         var databaseName = Guid.NewGuid().ToString();
@@ -288,6 +309,16 @@ public sealed class IdleBackgroundWorkTests
     public void SafetySweep_ZeroOrNegative_DisablesTheNet(string configured)
     {
         BackgroundWorkSafetySweep.ResolveInterval(configured).Should().Be(Timeout.InfiniteTimeSpan);
+    }
+
+    [Theory]
+    [InlineData("60.00:00:00")]
+    [InlineData("10675199.02:48:05")]
+    public void SafetySweep_AnIntervalPastTheTimerLimit_IsClampedToThirtyDays(string configured)
+    {
+        // Task.Delay throws past ~49.7 days; an unclamped value would crash the host from ExecuteAsync.
+        BackgroundWorkSafetySweep.ResolveInterval(configured).Should().Be(BackgroundWorkSafetySweep.MaxInterval);
+        BackgroundWorkSafetySweep.MaxInterval.Should().Be(TimeSpan.FromDays(30));
     }
 
     [Fact]

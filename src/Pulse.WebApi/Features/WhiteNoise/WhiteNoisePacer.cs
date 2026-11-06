@@ -174,8 +174,8 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     /// <see cref="WhiteNoisePacerOptions.IdleSleep"/> (until woken) otherwise.
     /// </summary>
     /// <param name="exercisesThatCanPost">
-    /// How many exercises the sweep found with a pool, noise on, and not stopped in memory (Freeze, a frozen or
-    /// unstarted clock).
+    /// How many exercises the sweep found with a pool, noise on, and a running clock (not stopped in memory, or stopped
+    /// only by the Freeze tier: see <see cref="KeepsThePacerAwake"/>).
     /// </param>
     /// <param name="options">The cadence.</param>
     /// <returns>The wait (a wake-up still cuts it short).</returns>
@@ -183,6 +183,21 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     {
         ArgumentNullException.ThrowIfNull(options);
         return exercisesThatCanPost > 0 ? options.TickInterval : options.IdleSleep;
+    }
+
+    /// <summary>
+    /// Whether a STOPPED exercise still keeps the pacer ticking: only the clock decides the sleep, never the Freeze
+    /// tier. Leaving Freeze unfreezes the clock (which wakes the pacer) BEFORE the tier is written, so a sweep in that
+    /// gap sees tier Freeze over a running clock; sleeping on it would spend the wake and leave noise silent until the
+    /// safety sweep. A successful Freeze always freezes the clock, so a frozen or unstarted clock still sleeps.
+    /// </summary>
+    /// <param name="clock">The exercise clocks.</param>
+    /// <param name="exerciseId">The stopped exercise.</param>
+    /// <returns><c>true</c> when its clock is running.</returns>
+    public static bool KeepsThePacerAwake(IExerciseClock clock, Guid exerciseId)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        return clock.IsRunning(exerciseId) && !clock.IsFrozen(exerciseId);
     }
 
     /// <summary>
@@ -256,6 +271,11 @@ public sealed partial class WhiteNoisePacer : BackgroundService
             if (WhiteNoiseService.IsTierOrClockStopped(_pauseTiers, _clock, exerciseId))
             {
                 _scheduler.IsDue(exerciseId, NoiseRates.Off, stopped: true, _timeProvider.GetUtcNow());
+                if (KeepsThePacerAwake(_clock, exerciseId))
+                {
+                    canPost++;
+                }
+
                 continue;
             }
 
