@@ -112,3 +112,65 @@ describe('SanitizedBody: nested table captions', () => {
     expect(screen.getByRole('region', { name: 'Table: Inner' })).toBeInTheDocument()
   })
 })
+
+describe('SanitizedBody: inline media placeholders (news 06)', () => {
+  function renderMedia(
+    bodyHtml: string,
+    renderInlineMedia?: (id: string, caption: string | null) => React.ReactNode,
+  ) {
+    return render(
+      <MemoryRouter>
+        <SanitizedBody bodyHtml={bodyHtml} renderInlineMedia={renderInlineMedia} />
+      </MemoryRouter>,
+    )
+  }
+
+  it('swaps each figure[data-media-id] for a host filled by the render prop, with the author caption', () => {
+    const renderMediaFn = vi.fn((id: string, caption: string | null) => (
+      <figure data-testid={`media-${id}`}>{caption ?? 'no caption'}</figure>
+    ))
+    const { container } = renderMedia(
+      '<p>a</p><figure data-media-id="m1"><figcaption> Crews at work </figcaption></figure>'
+      + '<figure data-media-id="m2"></figure><p>b</p>',
+      renderMediaFn,
+    )
+    expect(screen.getByTestId('media-m1')).toHaveTextContent('Crews at work')
+    expect(screen.getByTestId('media-m2')).toHaveTextContent('no caption')
+    // The placeholder figure is gone (no nested figure), and the hosts sit in body order.
+    const body = screen.getByTestId('sanitized-body')
+    expect(body.querySelectorAll(':scope > figure')).toHaveLength(0)
+    const hosts = [...body.querySelectorAll('[data-media-host]')]
+    expect(hosts.map(host => host.firstElementChild?.getAttribute('data-testid')))
+      .toEqual(['media-m1', 'media-m2'])
+    expect(hosts.every(host => host.parentElement === body)).toBe(true)
+    expect(container.querySelector('figcaption')).toBeNull()
+  })
+
+  it('a render that returns nothing leaves an empty host (no broken image, no caption)', () => {
+    renderMedia('<figure data-media-id="gone"><figcaption>orphan</figcaption></figure>', () => null)
+    const host = screen.getByTestId('sanitized-body').querySelector('[data-media-host]')
+    expect(host).not.toBeNull()
+    expect(host?.childNodes).toHaveLength(0)
+    expect(screen.queryByText('orphan')).toBeNull()
+  })
+
+  it('with no render prop the figure placeholder renders nothing', () => {
+    renderMedia('<figure data-media-id="m1"><figcaption>cap</figcaption></figure>')
+    expect(screen.queryByText('cap')).toBeNull()
+  })
+
+  it('a figure without data-media-id is left as authored', () => {
+    renderMedia('<figure><figcaption>plain</figcaption></figure>', () => <span>x</span>)
+    expect(screen.getByText('plain').closest('figure')).not.toBeNull()
+  })
+
+  it('a placeholder nested in another is never mounted into detached DOM', () => {
+    const renderMediaFn = vi.fn((id: string) => <span data-testid={`media-${id}`}>{id}</span>)
+    renderMedia(
+      '<figure data-media-id="outer"><figure data-media-id="inner"></figure></figure>',
+      renderMediaFn,
+    )
+    expect(renderMediaFn.mock.calls.map(([id]) => id)).toEqual(['outer'])
+    expect(screen.getByTestId('media-outer').isConnected).toBe(true)
+  })
+})

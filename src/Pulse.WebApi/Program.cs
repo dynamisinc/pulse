@@ -30,6 +30,7 @@ using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.Press;                  // press-room 01
 using Pulse.WebApi.Features.Weather;                // weather-source 01
+using Pulse.WebApi.Features.News;                   // news-network 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -304,6 +305,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 builder.Services.AddChannels();
 builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01), zones (02); read, delivery follow
 builder.Services.AddPress();                    // press-room (E5): release kind, seam defaults, org newsrooms (01)
+builder.Services.AddNewsChannel();              // news-network (E4): article kind descriptor + article-rich body profile (01)
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -352,8 +354,11 @@ app.UseCors(FrontendCorsPolicy);
 // (/health) is deliberately DB-independent — a DB hang must never delay the liveness 200 into an
 // instance recycle. (Middleware-vs-endpoint order is not governed by map order, so excluding the
 // path here is what actually keeps liveness DB-free.)
+// Also scoped OFF the bare root "/": nothing is mapped there (the default-deny fallback answers it), and App Service AlwaysOn pings
+// it every few minutes — resolving the exercise for each ping was a database query that alone kept
+// the serverless database from ever auto-pausing.
 app.UseWhen(
-    context => !context.Request.Path.StartsWithSegments("/health"),
+    context => !IsExerciseResolutionExempt(context.Request.Path),
     branch => branch.UseExerciseResolution());
 
 // Session authentication (identity-auth-roles/03) — MUST run AFTER UseExerciseResolution so an
@@ -567,4 +572,15 @@ app.MapWhiteNoise();          // demo-feedback 05 GET /api/staff/noise (any staf
 app.Run();
 
 // Reachable by WebApplicationFactory<Program> in Pulse.WebApi.Tests.
-public partial class Program { }
+public partial class Program
+{
+    /// <summary>
+    /// The paths that skip host-based exercise resolution (a database lookup): the liveness and readiness probes
+    /// under <c>/health</c>, which must stay database-independent, and the bare root <c>/</c>, which maps no endpoint and is
+    /// what App Service AlwaysOn pings every few minutes (resolving it kept the serverless database awake).
+    /// </summary>
+    /// <param name="path">The request path.</param>
+    /// <returns><c>true</c> when the request must not trigger exercise resolution.</returns>
+    public static bool IsExerciseResolutionExempt(PathString path) =>
+        path.StartsWithSegments("/health") || path.Value is null or "" or "/";
+}
