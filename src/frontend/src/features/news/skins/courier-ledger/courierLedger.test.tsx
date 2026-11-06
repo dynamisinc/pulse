@@ -24,6 +24,8 @@ import { fontFaceProblem, resetSkinFontsForTests } from '@/features/channels/ski
 import { getSkinFonts } from '@/features/channels/skin/registry'
 import { isFontStack } from '@/features/channels/skin/schema'
 import { NEUTRAL_SKIN_TOKENS } from '@/features/channels/skin/tokens/neutral'
+// The shared ext.news schema (one registration for every news skin), as the channel imports it.
+import '../newsExtension'
 import {
   COURIER_LEDGER_META,
   COURIER_LEDGER_SKIN_KEY,
@@ -32,6 +34,12 @@ import {
 } from './index'
 
 const palette = tokens.palette
+
+/** RGB chroma (max channel minus min channel) in 0..1: 0 is gray, 1 is a pure hue. */
+function chroma(hex: string): number {
+  const ch = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))
+  return (Math.max(...ch) - Math.min(...ch)) / 255
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -89,6 +97,8 @@ describe('D3-P3 values (the city-paper register)', () => {
     expect(tokens.density.ruleWeight).toBe(1)
     // Muted accent: dark and low-chroma enough to read as ink, not a brand shout.
     expect(contrastRatio(palette.accent, palette.bg)).toBeGreaterThan(AA_BODY)
+    expect(chroma(palette.accent)).toBeLessThan(0.4)
+    expect(chroma('#ff0000')).toBeGreaterThan(0.4) // the bound does reject a shout
   })
 
   it('leads the home with text and keeps the rail', () => {
@@ -137,8 +147,11 @@ describe('a11y floor', () => {
     }
   })
 
-  it('passes the full mount-time guard unchanged in palette', () => {
-    expect(finalizeSkinTokens(tokens, COURIER_LEDGER_SKIN_KEY).palette).toEqual(palette)
+  it('passes the full mount-time guard unchanged: palette and every ext.news key survive', () => {
+    const finalized = finalizeSkinTokens(tokens, COURIER_LEDGER_SKIN_KEY)
+    expect(finalized.palette).toEqual(palette)
+    // ext.news is checked against the shared schema; metaColor enters its AA check and is kept.
+    expect(finalized.ext?.news).toEqual(tokens.ext?.news)
   })
 })
 
@@ -188,7 +201,22 @@ describe('fonts', () => {
   })
 })
 
+/** The only imports a data-only skin source may make: F13, its own tokens, its own fonts. */
+const ALLOWED_IMPORT = /^(@\/features\/channels|\.\/tokens|\.\/fonts\/[a-z0-9-]+\.woff2\?url)$/
+
 describe('zero layout code', () => {
+  it('has sources that import no React, MUI, CSS or layout module', () => {
+    const sources = import.meta.glob('./*.ts', { query: '?raw', import: 'default', eager: true })
+    const code = Object.entries(sources).filter(([path]) => !path.includes('.test.'))
+    expect(code.map(([path]) => path).sort()).toEqual(['./index.ts', './tokens.ts'])
+    for (const [path, raw] of code) {
+      const imports = [...String(raw).matchAll(/^import .* from '([^']+)'/gm)].map(m => m[1])
+      for (const spec of imports) {
+        expect(spec, path).toMatch(ALLOWED_IMPORT)
+      }
+    }
+  })
+
   it('ships only data, its registration, tests, fonts and their licences', () => {
     const files = Object.keys(import.meta.glob('./**/*', { query: '?url', import: 'default' }))
       .map(p => p.replace(/^\.\//, ''))

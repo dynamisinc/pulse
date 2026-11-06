@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { OutletSkinTokens } from '@/features/channels'
+import { DEFAULT_NEWS_MASTHEAD } from '../newsExtension'
 import { tokens } from './tokens'
 
 interface MastheadSignature {
@@ -29,15 +30,24 @@ function leadFamily(stack: string): string {
   return (stack.split(',')[0] ?? '').trim().replace(/^['"]|['"]$/g, '').toLowerCase()
 }
 
-/** A token file's masthead signature. No `ext.news.masthead` means the portal's band. */
-function signature(t: OutletSkinTokens): MastheadSignature {
+/**
+ * A token file's masthead signature. A missing `ext.news.masthead` means what that file's
+ * renderer draws: the portal's band for the portal, the news default for a news skin.
+ */
+function signature(
+  t: OutletSkinTokens,
+  fallback: string = DEFAULT_NEWS_MASTHEAD,
+): MastheadSignature {
   const news = t.ext?.news
-  const structure = typeof news?.masthead === 'string' ? news.masthead : 'band'
+  const structure = typeof news?.masthead === 'string' ? news.masthead : fallback
   const filled = structure === 'band' || structure === 'tv-bar' || typeof news?.mastheadFill === 'string'
   return { family: leadFamily(t.type.mastheadFamily), structure, filled }
 }
 
-/** D3-P3 / D2-002 reference signatures of the other registers. */
+/**
+ * D3-P3 / D2-002 reference signatures of the other registers. TODO(story 20): once story 10
+ * and portal 06 are on main the glob above checks their real token files; drop these then.
+ */
 const REFERENCE: Readonly<Record<string, MastheadSignature>> = {
   // Metro Desk 9 (skinKey newsline7, story 10): Oswald on a navy TV bar with a LIVE chip.
   newsline7: { family: 'oswald', structure: 'tv-bar', filled: true },
@@ -59,8 +69,10 @@ const siblings = tokenExports({
   ...import.meta.glob('../*/tokens.ts', { eager: true }),
   ...import.meta.glob('../../../portal/skin/portalTokens.ts', { eager: true }),
 })
+// Forward-looking: the sibling skins and the portal tokens are matched as they merge (none may be
+// on the branch yet), so the REFERENCE floor below keeps the assertion meaningful meanwhile.
+// Vite keys this folder's own file as './tokens.ts' (not '../courier-ledger/tokens.ts').
 delete siblings['./tokens.ts']
-delete siblings['../courier-ledger/tokens.ts']
 
 const own = signature(tokens)
 
@@ -78,7 +90,7 @@ describe('the Courier-Ledger masthead is structurally its own', () => {
 
   it('differs in family and structure from every other token file on disk', () => {
     for (const [path, other] of Object.entries(siblings)) {
-      const theirs = signature(other)
+      const theirs = signature(other, path.includes('/portal/') ? 'band' : DEFAULT_NEWS_MASTHEAD)
       expect(theirs.family, path).not.toBe(own.family)
       expect(theirs.structure, path).not.toBe(own.structure)
     }

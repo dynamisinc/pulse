@@ -7,4 +7,5 @@
  * one line here, never layout code (NWS-002).
  */
 
+import './newsExtension'
 import './courier-ledger'

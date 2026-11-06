@@ -6,7 +6,8 @@
  * a scope for `courier-ledger` mounts (F13 `SkinScope`), with `font-display: swap`.
  *
  * Fonts: Newsreader (roman + italic, variable wght) and Source Sans 3 (roman,
- * variable wght), latin subset, from @fontsource-variable 5.3.x, SIL OFL 1.1 (the
+ * variable wght), latin subset, from @fontsource-variable/newsreader 5.3.0 and
+ * @fontsource-variable/source-sans-3 5.3.1, SIL OFL 1.1 (the
  * licence files sit beside them in `fonts/`). Same-origin `.woff2` files, so the
  * CSP `font-src 'self'` (F23) allows them; no CDN.
  */

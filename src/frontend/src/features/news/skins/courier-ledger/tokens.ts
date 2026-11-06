@@ -5,7 +5,7 @@
  *
  * Register: newspaper. Serif, measured, text-forward, traditional grid. It must
  * NOT read as the portal (D2-002 "print" risk: the portal stays broadcast, a
- * station-blue sans band), nor as Metro Desk 9's TV bar. The difference is
+ * station-blue sans band), nor as Metro Desk 9's TV bar (skinKey `newsline7`). The difference is
  * structural, not only a palette swap: a centred serif nameplate over a double rule
  * (`ext.news.masthead: 'centered-nameplate'` + `mastheadDoubleRule`, story 03 draws it).
  *
@@ -27,7 +27,8 @@ export const COURIER_LEDGER_SKIN_KEY = 'courier-ledger'
  * closest installed width match to Newsreader: measured in a 360 / 680 / 1140 px column
  * (masthead, hed, dek, body, caption), the `font-display: swap` rewrapped one block by
  * one line at 360 px and nothing at 680 or 1140 px, where a Georgia-first stack moved
- * two blocks. The masthead never rewrapped and nothing overflowed at 360 px.
+ * two blocks. The masthead never rewrapped and nothing overflowed at 360 px. (A manual
+ * dev-server check; the method and numbers are in the story 11 PR, #728.)
  */
 export const COURIER_LEDGER_SERIF =
   "'Newsreader', 'Times New Roman', Times, 'Liberation Serif', Georgia, serif"
@@ -39,7 +40,7 @@ export const COURIER_LEDGER_SANS =
 /**
  * Muted gray for meta text (byline, dateline, timestamps). Restrained palettes
  * usually fail here; this one is 6.75:1 on `bg` and 6.13:1 on `surface`
- * (pinned by `courierLedger.test.ts`).
+ * (pinned by `courierLedger.test.tsx`).
  */
 export const COURIER_LEDGER_META = '#5c574f'
 
@@ -50,6 +51,8 @@ export const tokens: OutletSkinTokens = {
     hedFamily: COURIER_LEDGER_SERIF,
     dekFamily: COURIER_LEDGER_SERIF,
     bodyFamily: COURIER_LEDGER_SERIF,
+    // F13 has no meta-family token: layouts set meta (byline, dateline, timestamp) in
+    // `kickerFamily`, so this sans stack is the meta face too, never the serif body.
     kickerFamily: COURIER_LEDGER_SANS,
     // Newspaper heads are sentence case; the kicker's small caps are `ext.news.kickerCase`.
     hedCase: 'none',
