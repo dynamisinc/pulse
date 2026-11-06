@@ -129,6 +129,8 @@ All nine requests were folded into the foundation (or the platform) in the Decem
 | FU-8 | Named sanitizer profile hook | **FC-7** `ISanitizerProfileRegistry` (F04); story 01 registers `article-rich`. |
 | FU-9 | Inline video player importable without Social chrome | **F14**: the player lives in `core/media` (extracted if needed). |
 
+**Platform extension made by story 05 (not a foundation story file):** `core/media/player/VideoPlayer` gained OPT-IN props `renderControls(api: PlayerControlsApi)`, `className` and `describedBy`, so the news broadcast player can draw its own tinted control row without a second video stack. Unset, behaviour is unchanged (Social, `ContentMedia`); story 05 owns the extension. `formatDuration` and `PlayerControlsApi` are exported from `@/core/media/player`.
+
 ## Cadence / E9 seam (recorded, not built)
 A Cadence-pushed article is a `ContentItem` with `ExternalSource: 'cadence'` (foundation Cadence seam); the story-01 descriptor already validates it identically. The Beat asset picker (NWS-020 "via E9") is a disabled labelled entry in 17 until E9.
 
