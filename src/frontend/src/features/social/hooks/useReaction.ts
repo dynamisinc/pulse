@@ -59,6 +59,7 @@ import { wallClockNowIso } from '@/core/time/wallClock'
 import { buildAndEmit, type BuildTelemetryEventInput } from '@/core/telemetry'
 import { useReactionToggle } from './useReactionToggle'
 import type { UseTransientMessageResult } from './useTransientMessage'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** Options for {@link useReaction}. */
 export interface UseReactionOptions {
@@ -157,7 +158,8 @@ export function useReaction(options: UseReactionOptions): UseReactionResult {
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
 
-  const isReadOnly = session.isReadOnly
+  // Read-only session OR exercise ended: the like (a write) is absent/inert either way.
+  const isReadOnly = !useCanWrite()
   const canReact = !isReadOnly && session.personaId !== undefined
 
   // MOCK mode only (the toggle engine never calls this live): the one XC-004

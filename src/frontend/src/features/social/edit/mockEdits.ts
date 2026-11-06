@@ -44,6 +44,7 @@ const records = new Map<string, MockPostRecord>()
 
 /** A mock switch the demo / tests can flip to see the 409 messages. */
 let forcedConflict: 'window-closed' | 'edit-limit' | 'frozen' | null = null
+let forcedForbidden = false
 
 /** Records a participant post the mock created (called from `createPost`, mock mode only). */
 export function noteMockPostCreated(id: string, text: string, scenarioTime: string): void {
@@ -55,10 +56,16 @@ export function setMockEditConflict(reason: 'window-closed' | 'edit-limit' | 'fr
   forcedConflict = reason
 }
 
+/** Test/demo hook: make the next edit saves answer 403 (the ended-exercise write gate). */
+export function setMockEditForbidden(forbidden: boolean): void {
+  forcedForbidden = forbidden
+}
+
 /** Test-only: forget every mock record and switch. */
 export function resetMockEditsForTests(): void {
   records.clear()
   forcedConflict = null
+  forcedForbidden = false
 }
 
 function secondsLeft(record: MockPostRecord): number {
@@ -119,6 +126,7 @@ export const mockEditAdapter: AxiosAdapter = config => {
     return respond(config, 400, { error: 'invalid text' })
   }
 
+  if (forcedForbidden) return respond(config, 403, { error: 'forbidden' })
   if (forcedConflict !== null) return respond(config, 409, { reason: forcedConflict })
   if (record.edits.length >= EDIT_LIMIT) return respond(config, 409, { reason: 'edit-limit' })
   if (secondsLeft(record) <= 0) return respond(config, 409, { reason: 'window-closed' })

@@ -28,6 +28,13 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// archived exercise merely because someone mapped a different verb on it.
 /// </para>
 /// <para>
+/// <b>The ONE verb-sensitive rule: the read carve-out in <c>completed</c> (Tom, 2026-10-19).</b> Coverage is
+/// verb-blind, but the SERVE decision (<see cref="IsServed"/>) admits a <c>GET</c>/<c>HEAD</c> in any state whose
+/// <see cref="ExerciseLifecycleBehaviour.ParticipantReadsAccepted"/> holds — which adds exactly <c>completed</c> to the
+/// participant-accessible states. A <c>POST</c>/<c>PUT</c>/<c>PATCH</c>/<c>DELETE</c> in <c>completed</c> is still
+/// refused with <c>403</c>. <c>build</c> and <c>archived</c> stay verb-blind and fully closed.
+/// </para>
+/// <para>
 /// <b>Not covered on CONNECT, by design: the SignalR hub <c>/hubs/exercise</c>.</b> A connection to a
 /// <c>build</c> / <c>completed</c> / <c>archived</c> exercise's group is still accepted — the participant overlay
 /// client re-GETs <c>/api/overlay-state</c> on reconnect, and that GET is what renders COR-054's EndEx overlay. The
@@ -35,8 +42,8 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// SEND side instead (#375): <c>SignalRFeedBroadcaster</c> checks
 /// <see cref="ExerciseLifecycleStates.IsLivePushOpen"/> before every feed frame, and outside it sends to the
 /// staff-only group alone (fail closed). That predicate coincides with this gate's
-/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> today, by design, and may diverge in
-/// <c>completed</c> (REST reads may reopen there; live pushes stay closed). A NEW hub frame that bypasses
+/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> by design, and diverges from this gate's READ rule in
+/// <c>completed</c> (REST reads are open there; live pushes stay closed). A NEW hub frame that bypasses
 /// <c>IFeedBroadcaster</c> must apply the same check; the pause overlay push already gates itself (CR-001).
 /// </para>
 /// </remarks>
@@ -99,17 +106,50 @@ public static class ExerciseLifecycleGatedRoutes
     /// <returns><c>true</c> when the path is the overlay-state route.</returns>
     public static bool IsOverlayState(PathString path) =>
         path.StartsWithSegments(OverlayStatePath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether <paramref name="method"/> is a READ for the purpose of the <c>completed</c> read carve-out: exactly
+    /// <c>GET</c> or <c>HEAD</c>. Everything else (including <c>OPTIONS</c> and any unknown verb) is treated as a
+    /// write, the fail-closed direction.
+    /// </summary>
+    /// <param name="method">The request's HTTP method.</param>
+    /// <returns><c>true</c> for <c>GET</c>/<c>HEAD</c>.</returns>
+    public static bool IsReadMethod(string? method) =>
+        method is not null && (HttpMethods.IsGet(method) || HttpMethods.IsHead(method));
+
+    /// <summary>
+    /// The gate's SERVE decision for a covered route, as one pure function (no I/O, so it is unit-testable over every
+    /// literal and verb). A covered request is served for a participant when:
+    /// <list type="bullet">
+    ///   <item>the state is participant-accessible (<c>staged</c>/<c>live</c>/<c>paused</c>), any verb; or</item>
+    ///   <item>the path is <c>/api/overlay-state</c> and <see cref="ExerciseLifecycleStates.IsOverlayStateServed"/>
+    ///   holds (decision 2); or</item>
+    ///   <item>the request is a READ (<see cref="IsReadMethod"/>) and
+    ///   <see cref="ExerciseLifecycleStates.IsParticipantReadServed"/> holds — the ended, read-only review that adds
+    ///   <c>completed</c>.</item>
+    /// </list>
+    /// Anything else is refused (subject to the middleware's staff exemption). An unknown state is never served.
+    /// </summary>
+    /// <param name="state">The resolved exercise's lifecycle literal (canonical or legacy).</param>
+    /// <param name="method">The request's HTTP method.</param>
+    /// <param name="path">The request path (assumed covered — see <see cref="IsGated"/>).</param>
+    /// <returns><c>true</c> when the request may proceed without a staff session.</returns>
+    public static bool IsServed(string? state, string? method, PathString path) =>
+        ExerciseLifecycleStates.IsParticipantAccessible(state)
+        || (IsOverlayState(path) && ExerciseLifecycleStates.IsOverlayStateServed(state))
+        || (IsReadMethod(method) && ExerciseLifecycleStates.IsParticipantReadServed(state));
 }
 
 /// <summary>
-/// <b>COR-032's participant fail-closed gate (AC3).</b> In <c>build</c> / <c>completed</c> / <c>archived</c>
-/// the participant surface is NOT SERVED: every route in
-/// <see cref="ExerciseLifecycleGatedRoutes"/> short-circuits with <c>403 Forbidden</c> before its handler
-/// runs. <c>staged</c> and <c>live</c> are the participant-accessible states; <c>paused</c> is served too,
-/// because that is the only way the holding page can render (AC6). <c>completed</c> is served for
-/// <c>/api/overlay-state</c> ALONE — the same "an overlay cannot render if its endpoint is refused" reasoning,
-/// applied to COR-054's EndEx overlay (Tier-2 human ruling, decision 2). <c>build</c> and <c>archived</c> stay
-/// fully closed.
+/// <b>COR-032's participant fail-closed gate (AC3).</b> In <c>build</c> / <c>archived</c> the participant surface
+/// is NOT SERVED: every route in <see cref="ExerciseLifecycleGatedRoutes"/> short-circuits with
+/// <c>403 Forbidden</c> before its handler runs, whatever the verb. <c>staged</c> and <c>live</c> are the
+/// participant-accessible states; <c>paused</c> is served too, because that is the only way the holding page can
+/// render (AC6). <c>completed</c> (EndEx) is the ended, read-only review (Tom, 2026-10-19): every gated
+/// <c>GET</c>/<c>HEAD</c> is served — the feed, threads, personas, edit history and the six shell GETs, including
+/// <c>/api/overlay-state</c>, which tells the shell the exercise has ended — while every write
+/// (<c>POST</c>/<c>PUT</c>/<c>PATCH</c>/<c>DELETE</c>) is refused with <c>403</c>. The decision itself is
+/// <see cref="ExerciseLifecycleGatedRoutes.IsServed"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -153,8 +193,8 @@ public static class ExerciseLifecycleGatedRoutes
 /// </para>
 /// <para>
 /// <b>Cost.</b> On a gated route this adds ONE indexed single-column read of the resolved exercise's status.
-/// The staff-session lookup runs only when the exercise is NOT participant-accessible, so the common
-/// <c>live</c> path costs exactly one query and never touches the sessions table.
+/// The staff-session lookup runs only when the request is NOT served (a closed state, or a write in
+/// <c>completed</c>), so the common <c>live</c> path costs exactly one query and never touches the sessions table.
 /// </para>
 /// </remarks>
 public sealed partial class ExerciseLifecycleGatingMiddleware
@@ -175,8 +215,8 @@ public sealed partial class ExerciseLifecycleGatingMiddleware
     }
 
     /// <summary>
-    /// Refuses a covered participant-world request when the resolved exercise is not in a
-    /// participant-accessible lifecycle state, unless the caller holds a live staff session.
+    /// Refuses a covered participant-world request the resolved exercise's lifecycle state does not serve
+    /// (<see cref="ExerciseLifecycleGatedRoutes.IsServed"/>), unless the caller holds a live staff session.
     /// </summary>
     /// <remarks>
     /// <b>Services are resolved from <see cref="HttpContext.RequestServices"/> AFTER the path check, not
@@ -203,11 +243,9 @@ public sealed partial class ExerciseLifecycleGatingMiddleware
         // An unresolved scope is the endpoints' own fail-closed 401, not this gate's 403 (see remarks).
         var state = await lifecycle.GetCurrentStateAsync(context.RequestAborted);
 
-        // The overlay endpoint answers in one extra state — 'completed' — so COR-054's EndEx overlay can
-        // render (decision 2). Every other covered route still sees the plain participant-access rule.
-        var served = ExerciseLifecycleGatedRoutes.IsOverlayState(context.Request.Path)
-            ? ExerciseLifecycleStates.IsOverlayStateServed(state)
-            : ExerciseLifecycleStates.IsParticipantAccessible(state);
+        // Participant-accessible states serve every verb; 'completed' additionally serves READS only (the ended,
+        // read-only review), so a write there is still refused below. build / archived serve nothing.
+        var served = ExerciseLifecycleGatedRoutes.IsServed(state, context.Request.Method, context.Request.Path);
 
         if (state is null || served)
         {
@@ -233,6 +271,6 @@ public sealed partial class ExerciseLifecycleGatingMiddleware
     [LoggerMessage(
         EventId = 1,
         Level = LogLevel.Information,
-        Message = "Refusing the participant-world route {Path}: the resolved exercise is in lifecycle state '{LifecycleState}', which is not participant-accessible (COR-032). Staff sessions are exempt.")]
+        Message = "Refusing the participant-world route {Path}: the resolved exercise is in lifecycle state '{LifecycleState}', which does not serve this request to participants (COR-032; 'completed' serves reads only). Staff sessions are exempt.")]
     private partial void LogParticipantSurfaceRefused(string path, string lifecycleState);
 }

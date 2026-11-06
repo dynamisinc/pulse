@@ -18,8 +18,9 @@ using Xunit;
 
 /// <summary>
 /// <b>AC3 / AC4 — the participant fail-closed gate, end to end over real HTTP and real SQL.</b> In
-/// <c>build</c> / <c>completed</c> / <c>archived</c> the participant surface is NOT SERVED; staff sessions
-/// and the pre-auth allowlist are untouched.
+/// <c>build</c> / <c>archived</c> the participant surface is NOT SERVED; in <c>completed</c> it is the ended,
+/// read-only review (Tom, 2026-10-19) — reads served, writes refused; staff sessions and the pre-auth allowlist are
+/// untouched.
 /// </summary>
 /// <remarks>
 /// <b>Why <c>/api/feed</c> is asserted by name, with a seeded post.</b> A shell-variant projection returning
@@ -37,12 +38,15 @@ public sealed class ExerciseLifecycleGatingTests
 
     public ExerciseLifecycleGatingTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
-    /// <summary>AC3, the headline case: an archived/build/completed world serves no feed at all.</summary>
+    /// <summary>
+    /// AC3, the headline case: an archived/build world serves no feed at all. (<c>completed</c> used to be on this
+    /// list; since the ended, read-only review it serves reads — see
+    /// <see cref="InCompleted_TheFeedIsServed_ButThePostWriteIsRefused"/>.)
+    /// </summary>
     [RequiresDockerTheory]
     [InlineData("build")]
-    [InlineData("completed")]
     [InlineData("archived")]
-    public async Task InBuildCompletedOrArchived_TheParticipantFeedIsNotServed(string state)
+    public async Task InBuildOrArchived_TheParticipantFeedIsNotServed(string state)
     {
         var exerciseId = await SeedAsync(state, withPost: true);
         await using var host = await StartAsync(exerciseId);
@@ -51,7 +55,7 @@ public sealed class ExerciseLifecycleGatingTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "COR-032: participants access Staged and Live only — '{0}' is not participant-accessible", state);
+            "COR-032: '{0}' is not participant-accessible, and accepts no participant reads either", state);
         (await response.Content.ReadAsStringAsync()).Should().NotContain(
             SeededPostBody, "a projection returning readOnly would tick AC3 and still leak this post");
     }
@@ -70,31 +74,79 @@ public sealed class ExerciseLifecycleGatingTests
             SeededPostBody, "so a 403 above is the gate closing the door, not an empty table");
     }
 
-    /// <summary>AC3: every covered route — the four social ones and all six shell GETs — is refused.</summary>
-    [RequiresDockerTheory]
-    [InlineData("/api/feed")]
-    [InlineData("/api/personas")]
-    [InlineData("/api/shell-state")]
-    [InlineData("/api/chrome-config")]
-    [InlineData("/api/brand-tokens")]
-    [InlineData("/api/channel-nav-config")]
-    [InlineData("/api/alerts")]
-    [InlineData("/api/overlay-state")]
-    public async Task InArchived_EveryCoveredGetRouteIsRefused(string route)
+    /// <summary>The covered GET routes this slice host maps: the social reads and all six shell GETs.</summary>
+    private static readonly string[] CoveredGetRouteList =
+    [
+        "/api/feed",
+        "/api/personas",
+        "/api/shell-state",
+        "/api/chrome-config",
+        "/api/brand-tokens",
+        "/api/channel-nav-config",
+        "/api/alerts",
+        "/api/overlay-state",
+    ];
+
+    /// <summary>The covered GET routes, as theory data.</summary>
+    public static TheoryData<string> CoveredGetRoutes => new(CoveredGetRouteList);
+
+    /// <summary>The two states that stay FULLY closed (verb-blind), crossed with every covered GET route.</summary>
+    public static TheoryData<string, string> ClosedStatesByCoveredGetRoute
     {
-        var exerciseId = await SeedAsync("archived", withPost: true);
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var state in new[] { "build", "archived" })
+            {
+                foreach (var route in CoveredGetRouteList)
+                {
+                    data.Add(state, route);
+                }
+            }
+
+            return data;
+        }
+    }
+
+    /// <summary>AC3: in build and archived every covered route — the social ones and all six shell GETs — is refused.</summary>
+    [RequiresDockerTheory]
+    [MemberData(nameof(ClosedStatesByCoveredGetRoute))]
+    public async Task InBuildOrArchived_EveryCoveredGetRouteIsRefused(string state, string route)
+    {
+        var exerciseId = await SeedAsync(state, withPost: true);
         await using var host = await StartAsync(exerciseId);
 
         var response = await host.Client.GetAsync(new Uri(route, UriKind.Relative));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "{0} is a covered participant-world route", route);
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden, "{0} is a covered participant-world route and '{1}' serves no reads", route, state);
+    }
+
+    /// <summary>
+    /// The ended, read-only review (Tom, 2026-10-19): in <c>completed</c> every covered GET this host maps is SERVED to
+    /// a participant. The full route set (pinned, follow graph, suggestions, edit history) is driven through the real
+    /// <c>Program</c> host in <c>EndedReadOnlyReviewGatingTests</c>.
+    /// </summary>
+    [RequiresDockerTheory]
+    [MemberData(nameof(CoveredGetRoutes))]
+    public async Task InCompleted_EveryCoveredGetRouteIsServed(string route)
+    {
+        var exerciseId = await SeedAsync("completed", withPost: true);
+        await using var host = await StartAsync(exerciseId);
+
+        var response = await host.Client.GetAsync(new Uri(route, UriKind.Relative));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK, "{0} is a participant READ, and a completed exercise accepts participant reads", route);
     }
 
     /// <summary>AC3: the templated thread read is covered too.</summary>
-    [RequiresDockerFact]
-    public async Task InArchived_TheThreadReadIsRefused()
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    public async Task InBuildOrArchived_TheThreadReadIsRefused(string state)
     {
-        var exerciseId = await SeedAsync("archived", withPost: true);
+        var exerciseId = await SeedAsync(state, withPost: true);
         await using var host = await StartAsync(exerciseId);
 
         var response = await host.Client.GetAsync(
@@ -125,28 +177,31 @@ public sealed class ExerciseLifecycleGatingTests
     }
 
     /// <summary>
-    /// <b>Tier-2 human ruling, decision 2.</b> <c>completed</c> is carved out of the refusal set for
-    /// <c>/api/overlay-state</c> ONLY: an overlay cannot render if the endpoint that carries it is refused, and
-    /// <c>endex</c> is a first-class literal in the frozen <c>OverlayStateResponse</c> union (COR-054). As
-    /// originally built, <c>live → completed</c> made this endpoint start 403ing and EndEx could never display.
-    /// The feed stays refused in the same state — the carve-out is the overlay endpoint, not the run's content.
+    /// <b>The ended, read-only review (Tom, 2026-10-19), replacing decision 2's overlay-only carve-out.</b> In
+    /// <c>completed</c> the feed is SERVED (with the run's content) and the overlay endpoint answers too, but the
+    /// participant post write is refused by the gate with <c>403</c> before its handler runs, so nothing is written.
+    /// This test used to pin "completed feed → 403"; that is now wrong by design.
     /// </summary>
     [RequiresDockerFact]
-    public async Task InCompleted_TheOverlayEndpointIsServedWhileTheFeedStaysRefused()
+    public async Task InCompleted_TheFeedIsServed_ButThePostWriteIsRefused()
     {
         var exerciseId = await SeedAsync("completed", withPost: true);
         await using var host = await StartAsync(exerciseId);
 
-        var overlay = await host.Client.GetAsync(new Uri("/api/overlay-state", UriKind.Relative));
-        overlay.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            "COR-054's end-of-exercise overlay is participant-visible — a 403 here makes EndEx undisplayable");
-
         var feed = await host.Client.GetAsync(new Uri("/api/feed", UriKind.Relative));
-        feed.StatusCode.Should().Be(
-            HttpStatusCode.Forbidden, "the carve-out is scoped to the overlay endpoint, not to the feed");
-        (await feed.Content.ReadAsStringAsync()).Should().NotContain(
-            SeededPostBody, "a completed run's content is still not browsable");
+        feed.StatusCode.Should().Be(HttpStatusCode.OK, "a completed run's content stays readable to participants");
+        (await feed.Content.ReadAsStringAsync()).Should().Contain(
+            SeededPostBody, "the review serves the run's real content, not an empty page");
+
+        (await host.Client.GetAsync(new Uri("/api/overlay-state", UriKind.Relative))).StatusCode.Should().Be(
+            HttpStatusCode.OK, "the overlay endpoint carries the 'ended' flag the shell renders");
+
+        var write = await host.Client.PostAsJsonAsync(new Uri("/api/posts", UriKind.Relative), NewPostBody());
+        write.StatusCode.Should().Be(HttpStatusCode.Forbidden, "every participant write is refused once the exercise has ended");
+
+        await using var context = _fixture.CreateContext();
+        (await context.Posts.IgnoreQueryFilters().AsNoTracking().CountAsync(p => p.ExerciseId == exerciseId))
+            .Should().Be(1, "only the seeded post exists: the gate short-circuits ahead of the ingest service");
     }
 
     /// <summary>
@@ -182,11 +237,14 @@ public sealed class ExerciseLifecycleGatingTests
             .Should().Be(HttpStatusCode.OK, "a paused world must still be able to serve its holding page (AC6)");
     }
 
-    /// <summary>A legacy row is gated by its MAPPED state, not by its spelling.</summary>
+    /// <summary>
+    /// A legacy row is gated by its MAPPED state, not by its spelling: <c>complete</c> reads as <c>completed</c>, whose
+    /// participant READS are served (the ended, read-only review).
+    /// </summary>
     [RequiresDockerTheory]
     [InlineData("active", HttpStatusCode.OK)]
     [InlineData("scheduled", HttpStatusCode.Forbidden)]
-    [InlineData("complete", HttpStatusCode.Forbidden)]
+    [InlineData("complete", HttpStatusCode.OK)]
     public async Task ALegacyRow_IsGatedByItsMappedState(string legacy, HttpStatusCode expected)
     {
         var exerciseId = await SeedAsync(legacy, withPost: true);
@@ -269,6 +327,44 @@ public sealed class ExerciseLifecycleGatingTests
             HttpStatusCode.OK,
             "the control: the same host DOES exempt a live staff-kind session, so the refusal above is the KIND, " +
             "not a mis-wired accessor gating everyone");
+    }
+
+    /// <summary>
+    /// The ended, read-only review applies to a COR-015 shared read-only (<c>readonly</c>-kind) session exactly as to a
+    /// participant: in <c>completed</c> it may READ the feed, its write is refused by the gate (403), and in
+    /// <c>archived</c> even the read is refused. Driven through the real token-backed staff-session accessor, so the
+    /// observer is provably not riding the staff exemption.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task ASharedReadOnlySession_InCompleted_ReadsButCannotWrite_AndInArchivedIsRefused()
+    {
+        var completed = await SeedAsync("completed", withPost: true);
+        var completedToken = await SeedSessionAsync(completed, kind: "readonly", staffUserId: null);
+
+        await using (var host = await StartAsync(completed, configureServices: UseTheRealStaffSessionAccessor))
+        {
+            var read = await host.Client.SendAsync(FeedRequestWith(completedToken));
+            read.StatusCode.Should().Be(HttpStatusCode.OK, "a shared observer may read an ended exercise like a participant");
+            (await read.Content.ReadAsStringAsync()).Should().Contain(SeededPostBody);
+
+            using var write = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/posts", UriKind.Relative))
+            {
+                Content = JsonContent.Create(NewPostBody()),
+            };
+            write.Headers.Authorization = new AuthenticationHeaderValue("Bearer", completedToken);
+            (await host.Client.SendAsync(write)).StatusCode.Should().Be(
+                HttpStatusCode.Forbidden, "no write reaches an ended exercise, whoever the non-staff caller is");
+        }
+
+        var archived = await SeedAsync("archived", withPost: true);
+        var archivedToken = await SeedSessionAsync(archived, kind: "readonly", staffUserId: null);
+
+        await using (var host = await StartAsync(archived, configureServices: UseTheRealStaffSessionAccessor))
+        {
+            var read = await host.Client.SendAsync(FeedRequestWith(archivedToken));
+            read.StatusCode.Should().Be(HttpStatusCode.Forbidden, "an archived world serves no reads, to an observer either");
+            (await read.Content.ReadAsStringAsync()).Should().NotContain(SeededPostBody);
+        }
     }
 
     /// <summary>AC4: an un-listed route (the pre-auth allowlist stand-in) is untouched in every state.</summary>

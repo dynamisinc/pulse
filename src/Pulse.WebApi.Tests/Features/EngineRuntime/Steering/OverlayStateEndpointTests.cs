@@ -59,6 +59,44 @@ public sealed class OverlayStateEndpointTests
         body.GetProperty("message").GetString().Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The ended, read-only review (Tom, 2026-10-19): a <c>completed</c> exercise answers <c>{state: none,
+    /// ended: true}</c> through the full decorator chain — never <c>endex</c> — and every other state answers
+    /// <c>ended: false</c>. The legacy <c>complete</c> spelling is ended too.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData(ExerciseLifecycleStates.Completed, "none", true)]
+    [InlineData(ExerciseLifecycleStates.LegacyComplete, "none", true)]
+    [InlineData(ExerciseLifecycleStates.Live, "none", false)]
+    [InlineData(ExerciseLifecycleStates.Staged, "none", false)]
+    [InlineData(ExerciseLifecycleStates.Paused, "pause", false)]
+    public async Task Get_CarriesTheEndedFlag_OnlyWhenCompleted(string status, string expectedState, bool expectedEnded)
+    {
+        var exerciseId = await SeedAsync(status);
+        await using var host = await StartAsync(exerciseId);
+
+        var body = await GetOverlayStateAsync(host);
+
+        body.GetProperty("state").GetString().Should().Be(
+            expectedState, "completed stays 'none' (Tom's #390 ruling) so participants can keep reading");
+        body.GetProperty("ended").GetBoolean().Should().Be(
+            expectedEnded, "'ended' is true exactly in completed (or its legacy alias), false elsewhere ('{0}')", status);
+    }
+
+    /// <summary>A Freeze that outlived EndEx is not shown over a completed exercise, and the body still says ended.</summary>
+    [RequiresDockerFact]
+    public async Task Get_InCompleted_WithAStaleFreeze_IsNoneAndEnded()
+    {
+        var exerciseId = await SeedAsync(ExerciseLifecycleStates.Completed);
+        await using var host = await StartAsync(exerciseId);
+        Freeze(host, exerciseId);
+
+        var body = await GetOverlayStateAsync(host);
+
+        body.GetProperty("state").GetString().Should().Be("none", "a Freeze means nothing once the exercise has ended");
+        body.GetProperty("ended").GetBoolean().Should().BeTrue();
+    }
+
     [RequiresDockerFact]
     public async Task Get_AfterAFreeze_ReturnsTheLiveHoldingPageState_NotTheStaticConstant()
     {
@@ -212,8 +250,8 @@ public sealed class OverlayStateEndpointTests
 
         using var document = JsonDocument.Parse(raw);
         document.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-            ["state", "register", "message"],
-            "the frozen OverlayStateResponse triple is FILLED, never reshaped — the store's additive 'sequence' is "
+            ["state", "register", "message", "ended"],
+            "the frozen OverlayStateResponse triple plus the additive 'ended' flag (Tom, 2026-10-19) — the store's additive 'sequence' is "
             + "deliberately not projected onto this body (the frontend's wire guard types it optional, and a "
             + "sequence-less GET re-bases its stale-push cutoff permissively rather than stranding it)");
         raw.Should().NotContain("actingHumanId", "XC-002/COR-018: staff attribution never crosses to a participant read");
