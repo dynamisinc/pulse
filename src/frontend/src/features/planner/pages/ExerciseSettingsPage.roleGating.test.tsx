@@ -86,6 +86,8 @@ describe('ExerciseSettingsPage Staff section by role (story 20)', () => {
     expect(screen.getByTestId('exercise-config-nav-staff')).toHaveTextContent('Staff')
   })
 
+  // orgAdmin holds assignStaff (rolePermissions), but on this exercise-settings page an org admin acts through
+  // their own planner enrollment, so the org-scope session itself does not get the Staff section here.
   for (const role of ['controller', 'evaluator', 'orgAdmin'] as const) {
     it(`${role} does not see the Staff nav item`, () => {
       setStubSession({ role, isLead: true })

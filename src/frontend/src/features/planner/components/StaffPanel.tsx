@@ -285,9 +285,13 @@ export function StaffPanel() {
           ) : (
             <Box sx={{ overflowX: 'auto', mt: 2 }}>
               <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
-                <caption style={{ position: 'absolute', left: -9999 }}>
+                <Box
+                  component="caption"
+                  sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden',
+                    clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}
+                >
                   Staff in this exercise
-                </caption>
+                </Box>
                 <thead>
                   <tr>
                     {['Name', 'Email', 'Role', 'Actions'].map(h => (
@@ -312,7 +316,7 @@ export function StaffPanel() {
                       sx={{ '& td, & th': { padding: '6px 8px', borderBottom: '1px solid',
                         borderColor: 'divider' } }}
                     >
-                      <th scope="row" style={{ textAlign: 'left', fontWeight: 600 }}>
+                      <Box component="th" scope="row" sx={{ textAlign: 'left', fontWeight: 600 }}>
                         {row.displayName}
                         {isSelf(row) ? ' (you)' : ''}
                         {row.isLead ? (
@@ -326,7 +330,7 @@ export function StaffPanel() {
                             Lead
                           </Box>
                         ) : null}
-                      </th>
+                      </Box>
                       <td>{row.email ?? '—'}</td>
                       <td>
                         <CobraTextField
