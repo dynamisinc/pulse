@@ -261,6 +261,9 @@ describe('Hero slot: broadcast player (NWS-014)', () => {
   it('the picture ends above the control row (captions / lower-thirds never behind it)', () => {
     const css = readSrcFile('features/news/hero/BroadcastPlayer.module.css')
     const frame = /\.frame\.frame\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    const root = /\.root\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(root).toMatch(/container-type:\s*inline-size/)
+    expect(frame).toMatch(/aspect-ratio:\s*auto !important/)
     expect(frame).toContain(
       'height: calc(100cqi / var(--vp-ratio, 1.7778) + var(--pulse-player-controls-h, 44px))',
     )

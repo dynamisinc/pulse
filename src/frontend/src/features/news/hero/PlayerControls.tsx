@@ -44,6 +44,11 @@ export interface PlayerControlsProps {
   readonly api: PlayerControlsApi
 }
 
+/** The keys a range input handles itself. */
+const SLIDER_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown',
+])
+
 /** Accessible name of the control group. */
 export const PLAYER_CONTROLS_LABEL = 'Video controls'
 
@@ -114,8 +119,10 @@ export function PlayerControls({ api }: PlayerControlsProps) {
         onPointerCancel={endDrag}
         onLostPointerCapture={endDrag}
         onBlur={endDrag}
-        // Keyboard use always follows the video's own time.
-        onKeyDown={endDrag}
+        // A slider key always steps from the video's own time (modifiers do not end a drag).
+        onKeyDown={event => {
+          if (SLIDER_KEYS.has(event.key)) endDrag()
+        }}
       />
 
       <span className={styles.time} data-testid="broadcast-time">

@@ -80,7 +80,6 @@ describe('PlayerControls', () => {
 
   it.each([
     ['a release outside the slider (lost pointer capture)', 'lostPointerCapture'],
-    ['a keyboard press', 'keyDown'],
     ['blur', 'blur'],
   ] as const)('%s ends the drag, so the thumb follows the video again', (_label, end) => {
     const controls = api({ currentTime: 12 })
@@ -91,6 +90,31 @@ describe('PlayerControls', () => {
     fireEvent[end](scrub)
     rerender(<PlayerControls api={{ ...controls, currentTime: 61 }} />)
     expect(scrub).toHaveValue('61')
+  })
+
+  it('a slider key ends the drag; a modifier does not', () => {
+    const controls = api({ currentTime: 12 })
+    const { rerender } = render(<PlayerControls api={controls} />)
+    const scrub = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.pointerDown(scrub)
+    fireEvent.change(scrub, { target: { value: '60' } })
+    fireEvent.keyDown(scrub, { key: 'Shift' })
+    rerender(<PlayerControls api={{ ...controls, currentTime: 13 }} />)
+    expect(scrub).toHaveValue('60')
+    fireEvent.keyDown(scrub, { key: 'ArrowRight' })
+    rerender(<PlayerControls api={{ ...controls, currentTime: 14 }} />)
+    expect(scrub).toHaveValue('14')
+  })
+
+  it('a primary press captures the pointer; a non-primary one does not', () => {
+    render(<PlayerControls api={api()} />)
+    const scrub = screen.getByRole('slider', { name: 'Seek' })
+    const capture = vi.fn()
+    scrub.setPointerCapture = capture
+    fireEvent.pointerDown(scrub, { button: 2, pointerId: 7 })
+    expect(capture).not.toHaveBeenCalled()
+    fireEvent.pointerDown(scrub, { button: 0, pointerId: 7 })
+    expect(capture).toHaveBeenCalledWith(7)
   })
 
   it('a non-primary button never starts a drag', () => {

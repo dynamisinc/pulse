@@ -399,7 +399,10 @@ export function VideoPlayer({
     return (
       <div
         className={[styles.player, className].filter(Boolean).join(' ')}
-        style={{ aspectRatio: singleMediaAspectRatio(media.width, media.height) }}
+        style={{
+          aspectRatio: singleMediaAspectRatio(media.width, media.height),
+          '--vp-ratio': singleMediaAspectRatio(media.width, media.height),
+        } as CSSProperties}
         data-testid="video-player-fallback"
       >
         <MediaFallbackTile alt={alt} kind="video" />
