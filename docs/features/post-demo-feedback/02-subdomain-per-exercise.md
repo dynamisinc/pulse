@@ -2,7 +2,7 @@
 
 **Feature:** Post-demo customer feedback  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** Not Started
 **Requirements:** COR-008 (finishes its unticked provisioning AC), COR-001/XC-001 (isolation), COR-005  ·  **Design decisions:** PDF-D6 (Tom, 10/21)  ·  **Issue:** #679
-**Stack:** fullstack + infra  ·  **World:** both (participant entry + staff switcher)  ·  **Review:** Tier-2 (scope-resolution seam; always-Critical isolation)  ·  **Priority:** Must  ·  **Effort:** L
+**Stack:** fullstack + infra  ·  **World:** both (participant entry + staff switcher)  ·  **Review:** Tier-2 (scope-resolution seam; always-Critical isolation)  ·  **Priority:** Must · **High** (Jonathan, 2026-11-06): pairs with the org sign-in work (identity-auth-roles 27/28, #835/#836), since an org admin who can create an exercise needs a working address for its players  ·  **Effort:** L
 
 ## Context
 10/20 demo: the customer liked `exercise-a.<env-host>` and it needs to be built. Source: Tom's demo notes.
