@@ -52,6 +52,14 @@ public sealed class ParticipantWriteRouteCoverageTests
         "/api/injects",
         "/api/org",
 
+        // December channels staff authoring, every write controllerOnly: the outlet registry (F03), the alert source's
+        // raise/clear (F10) and the weather zone registry. Participants READ these channels; nothing here is a
+        // participant write. Deliberately /api/weather/zones, not /api/weather, so a future participant weather write
+        // is still swept.
+        "/api/outlets",
+        "/api/alerts",
+        "/api/weather/zones",
+
         // Operator bootstrap / seeding (ops-key gated).
         "/api/ops",
 
