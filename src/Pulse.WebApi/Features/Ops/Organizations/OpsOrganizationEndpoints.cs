@@ -24,7 +24,8 @@ using Pulse.WebApi.Features.Ops.Bootstrap;
 /// in a customer tenant to present. Behind its own per-IP limiter (<see cref="RateLimitPolicy"/>) and
 /// <c>Cache-Control: no-store</c> (a 201 carries a bearer invite link).
 /// <c>201</c> <see cref="CreatedOrganizationDto"/>; the bare <c>404</c> for a wrong or unconfigured secret (checked before
-/// the body); <c>400 {"error":…}</c>; <c>409 {"error":"organization-exists"}</c>;
+/// the body is VALIDATED — but, as for <c>/api/ops/bootstrap-exercise</c>, a body the framework cannot bind at all, such as
+/// malformed JSON or a wrong content type, is the framework's 400/415 before the handler runs); <c>400 {"error":…}</c>; <c>409 {"error":"organization-exists"}</c>;
 /// <c>503 {"error":"invite-link-unavailable"}</c> without a frontend base URL.
 /// </remarks>
 public static class OpsOrganizationEndpoints

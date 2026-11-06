@@ -3,7 +3,8 @@
  * ---------------------------------------------------------------------------
  * The shared "copy this one-time link" presentation used by the reset-link action
  * (`PersonActionDialog`) and the invite dialog (`InvitePersonDialog`): a label carrying the
- * "shown once" warning, the link in a monospace block, and a Copy button. `useCopyLink` (in `useCopyLink.ts`) holds the
+ * "shown once" warning, the link in a monospace block, and a Copy button.
+ * `useCopyLink` (in `useCopyLink.ts`) holds the
  * clipboard state so each dialog can speak the result in its own always-mounted status region
  * (a modal hides the page from assistive tech). The link is a bearer credential: never logged.
  * STAFF world: COBRA button, FontAwesome only.

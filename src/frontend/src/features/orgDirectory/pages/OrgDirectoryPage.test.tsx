@@ -352,7 +352,8 @@ describe('invite person', () => {
     expect(screen.getByTestId('invite-status').getAttribute('role')).toBe('status')
     expect(screen.getByTestId('invite-status').textContent).toBe('Invite link created for Nina New.')
     expect(screen.getByTestId('org-people-action-status').textContent).toBe('Invite link created for Nina New.')
-    await waitFor(() => expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(callsBefore))
+    await waitFor(() =>
+      expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(callsBefore))
     fireEvent.click(screen.getByTestId('copy-invite-link'))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(INVITE))
     await waitFor(() => expect(screen.getByTestId('invite-status').textContent).toContain('copied'))

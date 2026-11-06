@@ -167,7 +167,8 @@ curl -sS -X POST "$API/api/ops/organizations" \
 `201 { organizationId, name, slug, adminPersonId, inviteUrl, emailed }`. It creates the organization (slug from the
 name, `-2`, `-3`… on a collision), its first org admin (with the staff facet) and a 7-day invite. **The `inviteUrl` is
 shown once** and is a bearer credential: send it to the admin over a private channel, never paste it in a ticket or
-chat log. The admin sets a password and is signed in to the (empty) organization. `409 organization-exists` when the
+chat log. The admin sets a password and is signed in to the (empty) organization. Until the org sign-in page ships
+(story 27, `/o/{slug}`) that automatic sign-in is their only UI way in while the organization has no exercise. `409 organization-exists` when the
 name is taken. **If the first admin's invite expires unused**, there is no ops re-issue route yet (follow-up), and the
 name is now taken, so re-running the call is a `409`: raise it with engineering.
 

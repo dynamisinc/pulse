@@ -132,8 +132,20 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
 - **Provisioning:** `POST /api/ops/organizations {name, adminEmail, adminDisplayName?}`
   (`Features/Ops/Organizations/*`), pre-auth allowlisted, `X-Bootstrap-Secret` gated (bare 404), own per-IP limiter,
   `no-store`. Creates the org (shared `OrganizationSlugAllocator`, #602 L-5 — `BootstrapService` now uses it too), the
-  first org admin WITH the staff facet, and a null-issuer invite delivered to the admin's own email (the null-issuer
-  rule). 201 with the link once; 409 `organization-exists`. Audits `org.organization.created` + `org.invite.issued`.
+  first org admin WITH the staff facet, and a null-issuer invite addressed to the admin's own email. 201 with the link
+  once; 409 `organization-exists`. Audits `org.organization.created` + `org.invite.issued`.
+  **Open decision (Tom / orchestrator):** while email is off the 201 also hands that null-issuer link to the ops caller,
+  which is a recorded exception to #665's null-issuer rule ("never to a third party"). The caller holds the bootstrap
+  secret, the admin has no prior credential, and the tenant is brand new, so W5 (a PEER admin holding a link) is not
+  engaged. Alternatives: return the link only when `emailed == false` (same today), or issue it as an admin-less but
+  ops-attributed token (needs a schema change).
+- **Sign-in UI gap (story 27):** there is no `/o/{slug}` page yet. The org sign-in is reached by the invite page's
+  automatic sign-in only; once that session ends, an org admin of an EMPTY organization has no UI way back in until
+  story 27 ships (an admin with an enrollment can use that exercise's `/staff/login` with email + password). The
+  "an empty org admin can then sign in at `/o/{slug}`" AC is met at the API (`POST /api/auth/staff/login {orgSlug}`).
+- **Accepted race:** an invite re-issued while the person concurrently redeems an earlier invite can leave the new
+  admin-held link live for a person who now has a password (equivalent to an admin reset, which is allowed for a
+  non-peer). Two concurrent re-invites are serialized on the person row.
 - **`CredentialTokenService.IsStaleFor`:** the tie (`CreatedAt == PasswordChangedAt`) is now fresh, so a token staged in
   the same unit of work as a password change survives it.
 - **No EF migration.**

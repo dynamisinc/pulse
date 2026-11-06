@@ -143,7 +143,8 @@ invite a disabled person or another org admin.
 
 > **Adding another org admin:** invite them first and select **Make admin** only after they have set
 > their password. Making someone an admin cancels any link they have not used yet, and you cannot send a
-> link to another org admin.
+> link to another org admin. If you made them an admin too early, select **Remove admin**, invite them
+> again, and make them an admin once they have set their password.
 
 ---
 

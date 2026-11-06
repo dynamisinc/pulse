@@ -163,3 +163,23 @@ function callArguments(source: string, name: string): string {
   }
   return source.slice(open)
 }
+
+describe('completeSignIn - the invite page (#575b) finishes through it too', () => {
+  const sources = import.meta.glob(
+    ['../staffPasswordReset/pages/StaffSetPasswordPage.tsx'],
+    { eager: true, query: '?raw', import: 'default' },
+  ) as Record<string, string>
+  const path = '../staffPasswordReset/pages/StaffSetPasswordPage.tsx'
+  const code = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1')
+
+  it('signs a granted invitee in through completeSignIn, never by hand', () => {
+    const source = code(sources[path] ?? '')
+    expect(source).toMatch(/\bcompleteSignIn\(/)
+    expect(source).toMatch(/from '@\/features\/login\/completeSignIn'/)
+    expect(source).toMatch(/\bpersist:\s*false\b/)
+    expect(source).not.toMatch(/\bpersist:\s*true\b/)
+    expect(source).not.toMatch(/\bsetTokens\(/)
+    expect(source).not.toMatch(/\bresetClientSession\(/)
+  })
+})

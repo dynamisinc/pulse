@@ -31,10 +31,18 @@ using Pulse.WebApi.Features.Org.PeopleDirectory;
 /// </para>
 /// <para>
 /// <b>The null issuer.</b> No person issues this invite (ops is not a Person), so the token carries
-/// <c>IssuedByPersonId = null</c>, which <see cref="CredentialTokenService.StageIssueAsync"/> allows only for a link
-/// delivered to the subject's OWN email: it is staged with <c>deliverToEmail</c> = the admin's address, after the person
-/// is saved, so the null-issuer rule is checked against the stored row. The redemption trusts a null issuer for an org
-/// admin target for exactly that reason (<see cref="PasswordResetService"/> W5).
+/// <c>IssuedByPersonId = null</c>. It is staged with <c>deliverToEmail</c> = the admin's address, after the person is
+/// saved, and handed to <see cref="IPulseMailer"/> for that address. That is NOT the whole story while email is off: the
+/// link is also returned to the ops caller (next paragraph), which is the one recorded exception to the null-issuer rule
+/// (<see cref="CredentialTokenService.StageIssueAsync"/>). The redemption's W5 check skips a null issuer
+/// (<see cref="PasswordResetService"/>); W5 guards against a PEER admin holding a link, and the ops caller is no peer.
+/// </para>
+/// <para>
+/// <b>Accepted trust, stated plainly.</b> While email is off, the same link is ALSO returned in the 201 to the ops caller,
+/// so whoever holds the bootstrap secret can set the first admin's password of each NEW organization. That is the §7.6
+/// design — the secret holder is the Dynamis operator provisioning the tenant, who could equally create the org with an
+/// address they control — and it reaches only a tenant this very call created (an existing organization's people are
+/// never touched here). Once ACS email is configured, a follow-up can stop returning the link.
 /// </para>
 /// <para>
 /// <b>Audit.</b> Two <see cref="OrgAuditEvent"/>s in the new organization, in the same unit of work:

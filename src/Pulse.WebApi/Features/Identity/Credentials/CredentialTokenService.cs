@@ -93,7 +93,10 @@ public sealed class CredentialTokenService
     /// <remarks>
     /// <b>The null-issuer rule (orchestrator decision, #665).</b> A token with no issuer may only be created by a path that
     /// delivers it to the person THEMSELVES: the first-admin invite to the invited address (#575b) and forgot-password to the
-    /// account's own address (later). Never to a third party. <see cref="PasswordResetService"/> trusts a null issuer at
+    /// account's own address (later). Never to a third party — with ONE recorded exception (#575b, pending the orchestrator's
+    /// sign-off): while email is off, <c>POST /api/ops/organizations</c> also returns the first admin's invite link to the
+    /// bootstrap-secret holder (the platform operator) for copy-link delivery; the subject is a brand-new admin with no prior
+    /// credential, of a tenant that same call created (see <c>OpsOrganizationService</c>). <see cref="PasswordResetService"/> trusts a null issuer at
     /// redemption (its W5 peer-admin check skips it), so this is where that trust is earned: #575b and forgot-password MUST
     /// pass <paramref name="deliverToEmail"/>. A violation throws <see cref="InvalidOperationException"/> rather than
     /// returning a refusal: the delivery target is chosen by server code, never by a request, so a mismatch is a programming
@@ -233,8 +236,10 @@ public sealed class CredentialTokenService
     /// <returns><c>true</c> when the token must be refused.</returns>
     /// <remarks>
     /// Only a token created STRICTLY before the change is stale. The tie (<c>CreatedAt == PasswordChangedAt</c>) is
-    /// fresh (#575b): every operation takes ONE wall-clock read, so a token staged in the SAME unit of work as a password
-    /// change (an invite issued alongside it) carries exactly that instant and must survive it. A token that really
+    /// fresh (#575b, requested by the orchestrator): every operation takes ONE wall-clock read, so a token staged in the
+    /// SAME unit of work as a password change carries exactly that instant and must survive it. No shipped path does that
+    /// yet (an invite refuses a person who has a password; the provisioned admin has none); it keeps a future one — an
+    /// admin-set temporary password issued with a link, say — from silently dying. A token that really
     /// predates the change in another unit of work was voided by <see cref="StageCredentialChangeInvalidationAsync"/>
     /// in the change's own transaction, so this check only has to catch the concurrent-commit window, where an exact
     /// tick tie is not a credible ordering signal either way.

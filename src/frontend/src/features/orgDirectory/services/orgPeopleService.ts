@@ -11,7 +11,8 @@
  *   POST  /api/org/people/{id}/password-reset (#576)           -> { resetUrl }
  *         404 bare; 409 target-is-org-admin | person-disabled; 503 reset-link-unavailable
  *
- *   POST  /api/org/people/invite { email, displayName } (#575b) -> { personId, inviteUrl, emailed, created }
+ *   POST  /api/org/people/invite { email, displayName } (#575b)
+ *     -> { personId, inviteUrl, emailed, created }
  *         400 invalid-email | invalid-display-name; 409 already-active | person-disabled |
  *         target-is-org-admin; 503 invite-link-unavailable
  *
@@ -98,7 +99,10 @@ export async function issuePasswordResetLink(personId: string): Promise<string> 
   }
 }
 
-/** Invites a person by email (copy-link flow; email is off). The link is returned once, never logged. */
+/**
+ * Invites a person by email (copy-link flow; email is off).
+ * The link is returned once, never logged.
+ */
 export async function inviteOrgPerson(request: OrgInviteRequest): Promise<OrgInviteResult> {
   try {
     const response = await api.post<OrgInviteResult>(`${PEOPLE_ENDPOINT}/invite`, {

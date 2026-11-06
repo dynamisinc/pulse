@@ -74,7 +74,11 @@ export function InvitePersonDialog({ onClose, onSuccess }: InvitePersonDialogPro
   return (
     <Dialog
       open
-      onClose={close}
+      // Once the link is shown, only Done closes: Escape or a backdrop
+      // click would discard the only copy.
+      onClose={() => {
+        if (link === undefined) close()
+      }}
       maxWidth="sm"
       fullWidth
       aria-labelledby={titleId}

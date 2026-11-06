@@ -201,7 +201,16 @@ public sealed partial class OrgInviteService
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // Bounded by the caller's own tenant: the same address in another customer is a different person.
+            // Serialize concurrent invites of the same existing person (cold review #8): take the row lock first with a no-op
+            // UPDATE, so a second invite waits here and its void statement then sees (and voids) the first one's committed
+            // token — never two live invites. Zero rows (a new address) locks nothing; the unique index arbitrates that race.
+            await _dbContext.People
+                .InOrganization(tenant)
+                .Where(p => p.Email == email)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Email, p => p.Email), cancellationToken);
+
+            // Bounded by the caller's own tenant: the same address in another customer is a different person. Read AFTER the
+            // lock, so the password / disabled / admin state checked below is the committed one.
             var person = await _dbContext.People
                 .InOrganization(tenant)
                 .FirstOrDefaultAsync(p => p.Email == email, cancellationToken);

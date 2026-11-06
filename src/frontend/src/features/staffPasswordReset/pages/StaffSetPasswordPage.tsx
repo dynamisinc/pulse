@@ -157,6 +157,9 @@ function SetPasswordBody({ variant }: { variant: SetPasswordVariant }) {
       .catch((caught: unknown) => {
         const failure = caught instanceof PasswordResetError ? caught : undefined
         if (failure?.status === 400 && failure.code === INVALID_TOKEN_CODE) {
+          // Terminal: the form never comes back, so drop the typed password now.
+          setPassword('')
+          setConfirm('')
           setPhase('invalid')
         } else if (failure?.status === 400) {
           setError(POLICY_MESSAGES[failure.code ?? ''] ?? GENERIC_POLICY_MESSAGE)
