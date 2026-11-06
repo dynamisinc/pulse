@@ -183,11 +183,10 @@ public static class ExerciseLifecycleStates
     /// <para>
     /// <b>Equal to <see cref="IsParticipantAccessible"/> today, by design — but a SEPARATE question.</b> REST
     /// access answers "may a participant READ this exercise's surface?"; this answers "may new content be PUSHED
-    /// live into an open participant tab?". A planned follow-up opens participant REST <i>reads</i> in
-    /// <c>completed</c> (a browsable after-action world); live pushes must stay closed there, because the run is
-    /// over and nothing should keep arriving. Keeping the two predicates apart means that change edits
-    /// <see cref="IsParticipantAccessible"/> alone and cannot silently reopen the hub. Do not re-express one in
-    /// terms of the other.
+    /// live into an open participant tab?". Participant REST <i>reads</i> are open in <c>completed</c> (the ended,
+    /// read-only review, via <see cref="IsParticipantReadServed"/>); live pushes stay closed there, because the run is
+    /// over and nothing should keep arriving. Keeping the predicates apart is what let that change leave the hub
+    /// closed. Do not re-express one in terms of another.
     /// </para>
     /// <para>
     /// Fails closed exactly like the access rule: an unknown literal or a missing row is never push-open.
@@ -200,9 +199,33 @@ public static class ExerciseLifecycleStates
         && canonical is Staged or Live or Paused;
 
     /// <summary>
+    /// <b>The participant READ carve-out (ended, read-only review — Tom, 2026-10-19).</b> Whether a participant-world
+    /// READ (<c>GET</c>/<c>HEAD</c> on a gated route) is served in <paramref name="state"/>: exactly when
+    /// <see cref="ExerciseLifecycleBehaviour.ParticipantReadsAccepted"/> holds, so <c>staged</c>, <c>live</c>,
+    /// <c>paused</c> and <c>completed</c>. <c>build</c>, <c>archived</c> and an unrecognized or missing status are
+    /// refused (fail closed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It differs from <see cref="IsParticipantAccessible"/> only in <c>completed</c>: after EndEx a participant may
+    /// still READ the run (the feed, threads, personas, the shell config) while every WRITE is refused by the gate
+    /// with <c>403</c>. The verb half of the rule lives in <see cref="ExerciseLifecycleGatedRoutes.IsServed"/>; this
+    /// predicate is the state half, keyed on the same flag the sign-in rule reads
+    /// (<see cref="IsParticipantSignInAllowed"/>), so "may sign in" and "may read" cannot drift apart.
+    /// </para>
+    /// <para>
+    /// Live pushes are a separate question and stay CLOSED in <c>completed</c> (<see cref="IsLivePushOpen"/>).
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when a participant read may be served.</returns>
+    public static bool IsParticipantReadServed(string? state) =>
+        BehaviourOf(state).ParticipantReadsAccepted;
+
+    /// <summary>
     /// <b>The overlay-endpoint carve-out (Tier-2 human ruling, decision 2).</b> Whether
-    /// <c>GET /api/overlay-state</c> — and ONLY that route — is served in <paramref name="state"/>: every
-    /// participant-accessible state, plus <c>completed</c>.
+    /// <c>/api/overlay-state</c> is served in <paramref name="state"/>: every participant-accessible state, plus
+    /// <c>completed</c> — which is exactly <see cref="IsParticipantReadServed"/>, and is expressed through it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -213,17 +236,16 @@ public static class ExerciseLifecycleStates
     /// that started 403ing this endpoint meant EndEx could never display.
     /// </para>
     /// <para>
-    /// <b>Scope discipline:</b> this reopens the overlay endpoint alone. <c>/api/feed</c> and every other
-    /// covered participant route stay refused in <c>completed</c> — the run is over and its content is not
-    /// browsable. <c>build</c> and <c>archived</c> remain FULLY closed, so AC3's letter still holds for those
-    /// two, and an unrecognized literal still fails closed.
+    /// <b>Since the read carve-out (2026-10-19)</b> every gated participant READ is served in <c>completed</c>, so
+    /// the overlay endpoint's own carve-out is the same set of states. It is kept as a named predicate (the gate still
+    /// serves the overlay route on it, whatever the verb) and is now defined through
+    /// <see cref="IsParticipantReadServed"/>, so the two cannot diverge. <c>build</c> and <c>archived</c> remain FULLY
+    /// closed, and an unrecognized literal still fails closed.
     /// </para>
     /// </remarks>
     /// <param name="state">A canonical or legacy lifecycle literal.</param>
     /// <returns><c>true</c> when the overlay endpoint may be served.</returns>
-    public static bool IsOverlayStateServed(string? state) =>
-        IsParticipantAccessible(state)
-        || (TryParse(state, out var canonical) && canonical is Completed);
+    public static bool IsOverlayStateServed(string? state) => IsParticipantReadServed(state);
 
     /// <summary>
     /// <b>One rule for all (Tom, 2026-10-19).</b> Whether a participant-world sign-in may admit a session in
@@ -238,8 +260,9 @@ public static class ExerciseLifecycleStates
     /// does not. A session is admitted wherever its holder could read, and nowhere else.
     /// </para>
     /// <para>
-    /// This is deliberately NOT <see cref="IsParticipantAccessible"/>, which still refuses <c>completed</c> and is what
-    /// the lifecycle gate serves participant routes on. The two differ only in <c>completed</c>.
+    /// This is deliberately NOT <see cref="IsParticipantAccessible"/>, which still refuses <c>completed</c>. The two
+    /// differ only in <c>completed</c>, where the lifecycle gate serves participant READS (on
+    /// <see cref="IsParticipantReadServed"/>, the same flag) and refuses every write.
     /// </para>
     /// </remarks>
     /// <param name="state">A canonical or legacy lifecycle literal.</param>
@@ -347,11 +370,11 @@ public sealed record ExerciseLifecycleBehaviour
     /// </para>
     /// <para>
     /// <b>It is also the flag for the participant REST read carve-out in <c>completed</c>.</b> It differs from
-    /// <see cref="ParticipantAccessOpen"/> only in <c>completed</c>, where reads are accepted but the gate does not yet
-    /// open. Today the lifecycle gating middleware still serves participant routes on
-    /// <see cref="ParticipantAccessOpen"/> (plus the overlay carve-out), so in <c>completed</c> a signed-in participant
-    /// reaches <c>/api/overlay-state</c> only. A follow-up that opens participant reads in <c>completed</c> should key the
-    /// gate on THIS flag rather than adding a parallel rule, so sign-in and reads cannot drift apart.
+    /// <see cref="ParticipantAccessOpen"/> only in <c>completed</c>. The lifecycle gating middleware serves a gated
+    /// participant route when <see cref="ParticipantAccessOpen"/> holds, OR when the request is a <c>GET</c>/<c>HEAD</c>
+    /// and THIS flag holds (<see cref="ExerciseLifecycleStates.IsParticipantReadServed"/>). So in <c>completed</c> a
+    /// signed-in participant can read every gated route, and every write is refused with <c>403</c>. Sign-in and reads
+    /// key on the one flag, so they cannot drift apart.
     /// </para>
     /// </remarks>
     public bool ParticipantReadsAccepted { get; init; }

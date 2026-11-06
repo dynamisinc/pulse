@@ -56,8 +56,9 @@ using Pulse.WebApi.Features.ParticipantShell;
 /// <b>XC-002 / COR-053.</b> The only input to the pause branch is an <see cref="OverlayStateSnapshot"/>, a record
 /// that structurally carries no staff field — no <c>actingHumanId</c> (COR-018), no <see cref="PauseTier"/> staff
 /// vocabulary, no timestamp of any kind. The output is the unchanged frozen three-field
-/// <see cref="OverlayStateResponse"/>. Note that the snapshot's additive <c>sequence</c> is NOT projected: the
-/// frozen shape carries three keys and the frontend's own wire guard types <c>sequence</c> as optional for
+/// <see cref="OverlayStateResponse"/> (plus the lifecycle's additive <c>ended</c> flag, passed through). Note that
+/// the snapshot's additive <c>sequence</c> is NOT projected: the frozen shape carries its own keys and the
+/// frontend's own wire guard types <c>sequence</c> as optional for
 /// exactly this body (a sequence-less GET re-bases the client's stale-push cutoff to 0, so later pushes are still
 /// accepted — it degrades permissively, never into a stuck holding page).
 /// </para>
@@ -154,6 +155,10 @@ public sealed class SteeringPauseOverlayProjection : IOverlayStateProjection
             // future writer skipped OverlayStateWire.CoerceRegister.
             Register = OverlayStateWire.CoerceRegister(snapshot.Register),
             Message = snapshot.Message,
+
+            // The lifecycle's 'ended' flag passes through untouched. A Freeze is only visible in a running world, so
+            // this is 'false' in practice — but the lifecycle owns the flag, and the decorator never re-derives it.
+            Ended = lifecycleOverlay.Ended,
         };
     }
 

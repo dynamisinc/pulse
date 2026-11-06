@@ -124,8 +124,8 @@ a 3 a.m. rollover) and a lifecycle-pin test in `ExerciseLifecycleGatingTests` te
   `.FallBack_RolloverZero_TheTwentyFiveHourDayEndsAtLocalMidnightInStandardTime`,
   `.FallBack_ThreeAmRollover_TheDayEndsAtThreeLocalAfterTheClocksFall`, `.AtTheDayEndExactly_TheNextDayHasBegun`.
 - **AC-6 (lifecycle pin; superseded 2026-10-19, EL-11, one rule for all):**
-  `ParticipantDayLongLifecyclePinTests.AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore`
-  (completed: feed 403, overlay 200; refresh succeeds and the refreshed token resolves a live session, Gate-1 S-1);
+  `ParticipantDayLongLifecyclePinTests.AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndCanStillRead`
+  (completed: feed 200 since the ended read-only review, overlay 200; refresh succeeds and the refreshed token resolves a live session, Gate-1 S-1);
   `ParticipantDayLongLifecyclePinTests.InAStateThatRefusesParticipantReads_ADayLongParticipantSession_IsNotRefreshed`
   (build, archived);
   `SessionServiceTests.Refresh_ParticipantWorldSession_InAParticipantReadState_Renews`,

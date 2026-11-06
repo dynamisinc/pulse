@@ -9,9 +9,17 @@
 > publish funnel (`ContentPublishService.ClockAsync`), the alert source (`AlertReader.ReadTimeAsync`, which also gates
 > scenario-time expiry), outlets (`OutletService`), weather zones (`WeatherZoneService`), the go-live readiness
 > opening-feed check (`ExerciseReadinessService`), and the steering-lever recorder (`EngineSteeringLeverRecorder`,
-> #618). The index migration was regenerated as `20261106151929_EngineRuntimeScenarioNowPostIndex`. It sorts after
-> the queued A3 migration (`20261030173000`) and BEFORE the A2 PR's `20261106153923_A2CredentialFoundation`, so
-> whichever of this PR and A2 merges second needs a textual re-merge of the model snapshot.
+> #618). The index migration was regenerated as `20261106151929_EngineRuntimeScenarioNowPostIndex`.
+>
+> **Migration order (merge of `main`, 2026-11-06).** A3 (`20261030173000_A3SetupContentParticipantName`) is now on
+> `main` and applied to UAT; this PR's migration sorts directly after it. The model snapshot was merged textually and
+> this migration's Designer re-scaffolded over the merged model (`docs/OPERATE.md` A3 step 3, applied to this
+> migration): the throwaway migration's `Up()`/`Down()` were empty and `has-pending-model-changes` reports none.
+> A2 (`20261106153923_A2CredentialFoundation`) is still with the A2 session and sorts AFTER this PR, so whichever of
+> this PR and A2 merges second re-merges the snapshot textually and re-scaffolds its own Designer the same way. The
+> same merge rewired two more readers `main` had gained to `IScenarioNow`: the org newsroom provisioner
+> (`OrgNewsroomProvisioner.TimeForAsync`, press-room 01) and the staff content service's schedule / preview clock
+> (`StaffContentService.ScenarioNowAsync`, channels-foundation).
 
 ## Context
 
@@ -147,20 +155,24 @@ the report) stamp the resolver's value. Static guard: a test fails if production
   `ExerciseReportScopeEndpointTests.ScenarioNow_IsTheRunningClock_OrTheLatestPostWhenLater_InTheExerciseZone`,
   `EasyLoginTelemetryTests.EventTime_StampsTheScenarioNowResolver_ElseTheWallClock`.
 - AC-5 (retired; the index migration): the entity XML doc; `MigrationRoundTripTests` unchanged (column still
-  mapped); `ScenarioNowPostIndexMigrationTests.TheMigration_IsTheStorysOnlyOne_AppliedAfterChannelsM1`,
+  mapped); `ScenarioNowPostIndexMigrationTests.TheMigration_IsTheStorysOnlyOne_AppliedAfterA3`,
   `ScenarioNowPostIndexMigrationTests.Post_HasTheExerciseIdThenCreatedScenarioTimeIndex_AndKeepsTheExerciseIdIndex`,
   `ScenarioNowPostIndexMigrationTests.Up_CreatesOnlyTheIndex_AndDown_DropsOnlyIt`; the deploy-script replay in
   `IdempotentMigrationScriptTests`.
 - AC-6 (isolation): `ScenarioNowResolverTests.AnotherExercisesLaterPost_NeverInformsThisExercisesScenarioNow_ScopedOrByExplicitId`,
   plus the other-exercise later post in the seed, freeze, settings, lifecycle and report tests above;
   `OrganizationScopeSweepTests` (ResolvedScope inventory 34 → 33 on the 2026-11-06 rebuild: the media upload no longer
-  reads the exercise row).
+  reads the exercise row; 34 after merging `main`, whose idle-db-autopause pacer sweep added one).
 - Readers added on main after 10/19 (2026-11-06 rebuild):
   `ContentPublishServiceTests.WithNoStartedClock_TheExercisesLatestPost_IsTheFallback_ThenNow` (the content funnel),
   `AlertEndpointsTests` (issue/clear stamps come from the resolver; expiry runs only on a started clock, CLK-7, and
   never on the wall clock), `ExerciseReadinessServiceTests.OpeningFeed_ComparesAgainstTheScenarioStart_NotTheRealWorldScheduledStart`
   and `ExerciseReadinessServiceTests.OpeningFeed_CountsAnyLiveTopLevelPost_WhenNoClockRuns` (the opening-feed bound is
   the running clock, else the latest post), and the weather-zone harness (a resolver over its stub clock).
+- Readers `main` gained before the 2026-11-06 merge: `OrgNewsroomProvisionerTests` and `StaffContentServiceTests`
+  (both through the funnel harness, which composes the real `ScenarioNowResolver`), and the
+  `RetiredScenarioTimeSourceGuardTests` sweep (both read the removed `ExerciseFacts.StoredScenarioTime`, so the merged
+  build did not compile until they were rewired).
 
 ## Known limitations / open questions (for Tom)
 

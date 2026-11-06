@@ -61,7 +61,7 @@ export function ReplyComposer({
   })
 
   // COR-015 / D1-011: absent for a read-only session and for one with no persona.
-  if (compose.isReadOnly || !compose.canPost) return null
+  if (compose.isReadOnly || !compose.canPost || compose.hiddenByEnd) return null
 
   return (
     <ComposerForm

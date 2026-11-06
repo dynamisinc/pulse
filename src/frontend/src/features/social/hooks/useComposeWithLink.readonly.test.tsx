@@ -3,14 +3,16 @@
  * ---------------------------------------------------------------------------
  * Channels-foundation 21: in a read-only SESSION (COR-015 / D1-011), even on a `full`
  * mount, `openComposerWithLink` returns `false` and there is no composer. A persona-less
- * session cannot post either, so it gets the same answer. `useSession()` is mocked, so this
- * lives in its own file (as `Composer.readonly.test.tsx` does).
+ * session cannot post either, so it gets the same answer, and so does a writable session once
+ * the exercise has ENDED (the read-only review's `useCanWrite` seam). `useSession()` is mocked,
+ * so this lives in its own file (as `Composer.readonly.test.tsx` does).
  */
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/core/auth'
 import { ShellContextProvider } from '@/features/participant-shell/mountContract'
+import { ExerciseEndedProvider } from '@/features/participant-shell/writeGate'
 
 const session = vi.hoisted(() => ({ current: undefined as unknown }))
 vi.mock('@/core/auth', () => ({ useSession: () => session.current }))
@@ -46,6 +48,30 @@ describe('useComposeWithLink: sessions that cannot post', () => {
   ])('%s: returns false and opens nothing', (_label, value) => {
     session.current = value
     const { result } = renderHook(() => useComposeWithLink(), { wrapper: Shell })
+
+    let opened: boolean | undefined
+    act(() => {
+      opened = result.current.openComposerWithLink('/news/newsline-7/a-story')
+    })
+
+    expect(opened).toBe(false)
+    expect(result.current.isOpen).toBe(false)
+    expect(result.current.composer).toBeNull()
+  })
+})
+
+describe('useComposeWithLink: an ended exercise', () => {
+  function EndedShell({ children }: { children: ReactNode }) {
+    return (
+      <Shell>
+        <ExerciseEndedProvider ended>{children}</ExerciseEndedProvider>
+      </Shell>
+    )
+  }
+
+  it('a writable session on a full mount: returns false and opens nothing', () => {
+    session.current = { ...BASE, isReadOnly: false }
+    const { result } = renderHook(() => useComposeWithLink(), { wrapper: EndedShell })
 
     let opened: boolean | undefined
     act(() => {

@@ -95,6 +95,7 @@ public sealed partial class WhiteNoiseService
     private readonly NoiseStateThrottle _throttle;
     private readonly PostIngestService _ingest;
     private readonly TimeProvider _timeProvider;
+    private readonly WhiteNoisePacerSignal _pacerSignal;
     private readonly ILogger<WhiteNoiseService> _logger;
     private readonly IScenarioNow _scenarioNow;
 
@@ -109,6 +110,7 @@ public sealed partial class WhiteNoiseService
     /// <param name="throttle">Limits post-driven pushes to one per 2 s per exercise.</param>
     /// <param name="ingest">The one post funnel.</param>
     /// <param name="timeProvider">The server clock.</param>
+    /// <param name="pacerSignal">Wakes the sleeping pacer after a level or pool change commits.</param>
     /// <param name="logger">Diagnostics.</param>
     /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public WhiteNoiseService(
@@ -122,6 +124,7 @@ public sealed partial class WhiteNoiseService
         NoiseStateThrottle throttle,
         PostIngestService ingest,
         TimeProvider timeProvider,
+        WhiteNoisePacerSignal pacerSignal,
         ILogger<WhiteNoiseService> logger,
         IScenarioNow scenarioNow)
     {
@@ -135,6 +138,7 @@ public sealed partial class WhiteNoiseService
         ArgumentNullException.ThrowIfNull(throttle);
         ArgumentNullException.ThrowIfNull(ingest);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(pacerSignal);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(scenarioNow);
 
@@ -148,6 +152,7 @@ public sealed partial class WhiteNoiseService
         _throttle = throttle;
         _ingest = ingest;
         _timeProvider = timeProvider;
+        _pacerSignal = pacerSignal;
         _logger = logger;
         _scenarioNow = scenarioNow;
     }
@@ -278,6 +283,9 @@ public sealed partial class WhiteNoiseService
             JsonSerializer.Serialize(new LevelChangedPayload(from, to!))));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        // After the commit, so the pacer's sweep sees the new level: it sleeps while no exercise is making noise.
+        _pacerSignal.Wake();
+
         var state = await BuildStateAsync(exerciseId, to!, facts.Status, CancellationToken.None);
 
         // The level has committed: a failed push must not turn it into a failed request. The console re-reads on
@@ -393,6 +401,9 @@ public sealed partial class WhiteNoiseService
 
         _dbContext.NoisePosts.AddRange(accepted);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // After the commit: a new pool under a level that is already on starts the sleeping pacer.
+        _pacerSignal.Wake();
 
         var poolSize = await _dbContext.NoisePosts.CountAsync(CancellationToken.None);
 

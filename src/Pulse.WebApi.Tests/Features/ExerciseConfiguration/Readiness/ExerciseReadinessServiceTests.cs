@@ -65,7 +65,7 @@ public sealed class ExerciseReadinessServiceTests
         report.LifecycleState.Should().Be("build");
         report.Blocking.Select(i => i.Id).Should().Equal(BlockingIds, "the blocking items are a fixed, ordered contract");
         report.Warnings.Select(i => i.Id).Should().Equal(WarningIds, "the warnings are a fixed, ordered contract");
-        report.Blocking.Where(i => i.Id is not ("participant-name" or "sign-in-methods"))
+        report.Blocking.Where(i => i.Id is not "sign-in-methods")
             .Should().OnlyContain(i => i.Status == ReadinessItemStatuses.Ok && i.Detail == null);
         report.Warnings.Should().OnlyContain(i => i.Status == ReadinessItemStatuses.Ok && i.Detail == null);
         report.Blocking.Concat(report.Warnings).Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.Label));
@@ -108,15 +108,41 @@ public sealed class ExerciseReadinessServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task ParticipantNameAndSignInMethods_AreAlwaysNotChecked_AndNeverBlock()
+    public async Task ParticipantName_IsOk_WhenAParticipantFacingNameIsSet()
     {
         var exerciseId = await SeedReadyAsync();
 
         var report = await ReadAsync(exerciseId);
 
         var name = Blocking(report, "participant-name");
-        name.Status.Should().Be(ReadinessItemStatuses.NotChecked);
-        name.Detail.Should().Be("Not checked yet — arrives with story 09 (participant-facing name).");
+        name.Status.Should().Be(ReadinessItemStatuses.Ok, "exercise-build-golive/09 made this a real blocking check");
+        name.Detail.Should().BeNull();
+    }
+
+    [RequiresDockerTheory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public async Task ParticipantName_IsOpenAndBlocks_WhenNoParticipantFacingNameIsSet(string? participantName)
+    {
+        // The internal Name is always set; it does NOT satisfy the item (there is no fallback, §8.4).
+        var exerciseId = await SeedReadyAsync(participantName: participantName);
+
+        var report = await ReadAsync(exerciseId);
+
+        var name = Blocking(report, "participant-name");
+        name.Status.Should().Be(ReadinessItemStatuses.Open);
+        name.Detail.Should().Be("No participant-facing name is set. Participants would see only the brand header.");
+        report.Ready.Should().BeFalse("a missing participant-facing name blocks staging");
+        report.OpenBlocking.Select(i => i.Id).Should().Equal("participant-name");
+    }
+
+    [RequiresDockerFact]
+    public async Task SignInMethods_IsAlwaysNotChecked_AndNeverBlocks()
+    {
+        var exerciseId = await SeedReadyAsync();
+
+        var report = await ReadAsync(exerciseId);
+
         var methods = Blocking(report, "sign-in-methods");
         methods.Status.Should().Be(ReadinessItemStatuses.NotChecked);
         methods.Detail.Should().Be("Not checked yet — needs identity-auth-roles 22 (sign-in methods).");
@@ -461,6 +487,8 @@ public sealed class ExerciseReadinessServiceTests
             ReadinessItemStatuses.Open, "A's controller is not B's");
         Blocking(emptyReport, "participant-access").Status.Should().Be(
             ReadinessItemStatuses.Open, "A's accounts and A's view-only code are not B's");
+        Blocking(emptyReport, "participant-name").Status.Should().Be(
+            ReadinessItemStatuses.Open, "A's participant-facing name is not B's");
         foreach (var id in WarningIds)
         {
             Warning(emptyReport, id).Status.Should().Be(
@@ -528,7 +556,8 @@ public sealed class ExerciseReadinessServiceTests
         bool inject = true,
         bool post = true,
         bool noise = true,
-        bool startClock = true)
+        bool startClock = true,
+        string? participantName = "Harbor City Exercise")
     {
         var exerciseId = Guid.NewGuid();
         if (startClock)
@@ -540,6 +569,7 @@ public sealed class ExerciseReadinessServiceTests
         {
             var exercise = ExerciseLifecycleTestData.ExerciseInState(exerciseId, "build");
             exercise.ScheduledStartAt = ScenarioStart;
+            exercise.ParticipantName = participantName;
             seed.Exercises.Add(exercise);
 
             if (controller)

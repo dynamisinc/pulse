@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -81,7 +82,9 @@ public sealed class ExerciseLifecycleCompositionTests
         root.GetProperty("state").GetString().Should().Be("pause");
         root.GetProperty("register").GetString().Should().Be("out-of-fiction");
         root.GetProperty("message").GetString().Should().BeEmpty();
-        root.EnumerateObject().Should().HaveCount(3, "the frozen OverlayStateResponse shape is filled, never reshaped");
+        root.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["state", "register", "message", "ended"],
+            "the frozen OverlayStateResponse triple is filled, never reshaped — plus the additive 'ended' flag");
     }
 
     /// <summary>A Live exercise with no steering overlay is byte-identical to the shipped Phase-1 constant.</summary>
@@ -122,26 +125,42 @@ public sealed class ExerciseLifecycleCompositionTests
     }
 
     /// <summary>
-    /// <b>Decision 2, end to end:</b> a <c>completed</c> exercise still SERVES <c>/api/overlay-state</c> — the
-    /// only way COR-054's participant-visible EndEx overlay can ever render — while <c>/api/feed</c> stays
-    /// refused in that same state.
+    /// <b>Decision 2, end to end, as widened by the ended read-only review (Tom, 2026-10-19):</b> a <c>completed</c>
+    /// exercise SERVES <c>/api/overlay-state</c> with <c>state: none</c> and <c>ended: true</c> — the shell's
+    /// "exercise has ended" signal — and its participant reads (here <c>/api/feed</c>) are served too.
     /// </summary>
     [RequiresDockerFact]
-    public async Task OverlayState_ForACompletedExercise_IsStillServed_SoEndExCanRender()
+    public async Task OverlayState_ForACompletedExercise_IsServed_NoneAndEnded()
     {
         var exerciseId = await SeedAsync("completed");
         await using var host = await StartAsync(exerciseId);
 
         var root = await GetJsonAsync(host, "/api/overlay-state");
 
-        root.EnumerateObject().Should().HaveCount(
-            3, "the frozen OverlayStateResponse shape is what EndEx will be carried on");
+        root.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["state", "register", "message", "ended"], "the frozen triple plus the additive 'ended' flag");
         root.GetProperty("state").GetString().Should().Be(
-            "none", "this story writes no endex overlay (COR-054 is exercise-clock's) — it only keeps the door open");
+            "none", "completed stays 'none' (Tom's #390 ruling): EndEx does not block reading — it is never 'endex'");
+        root.GetProperty("ended").GetBoolean().Should().BeTrue("a completed exercise has ended");
 
         (await host.Client.GetAsync(new Uri("/api/feed", UriKind.Relative))).StatusCode.Should().Be(
-            HttpStatusCode.Forbidden,
-            "the carve-out is the overlay endpoint ALONE — a completed run's content is not browsable");
+            HttpStatusCode.OK,
+            "the ended, read-only review: a completed run's content stays readable to participants");
+    }
+
+    /// <summary>Every other state answers <c>ended: false</c> — the flag is EndEx alone.</summary>
+    [RequiresDockerTheory]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    public async Task OverlayState_InARunningOrHeldExercise_IsNotEnded(string state)
+    {
+        var exerciseId = await SeedAsync(state);
+        await using var host = await StartAsync(exerciseId);
+
+        var root = await GetJsonAsync(host, "/api/overlay-state");
+
+        root.GetProperty("ended").GetBoolean().Should().BeFalse("'{0}' has not ended", state);
     }
 
     /// <summary>The frozen shell-state shape is filled, never reshaped.</summary>

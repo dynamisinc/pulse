@@ -20,9 +20,9 @@ using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// <b>Easy-login story 06 lifecycle pin (EL-11), as amended by the one-rule ruling (Tom, 2026-10-19).</b> A day-long
-/// participant session in a <c>completed</c> exercise refreshes into a live session and keeps the EXISTING
-/// lifecycle-gate behaviour — participant data routes <c>403</c>, and <c>/api/overlay-state</c> served (COR-054's EndEx
-/// overlay) — and its refresh is NOT refused. Refusing refresh at EndEx would sign participants out underneath the
+/// participant session in a <c>completed</c> exercise refreshes into a live session and gets the lifecycle gate's
+/// ended, read-only review (Tom, 2026-10-19) — participant data READS served, and <c>/api/overlay-state</c> served
+/// (carrying <c>ended: true</c>) — and its refresh is NOT refused. Refusing refresh at EndEx would sign participants out underneath the
 /// overlay they are meant to see; this pin stops a later change from doing that silently. In <c>build</c> and
 /// <c>archived</c> participant reads are refused, so under the one rule the refresh is refused too.
 /// </summary>
@@ -35,7 +35,7 @@ using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 [Collection(MsSqlCollection.Name)]
 public sealed class ParticipantDayLongLifecyclePinTests
 {
-    private const string SeededPostBody = "ENDEX MUST NOT SERVE THIS FEED";
+    private const string SeededPostBody = "AFTER ENDEX THIS FEED IS STILL READABLE";
 
     private readonly MsSqlContainerFixture _fixture;
 
@@ -43,7 +43,7 @@ public sealed class ParticipantDayLongLifecyclePinTests
 
     [RequiresDockerTheory]
     [InlineData("completed", HttpStatusCode.OK)]
-    public async Task AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore(
+    public async Task AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndCanStillRead(
         string state,
         HttpStatusCode expectedOverlay)
     {
@@ -74,8 +74,8 @@ public sealed class ParticipantDayLongLifecyclePinTests
 
         var feed = await host.Client.SendAsync(RequestWith("/api/feed", refreshed.SessionToken!));
         feed.StatusCode.Should().Be(
-            HttpStatusCode.Forbidden, "participant data routes stay refused in '{0}', refreshed token or not", state);
-        (await feed.Content.ReadAsStringAsync()).Should().NotContain(SeededPostBody);
+            HttpStatusCode.OK, "participant data READS are served in '{0}' (the ended, read-only review)", state);
+        (await feed.Content.ReadAsStringAsync()).Should().Contain(SeededPostBody);
 
         var overlay = await host.Client.SendAsync(RequestWith("/api/overlay-state", refreshed.SessionToken!));
         overlay.StatusCode.Should().Be(

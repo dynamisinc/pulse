@@ -133,6 +133,7 @@ describe('liveOverlayStateStore — seeding GET (AC4)', () => {
       state: 'none',
       register: 'in-fiction',
       message: '',
+      ended: false,
     })
   })
 
@@ -146,6 +147,7 @@ describe('liveOverlayStateStore — seeding GET (AC4)', () => {
       state: 'pause',
       register: 'out-of-fiction',
       message: '',
+      ended: false,
     })
     expect(getMock).toHaveBeenCalledWith('/overlay-state')
   })
@@ -192,6 +194,7 @@ describe('liveOverlayStateStore — pushes (AC2/AC3/AC5)', () => {
       state: 'pause',
       register: 'out-of-fiction',
       message: '',
+      ended: false,
     })
     expect(listener).toHaveBeenCalledTimes(1)
   })
@@ -223,6 +226,7 @@ describe('liveOverlayStateStore — pushes (AC2/AC3/AC5)', () => {
       state: 'pause',
       register: 'out-of-fiction',
       message: '',
+      ended: false,
     })
   })
 
@@ -357,6 +361,7 @@ describe('liveOverlayStateStore — a refused re-GET (WR-001)', () => {
       state: 'none',
       register: 'in-fiction',
       message: '',
+      ended: false,
     })
   })
 
@@ -460,6 +465,7 @@ describe('liveOverlayStateStore — a tab becoming visible re-GETs (#390)', () =
       state: 'none',
       register: 'in-fiction',
       message: '',
+      ended: false,
     })
   })
 

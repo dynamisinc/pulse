@@ -70,8 +70,15 @@ internal sealed class LinkCardTestWorld
 
     public MsSqlContainerFixture Fixture => _fixture;
 
-    /// <summary>Seeds an exercise with a stored scenario instant and zone (the telemetry fallbacks).</summary>
-    public async Task<Guid> SeedExerciseAsync(string? name = null, DateTimeOffset? scenarioTime = null, string timeZone = "America/New_York")
+    /// <summary>
+    /// Seeds an exercise with a stored scenario instant and zone (the telemetry fallbacks). <paramref name="name"/> is the
+    /// INTERNAL name; <paramref name="participantName"/> is the participant-facing one the card sheet carries (§8.4).
+    /// </summary>
+    public async Task<Guid> SeedExerciseAsync(
+        string? name = null,
+        DateTimeOffset? scenarioTime = null,
+        string timeZone = "America/New_York",
+        string? participantName = null)
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
@@ -82,6 +89,7 @@ internal sealed class LinkCardTestWorld
             Name = name ?? $"Coastal Surge {id:N}",
             TimeZone = timeZone,
             Status = "live",
+            ParticipantName = participantName,
         });
         await seed.SaveChangesAsync();
         await TestScenarioNow.SeedWorldTimeAsync(seed, id, scenarioTime); // engine-runtime/08: the world's time is its latest post

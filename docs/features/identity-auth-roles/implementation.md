@@ -207,5 +207,9 @@ Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODE
 | 23 Avatars **[Tier-2]** | fullstack | `Features/Identity/Avatars/*` | 24 | 20 | A2 | M |
 | 26 No-store auth | backend | auth group filter | none | any | A5 | S |
 | 25 Audit refused attribution | backend | attribution audit | 12, A1 | 26 | A5 | S |
+| 27 Org sign-in page **[Tier-2]** | fullstack | `features/login/pages/StaffSignInPage.tsx`, `staffSignInService.ts`, `OrgStaffLoginService.cs` (edit: host-implied org) | 15, 16, 17 | 28 | A1 follow-up (priority) | M |
+| 28 Staff console host **[Tier-2]** | backend + infra | `StaffConsole:Host` setting, host resolution, `infrastructure/modules/{webapp,staticwebapp}.bicep`, `parameters/uat.bicepparam` | 15, exercise-isolation 11 | 27 | A1 follow-up (priority) | M |
+
+Stories 27 and 28 were added 2026-11-06 (Jonathan) to close story 15's named frontend gap and the design's staff console host. Either can merge first; 27 alone makes org sign-in usable on existing exercise addresses.
 
 A1 stories need orchestrator clearance first for the EF migration, `Program.cs`, `App.tsx` / `staffRouteRegistry.tsx` and frozen-type changes (`Session`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, staff login request). One EF migration per wave.

@@ -134,11 +134,13 @@ public sealed class ExerciseRealtimeHubLifecycleTests
     }
 
     [RequiresDockerFact]
-    public async Task ReconnectAfterEndEx_EveryFrameType_ReachesStaffOnly_NeverTheParticipant()
+    public async Task ReconnectAfterEndEx_OnlyTheCorrectionFrames_ReachTheParticipant()
     {
         // Gate-2 S-1: the hub stays OPEN on connect after EndEx by design (the overlay client re-GETs on reconnect),
-        // so a participant can (re)connect to a completed exercise. Every one of the five frames must still reach
-        // only the staff group. Real reader, real transition, no stub.
+        // so a participant can (re)connect to a completed exercise. Every frame that ADDS to the world must still
+        // reach only the staff group; the ended read-only review's F-3 exception lets ONLY the corrections
+        // (PostRemoved, PostEdited) through, so a takedown or edit during the review reaches the open tab.
+        // Real reader, real transition, no stub.
         var exercise = await SeedExerciseAsync();
         var participantToken = await SeedParticipantSessionAsync(exercise.Id);
         var staffToken = await SeedStaffSessionAsync(exercise.Id);
@@ -154,9 +156,11 @@ public sealed class ExerciseRealtimeHubLifecycleTests
         await staff.WaitForAsync(sent[^1].Event, sent[^1].Id);
         await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
 
-        participant.Frames.Should().BeEmpty(
-            "a participant connected to a completed exercise must receive no feed frame of any type (#375)");
-        staff.Frames.Should().Equal(sent, "every frame type reaches the staff group, once each, in send order");
+        await participant.WaitForAsync(PostEdited, sent.Single(frame => frame.Event == PostEdited).Id);
+        participant.Frames.Should().Equal(
+            sent.Where(frame => frame.Event is PostRemoved or PostEdited),
+            "after EndEx a participant receives the corrections ONLY — no new post, pin, engagement (#375, F-3)");
+        staff.Frames.Should().Equal(sent, "every frame type reaches staff, once each, in send order");
     }
 
     /// <summary>A REAL EndEx: <c>live → completed</c> through the shipped lifecycle service, committed to SQL.</summary>

@@ -240,7 +240,7 @@ public sealed class EasyLoginTelemetryTests
         // else the latest post, else the caller's now), passed the caller's one wall-clock read.
         var now = new DateTimeOffset(2026, 10, 20, 13, 0, 0, TimeSpan.Zero);
         var world = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.Zero);
-        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid());
+        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid(), ParticipantName: null);
         var resolver = new Mock<IScenarioNow>();
         resolver.Setup(r => r.GetAsync(ExerciseId, now, It.IsAny<CancellationToken>())).ReturnsAsync(world);
 

@@ -32,6 +32,7 @@ public sealed class ExerciseFactsReaderTests
             Id = Guid.NewGuid(),
             OrganizationId = Organization.DefaultOrganizationId,
             Name = $"Looking Glass {Guid.NewGuid():N}",
+            ParticipantName = "Harbor City",
             TimeZone = "America/New_York",
             Status = "live",
         };
@@ -45,7 +46,8 @@ public sealed class ExerciseFactsReaderTests
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
         var facts = await new ExerciseFactsReader(context).GetAsync(exercise.Id);
 
-        facts.Should().Be(new ExerciseFacts(exercise.Name, "America/New_York", "live", Organization.DefaultOrganizationId));
+        facts.Should().Be(new ExerciseFacts(
+            exercise.Name, "America/New_York", "live", Organization.DefaultOrganizationId, "Harbor City"));
     }
 
     [RequiresDockerFact]

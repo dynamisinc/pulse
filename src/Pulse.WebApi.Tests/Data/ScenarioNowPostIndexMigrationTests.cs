@@ -19,17 +19,18 @@ using Xunit;
 public sealed class ScenarioNowPostIndexMigrationTests
 {
     /// <summary>
-    /// The latest migration on main when the story was rebuilt (2026-11-06). Other stories' migrations may land between
-    /// it and this one (A3/A2 are queued), so the proof is "applied after", not "directly after".
+    /// The latest migration on main when the story merged main (2026-11-06): A3 (<c>A3SetupContentParticipantName</c>,
+    /// already applied to UAT). Other stories' migrations may still land around this one (A2 = 20261106153923 sorts
+    /// after it), so the proof is "applied after", not "directly after".
     /// </summary>
-    private const string EarlierMigration = "20261029174012_Channels_M1_ContentFoundation";
+    private const string EarlierMigration = "20261030173000_A3SetupContentParticipantName";
 
     private const string MigrationName = "EngineRuntimeScenarioNowPostIndex";
 
     private const string IndexName = "IX_Posts_ExerciseId_CreatedScenarioTime";
 
     [Fact]
-    public void TheMigration_IsTheStorysOnlyOne_AppliedAfterChannelsM1()
+    public void TheMigration_IsTheStorysOnlyOne_AppliedAfterA3()
     {
         using var context = ModelOnlyContext();
         var migrations = context.Database.GetMigrations().ToList();

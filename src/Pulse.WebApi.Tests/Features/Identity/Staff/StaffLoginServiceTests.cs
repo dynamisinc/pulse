@@ -99,7 +99,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), issuer, TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Fresh Controller"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -155,7 +155,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), issuer, TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -186,7 +186,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), issuer, TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -213,7 +213,7 @@ public sealed class StaffLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), issuer, TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("newbie", "pw-123456", subject, "New Staffer"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -253,7 +253,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {
@@ -291,7 +291,7 @@ public sealed class StaffLoginServiceTests
 
         var issuer = new RecordingSessionIssuer();
         await using var context = _fixture.CreateContext();
-        var service = new StaffLoginService(context, swapped, issuer, TestScenarioNow.Over(context));
+        var service = new StaffLoginService(context, swapped, TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -324,7 +324,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "pw-123456", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -354,7 +354,7 @@ public sealed class StaffLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options);
-        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
+        var service = new StaffLoginService(context, ProviderFor("ctrl", "correct-secret", subject, "Ctrl"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new StaffLoginRequest
         {
@@ -380,7 +380,7 @@ public sealed class StaffLoginServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), new RecordingSessionIssuer(), TestScenarioNow.Over(context));
+            var service = new StaffLoginService(context, ProviderFor("plan", "pw-123456", subject, "Planner"), TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
             await service.LoginAsync(new StaffLoginRequest { Username = "plan", Secret = "pw-123456", ExerciseId = exercise.Id.ToString() });
         }
 
@@ -403,7 +403,8 @@ public sealed class StaffLoginServiceTests
         {
             var provider = new OrderRecordingIdentityProvider(ProviderFor("ctrl", "correct-secret", subject, "Ctrl"));
             var scenarioNow = new OrderCheckingScenarioNow(TestScenarioNow.Over(context), provider);
-            var service = new StaffLoginService(context, provider, new RecordingSessionIssuer(), scenarioNow);
+            var service = new StaffLoginService(
+                context, provider, TestPasswordVerifiers.New(), TestSignInTiming.NoFloor, new RecordingSessionIssuer(), scenarioNow);
 
             var result = await service.LoginAsync(new StaffLoginRequest
             {

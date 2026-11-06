@@ -141,6 +141,9 @@ public sealed class OrganizationScopeSweepTests
         // the same read the overlay GET performs, never a client-supplied id.
         // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        // idle-db-autopause: +1 for WhiteNoisePacer's sweep — the noise level is checked (ids only) for exercises that
+        // have pool rows, so the pacer can sleep while none is making noise; the same shape as the rehydrator's
+        // existence check, each id then worked in its own resolved scope.
         // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
         // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
         // channels-foundation/09: +1 for ExerciseChannelEnabledReader — the realtime disabled-channel gate's read of
@@ -155,7 +158,8 @@ public sealed class OrganizationScopeSweepTests
         // an explicit ExerciseId and is not an org-owned read). The ReactionService, ContentPublishService.ClockAsync,
         // AlertReader.ReadTimeAsync and EngineSteeringLeverRecorder reads above stay, but no longer select the retired
         // column (time zone / organization only).
-        ["ResolvedScope"] = 33,
+        // (Merged over idle-db-autopause's +1 above: 34 + 1 - 1 = 34.)
+        ["ResolvedScope"] = 34,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
@@ -187,7 +191,9 @@ public sealed class OrganizationScopeSweepTests
         // Organization.DefaultOrganizationId — now needs a marker. A count going above 1 means somebody
         // added a second unbounded read of the customer roster: check that it is still a by-known-id lookup
         // and not an enumeration before bumping this.
-        ["TenantRoot"] = 1,
+        // #602 L-5: +1 for BootstrapService.SlugTakenAsync — an EXISTENCE probe (AnyAsync, no row returned) by the unique
+        // slug, so a re-created default organization takes the backfill's -2/-3 suffix instead of tripping the index.
+        ["TenantRoot"] = 2,
     };
 
     [Fact]

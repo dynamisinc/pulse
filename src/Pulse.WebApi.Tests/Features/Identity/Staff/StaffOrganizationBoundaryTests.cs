@@ -119,6 +119,8 @@ public sealed class StaffOrganizationBoundaryTests
             var service = new StaffLoginService(
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 issuer,
                 TestScenarioNow.Over(context));
 
@@ -145,6 +147,8 @@ public sealed class StaffOrganizationBoundaryTests
             var service = new StaffLoginService(
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 issuer,
                 TestScenarioNow.Over(context));
 
@@ -175,6 +179,8 @@ public sealed class StaffOrganizationBoundaryTests
             var service = new StaffLoginService(
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer(),
                 TestScenarioNow.Over(context));
 
@@ -209,6 +215,8 @@ public sealed class StaffOrganizationBoundaryTests
             var service = new StaffLoginService(
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
+                TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer(),
                 TestScenarioNow.Over(context));
 

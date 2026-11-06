@@ -17,6 +17,10 @@ You will get a personal sign-in card or an email from exercise staff.
 Pulse runs in your web browser on a phone, tablet or computer. There is no app to download, but you
 can add it to your phone's home screen (see *On a phone or tablet*).
 
+The exercise may show its name on the sign-in page and, on a tablet or computer, under the logo in the
+social app's side menu. That is the name the exercise team chose for you. If no name is shown, you are
+still in the right place.
+
 **Your link is personal.** Do not share it or post it. Anyone who has it can sign in as you.
 
 ## 2. No link? Sign in with today's word
@@ -132,8 +136,15 @@ one was issued. Use the back arrow to return to the feed.
 If the feed is replaced by a holding page, exercise control has paused the exercise. **This is
 normal.** Keep the page open. It usually clears by itself when the exercise resumes; if exercise staff
 say the exercise has resumed and you still see it, reload the page. When exercise staff
-announce the end of the exercise (EndEx), reload the page or close the tab. Reloading shows an
-end-of-exercise page. Until you reload, the feed may stay on screen.
+announce the end of the exercise (EndEx), see the next section.
+
+## After the exercise ends
+
+When exercise staff end the exercise (EndEx), your open page changes by itself; you do not need to reload.
+A banner at the top reads **This exercise has ended. You can still read posts, but nothing new can be posted.**
+You can keep reading the feed, threads, profiles and your notifications, and look at your Following and Pinned
+tabs. You cannot post, reply, like, repost, pin, follow or edit anything. If you were halfway through writing a
+post, your text stays on screen so you can read or copy it, but it cannot be sent.
 
 ## 7. Need help?
 
