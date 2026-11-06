@@ -27,7 +27,7 @@ using Xunit;
 [Collection(MsSqlCollection.Name)]
 public sealed class A3SetupContentParticipantNameMigrationTests
 {
-    private const string PreviousMigration = "20261017120000_AdminIdentityFoundation";
+    private const string PreviousMigration = "20261029174012_Channels_M1_ContentFoundation";
     private const string MigrationUnderTest = "20261030173000_A3SetupContentParticipantName";
     private const string Transitioned = "exercise.lifecycle.transitioned";
 
