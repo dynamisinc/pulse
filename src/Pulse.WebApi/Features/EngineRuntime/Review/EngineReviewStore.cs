@@ -18,13 +18,17 @@ using Pulse.WebApi.Data.Entities;
 public sealed class EngineReviewStore : IEngineReviewStore
 {
     private readonly PulseDbContext _dbContext;
+    private readonly EngineReviewTickSignal _tickSignal;
 
     /// <summary>Creates the store over the persistence context.</summary>
     /// <param name="dbContext">The persistence context whose filter/guard confine every operation to scope.</param>
-    public EngineReviewStore(PulseDbContext dbContext)
+    /// <param name="tickSignal">Wakes the sleeping auto-HOLD tick when a write starts a countdown.</param>
+    public EngineReviewStore(PulseDbContext dbContext, EngineReviewTickSignal tickSignal)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(tickSignal);
         _dbContext = dbContext;
+        _tickSignal = tickSignal;
     }
 
     /// <inheritdoc />
@@ -34,6 +38,12 @@ public sealed class EngineReviewStore : IEngineReviewStore
 
         _dbContext.EngineReviewItems.Add(item);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // After the commit, so the tick's sweep sees the row: it may be sleeping with nothing to count down.
+        if (item.Disposition == DraftDisposition.CountingDown)
+        {
+            _tickSignal.Wake();
+        }
     }
 
     /// <inheritdoc />
@@ -73,6 +83,11 @@ public sealed class EngineReviewStore : IEngineReviewStore
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        if (disposition == DraftDisposition.CountingDown)
+        {
+            _tickSignal.Wake();
+        }
+
         return true;
     }
 }
