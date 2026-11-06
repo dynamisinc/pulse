@@ -60,6 +60,11 @@ public sealed class ParticipantWriteRouteCoverageTests
         "/api/alerts",
         "/api/weather/zones",
 
+        // Staff content authoring (channels-foundation 07, every write controllerOnly) and the portal resources shelf
+        // (exercise-portal 04, writes behind the staff filter + PlannerOrController; its GETs are the participant reads).
+        "/api/content-items",
+        "/api/portal/resources",
+
         // Operator bootstrap / seeding (ops-key gated).
         "/api/ops",
 
