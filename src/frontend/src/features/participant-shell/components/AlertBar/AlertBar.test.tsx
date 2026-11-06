@@ -84,10 +84,15 @@ describe('AlertBar — none state (AC1)', () => {
     // The live region stays mounted (so the none→first-alert transition below
     // announces) but is empty and reserves no space (AC1): no chip, message,
     // timestamp, or Details anatomy.
+    // Since story 11 the live region is a hidden child of the host (it announces
+    // arrivals only), so the host holds exactly that one empty node.
     const host = screen.getByTestId('pulse-alert-bar')
-    expect(host).toHaveAttribute('role', 'status')
+    const live = screen.getByRole('status')
+    expect(live).toHaveAttribute('data-testid', 'pulse-alert-bar-live')
+    expect(host).toContainElement(live)
     expect(host).toHaveAttribute('data-alert-treatment', 'none')
-    expect(host).toBeEmptyDOMElement()
+    expect(host.children).toHaveLength(1)
+    expect(live).toBeEmptyDOMElement()
     expect(screen.queryByTestId('pulse-alert-bar-message')).not.toBeInTheDocument()
     expect(screen.queryByTestId('pulse-alert-bar-details')).not.toBeInTheDocument()
   })
@@ -99,15 +104,16 @@ describe('AlertBar — none state (AC1)', () => {
     mockUseAlerts.mockReturnValue([])
     const { rerender } = render(<AlertBar />)
     const hostBefore = screen.getByTestId('pulse-alert-bar')
-    expect(hostBefore).toBeEmptyDOMElement()
+    const liveBefore = screen.getByRole('status')
+    expect(liveBefore).toBeEmptyDOMElement()
 
     mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info', message: 'First alert appears.' })])
     rerender(<AlertBar />)
 
     const hostAfter = screen.getByTestId('pulse-alert-bar')
     expect(hostAfter).toBe(hostBefore) // same element — region existed before content
-    expect(hostAfter).toHaveAttribute('role', 'status')
-    expect(hostAfter).toHaveTextContent('First alert appears.')
+    expect(screen.getByRole('status')).toBe(liveBefore)
+    expect(liveBefore).toHaveTextContent('INFO alert: First alert appears.')
   })
 })
 
