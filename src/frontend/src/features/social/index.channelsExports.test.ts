@@ -18,6 +18,7 @@ import { useRecentPublicPosts } from './hooks/useRecentPublicPosts'
 import { usePostById } from './hooks/usePostById'
 import { useComposeWithLink } from './hooks/useComposeWithLink'
 import { PostCard } from './components/post/PostCard'
+import { toPostView } from './services/feedService'
 
 describe('social barrel: channels-foundation 21 exports', () => {
   it('exports each addition as the same binding as its deep-path original', () => {
@@ -31,6 +32,8 @@ describe('social barrel: channels-foundation 21 exports', () => {
     expect(barrel.useComposeWithLink).toBe(useComposeWithLink)
     // The read-only card is the existing card (a prop), not a fork.
     expect(barrel.PostCard).toBe(PostCard)
+    // news-network 06: the embed maps its post with the feed's own mapping.
+    expect(barrel.toPostView).toBe(toPostView)
   })
 
   it('the route helpers build the existing in-channel paths, host-relative', () => {

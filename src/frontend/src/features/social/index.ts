@@ -125,3 +125,6 @@ export { usePostById } from './hooks/usePostById'
 export type { UsePostByIdResult } from './hooks/usePostById'
 export { useComposeWithLink } from './hooks/useComposeWithLink'
 export type { UseComposeWithLinkResult } from './hooks/useComposeWithLink'
+// news-network 06 (additive): the ONE ParticipantPostView + persona -> PostView mapping, so an
+// embedded post (`usePostById` answer + its author) reaches `<PostCard>` without a fork.
+export { toPostView } from './services/feedService'

@@ -7,7 +7,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SanitizedBody } from './SanitizedBody'
-import { BODY_ALLOWED_TAGS, INSIM_LINK_ATTR, sanitizeBodyHtml } from './sanitizeBody'
+import { BODY_ALLOWED_TAGS, INSIM_LINK_ATTR, PULL_QUOTE_CLASS, sanitizeBodyHtml } from './sanitizeBody'
 
 declare global {
   interface Window {
@@ -183,5 +183,44 @@ describe('sanitizeBodyHtml: href normalisation follows the browser (re-review W-
       .parseFromString(sanitizeBodyHtml(`<a href="${raw}">x</a>`), 'text/html')
       .querySelector('a')
     expect(a?.getAttribute('href')).toBe(stored)
+  })
+})
+
+describe('sanitizeBodyHtml: the article-rich markers (news 06)', () => {
+  it('keeps class only as exactly the pull-quote marker on a blockquote (server parity)', () => {
+    expect(sanitizeBodyHtml('<blockquote class="pull-quote">q</blockquote>'))
+      .toBe(`<blockquote class="${PULL_QUOTE_CLASS}">q</blockquote>`)
+    // Any other value is dropped, not normalised (story 01's article-rich rule).
+    expect(sanitizeBodyHtml('<blockquote class="evil pull-quote huge">q</blockquote>'))
+      .toBe('<blockquote>q</blockquote>')
+    // DOMPurify trims every attribute value before the hook sees it, so padding is harmless.
+    expect(sanitizeBodyHtml('<blockquote class=" pull-quote ">q</blockquote>'))
+      .toBe('<blockquote class="pull-quote">q</blockquote>')
+    expect(sanitizeBodyHtml('<blockquote class="Pull-Quote">q</blockquote>')).toBe('<blockquote>q</blockquote>')
+  })
+
+  it.each([
+    '<blockquote class="evil">q</blockquote>',
+    '<p class="pull-quote">q</p>',
+    '<span class="pull-quote">q</span>',
+  ])('strips any other class: %s', html => {
+    expect(sanitizeBodyHtml(html)).not.toMatch(/class=/)
+  })
+
+  it('keeps data-media-id only on a figure, and only an opaque id', () => {
+    expect(sanitizeBodyHtml('<figure data-media-id="m-1"><figcaption>c</figcaption></figure>'))
+      .toBe('<figure data-media-id="m-1"><figcaption>c</figcaption></figure>')
+    expect(sanitizeBodyHtml('<p data-media-id="m-1">p</p>')).toBe('<p>p</p>')
+    expect(sanitizeBodyHtml('<figure data-media-id="&quot;><script>x</script>"></figure>'))
+      .toBe('<figure></figure>')
+    expect(sanitizeBodyHtml('<figure data-media-id="../../etc"></figure>')).toBe('<figure></figure>')
+  })
+
+  it('a marker never carries a handler or style through', () => {
+    const clean = sanitizeBodyHtml(
+      `<blockquote class="pull-quote" style="color:red" onclick="${PWN}">q</blockquote>`
+      + `<figure data-media-id="m" onerror="${PWN}" style="x"></figure>`,
+    )
+    expect(clean).toBe('<blockquote class="pull-quote">q</blockquote><figure data-media-id="m"></figure>')
   })
 })
