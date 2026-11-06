@@ -1,0 +1,50 @@
+/*
+ * features/news/hero/HeroSlot.module.css
+ * The news hero slot (news story 05). Reads only F13 skin custom properties, each with a
+ * neutral fallback. The caption treatments are the four `skin.media.captionStyle` values.
+ */
+
+.hero {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+/* Phone width: full-bleed to the content edge, square corners (D3-P2 mobile). */
+@media (max-width: 599.98px) {
+  .hero {
+    --pulse-skin-radius: 0px;
+  }
+}
+
+/* The video caption (an image's caption is ContentMedia's own figcaption). */
+.caption {
+  margin-top: 6px;
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--pulse-skin-text, #3d4451);
+}
+
+/* Caption treatments: descendant `figcaption` so ContentMedia's caption follows too. */
+.captionPlain figcaption {
+  font-style: normal;
+}
+
+.captionItalicSerif figcaption {
+  font-family: var(--pulse-skin-font-dek, Georgia, 'Times New Roman', serif);
+  font-style: italic;
+}
+
+.captionSmallCaps figcaption {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+
+.captionShouty figcaption {
+  font-family: var(--pulse-skin-font-kicker, var(--pulse-skin-font-body, system-ui, sans-serif));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}

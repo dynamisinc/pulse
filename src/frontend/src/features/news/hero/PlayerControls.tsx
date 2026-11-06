@@ -1,0 +1,133 @@
+/**
+ * features/news/hero/PlayerControls.tsx
+ * ---------------------------------------------------------------------------
+ * The broadcast player's control row (news story 05; NWS-014, NFR-001). Drawn by the
+ * shared `VideoPlayer` through its `renderControls` hook, so it sits INSIDE the wrapper
+ * that goes fullscreen.
+ *
+ *   [play] [----o---------] 0:12 / 1:30 [mute] [CC] [full screen]
+ *
+ *  - A labelled control group ("Video controls"): play/pause, scrub, elapsed / total,
+ *    mute, captions (ONLY when the video exposes a captions track), fullscreen.
+ *  - TINT: the row's background is `--pulse-skin-player-tint` and its ink is
+ *    `--pulse-skin-on-player-tint` (F13 picks black or white, always >= 4.5:1 on the
+ *    tint). The row is OPAQUE, so chrome-over-poster contrast never depends on the
+ *    footage (the >= 3:1 floor, NFR-001). No other token reaches the player.
+ *  - NOT COLOUR-ONLY: every toggle has an icon swap, an accessible name and `aria-pressed`.
+ *  - 44px targets on a coarse pointer (CSS). One row, so the EXERCISE chip and bands
+ *    above it are never covered.
+ *
+ * Presentational: state and actions come from the player (`PlayerControlsApi`).
+ * Participant world: CSS Module + FontAwesome, no COBRA, no MUI.
+ */
+
+import type { ChangeEvent } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import {
+  faClosedCaptioning,
+  faCompress,
+  faExpand,
+  faPause,
+  faPlay,
+  faVolumeHigh,
+  faVolumeXmark,
+} from '@fortawesome/free-solid-svg-icons'
+import { formatDuration } from '@/core/media/player'
+import type { PlayerControlsApi } from '@/core/media/player'
+import styles from './PlayerControls.module.css'
+
+export interface PlayerControlsProps {
+  readonly api: PlayerControlsApi
+}
+
+/** Accessible name of the control group. */
+export const PLAYER_CONTROLS_LABEL = 'Video controls'
+
+export function PlayerControls({ api }: PlayerControlsProps) {
+  const { duration } = api
+  const max = duration !== undefined && duration > 0 ? duration : 0
+  const value = Math.min(api.currentTime, max)
+  const elapsed = formatDuration(api.currentTime)
+  const total = duration !== undefined ? formatDuration(duration) : '--:--'
+
+  const handleScrub = (event: ChangeEvent<HTMLInputElement>) => {
+    api.seekTo(Number(event.currentTarget.value))
+  }
+
+  return (
+    <div
+      className={styles.row}
+      role="group"
+      aria-label={PLAYER_CONTROLS_LABEL}
+      data-testid="broadcast-controls"
+    >
+      <button
+        type="button"
+        className={styles.button}
+        aria-label="Play"
+        aria-pressed={api.playing}
+        data-testid="broadcast-play"
+        onClick={api.togglePlay}
+      >
+        <FontAwesomeIcon icon={api.playing ? faPause : faPlay} aria-hidden="true" />
+      </button>
+
+      <input
+        type="range"
+        className={styles.scrub}
+        min={0}
+        max={max}
+        step="any"
+        value={value}
+        disabled={max === 0}
+        aria-label="Seek"
+        aria-valuetext={`${elapsed} of ${total}`}
+        data-testid="broadcast-scrub"
+        onChange={handleScrub}
+      />
+
+      <span className={styles.time} data-testid="broadcast-time">
+        <span>{elapsed}</span>
+        <span aria-hidden="true"> / </span>
+        <span className={styles.srOnly}> of </span>
+        <span>{total}</span>
+      </span>
+
+      <button
+        type="button"
+        className={styles.button}
+        aria-label="Mute"
+        aria-pressed={api.muted}
+        data-testid="broadcast-mute"
+        onClick={api.toggleMute}
+      >
+        <FontAwesomeIcon icon={api.muted ? faVolumeXmark : faVolumeHigh} aria-hidden="true" />
+      </button>
+
+      {api.captionsAvailable && (
+        <button
+          type="button"
+          className={styles.button}
+          aria-label="Captions"
+          aria-pressed={api.captionsOn}
+          data-testid="broadcast-captions"
+          onClick={api.toggleCaptions}
+        >
+          <FontAwesomeIcon icon={faClosedCaptioning} aria-hidden="true" />
+          {/* Not colour-only: "off" also draws a strike-through bar. */}
+          {!api.captionsOn && <span className={styles.strike} aria-hidden="true" />}
+        </button>
+      )}
+
+      <button
+        type="button"
+        className={styles.button}
+        aria-label={api.fullscreen ? 'Exit full screen' : 'Full screen'}
+        data-testid="broadcast-fullscreen"
+        onClick={api.toggleFullscreen}
+      >
+        <FontAwesomeIcon icon={api.fullscreen ? faCompress : faExpand} aria-hidden="true" />
+      </button>
+    </div>
+  )
+}

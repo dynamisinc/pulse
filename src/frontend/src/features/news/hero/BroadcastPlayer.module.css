@@ -1,0 +1,40 @@
+/*
+ * features/news/hero/BroadcastPlayer.module.css
+ * The news broadcast frame around the shared player (news story 05).
+ */
+
+.root {
+  width: 100%;
+  /* One 44px control row; the chip box and PlayerControls both read it. */
+  --news-player-controls-h: 44px;
+}
+
+/*
+ * The shared player's wrapper, reshaped for a news hero: square-ish skin radius instead of
+ * Social's 16px card corner, no card border. Doubled class so it outranks `.player`
+ * whatever order the two modules load in.
+ */
+.frame.frame {
+  border: 0;
+  border-radius: var(--pulse-skin-radius, 0);
+  background: #000;
+}
+
+.frame.frame:fullscreen {
+  border-radius: 0;
+}
+
+/*
+ * The EXERCISE chip's positioned box: the video frame above the control row. The chip
+ * (F14 `WatermarkSlot`, absolutely positioned bottom-right) therefore sits at the bottom-
+ * right of the PICTURE and never overlaps a control. Click-through.
+ */
+.chipBox {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: var(--news-player-controls-h, 44px);
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+}

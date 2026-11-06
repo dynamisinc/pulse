@@ -1,0 +1,119 @@
+/*
+ * features/news/hero/PlayerControls.module.css
+ * The broadcast control row (news story 05). Tinted ONLY by the skin's player tint
+ * (`--pulse-skin-player-tint`) and its F13-computed ink (`--pulse-skin-on-player-tint`).
+ * The fallbacks are a neutral near-black with white ink (>= 4.5:1).
+ *
+ * Height: one 44px row (`--news-player-controls-h`, set by the broadcast frame), so the
+ * EXERCISE chip box and the shared bands' 44px bottom lift sit exactly above it.
+ */
+
+.row {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* Above the EXERCISE bands (z 1) and the chip (z 2). */
+  z-index: 3;
+  display: flex;
+  box-sizing: border-box;
+  height: var(--news-player-controls-h, 44px);
+  align-items: center;
+  gap: 4px;
+  padding: 0 max(4px, env(safe-area-inset-right, 0px)) 0 max(4px, env(safe-area-inset-left, 0px));
+  /* Opaque: chrome-over-poster contrast never depends on the footage (NFR-001). */
+  background-color: var(--pulse-skin-player-tint, #111418);
+  color: var(--pulse-skin-on-player-tint, #ffffff);
+  font-family: var(--pulse-skin-font-body, system-ui, sans-serif);
+}
+
+.button {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.button:hover {
+  background-color: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+/* Visible on any tint: an ink ring, with a tint ring inside it. */
+.button:focus-visible,
+.scrub:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px var(--pulse-skin-player-tint, #111418);
+}
+
+.strike {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 2px;
+  background-color: currentColor;
+  transform: translate(-50%, -50%) rotate(-35deg);
+}
+
+.scrub {
+  flex: 1 1 auto;
+  min-width: 48px;
+  height: 36px;
+  margin: 0;
+  accent-color: currentColor;
+  background: transparent;
+  cursor: pointer;
+}
+
+.scrub:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.time {
+  flex: none;
+  padding: 0 4px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Coarse pointer (phones, tablets): 44px targets (NFR-001), the full row height. */
+@media (pointer: coarse) {
+  .button,
+  .scrub {
+    height: 44px;
+  }
+
+  .button {
+    width: 44px;
+  }
+}
+
+/* Very narrow screens: the scrub keeps priority over the time readout. */
+@media (max-width: 340px) {
+  .time {
+    display: none;
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
