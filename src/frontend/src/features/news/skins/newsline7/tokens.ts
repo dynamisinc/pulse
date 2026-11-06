@@ -25,8 +25,10 @@ const NAVY = '#0f2749'
 
 /**
  * Fallbacks are chosen for width as well as look: Oswald is condensed, so
- * its stack tries the condensed system faces first, keeping the swap's line
- * breaks close; Source Sans 3 falls back to the humanist system sans.
+ * its stack tries the condensed system faces first (Arial Narrow, Roboto
+ * Condensed), which keeps the swap's line breaks close where one is installed;
+ * past those it degrades to a regular-width sans. Source Sans 3 falls back to
+ * the humanist system sans.
  */
 const OSWALD = "'Oswald', 'Arial Narrow', 'Roboto Condensed', 'Helvetica Neue', sans-serif"
 const SOURCE_SANS = "'Source Sans 3', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
@@ -60,7 +62,7 @@ export const tokens: OutletSkinTokens = {
     news: {
       masthead: 'tv-bar',
       mastheadFill: NAVY,
-      liveChip: true,
+      liveChip: 'LIVE',
     },
   },
 }

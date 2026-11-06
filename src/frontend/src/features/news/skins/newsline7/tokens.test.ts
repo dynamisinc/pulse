@@ -41,7 +41,7 @@ describe('newsline7 token file', () => {
     expect(tokens.layout).toEqual({ rail: true, homeLead: 'video-lead' })
     expect(tokens.media.playerTint).toBe(NAVY)
     expect(tokens.breaking).toEqual({ style: 'bar', vocabulary: 'BREAKING NEWS' })
-    expect(tokens.ext?.news).toEqual({ masthead: 'tv-bar', mastheadFill: NAVY, liveChip: true })
+    expect(tokens.ext?.news).toEqual({ masthead: 'tv-bar', mastheadFill: NAVY, liveChip: 'LIVE' })
   })
 
   it('names no outlet: the displayed name ("Metro Desk 9") is registry data, not a token', () => {
@@ -61,6 +61,7 @@ describe('newsline7 token file', () => {
       expect(spec, `ext.news.${key}`).toBeDefined()
       if (spec?.type === 'enum') expect(spec.values).toContain(value)
       if (spec?.type === 'boolean') expect(typeof value).toBe('boolean')
+      if (spec?.type === 'string') expect(typeof value).toBe('string')
       if (spec?.type === 'color') expect(value).toMatch(/^#[0-9a-f]{6}$/i)
     }
   })
@@ -77,6 +78,7 @@ describe('newsline7 a11y floor (NFR-001)', () => {
   it('needs no clamp when finalized (the floor leaves palette and ext untouched)', () => {
     const finalized = finalizeSkinTokens(tokens, NEWSLINE7_SKIN_KEY)
     expect(finalized.palette).toEqual(tokens.palette)
+    expect(finalized.ext?.news).toEqual(tokens.ext?.news)
   })
 
   it('reads white on the red breaking bar at body size', () => {

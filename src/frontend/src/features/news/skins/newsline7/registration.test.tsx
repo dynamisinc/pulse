@@ -43,6 +43,8 @@ describe('newsline7 registration', () => {
   })
 
   it('loads its faces only when a newsline7 scope mounts', () => {
+    // Start from a clean registry (dropping the import-time registration) and re-register,
+    // so this test does not depend on the order or side effects of the ones above.
     resetSkinRegistryForTests()
     registerSkinExtension('news', NEWS_SKIN_EXTENSION)
     registerSkinTokens(NEWSLINE7_SKIN_KEY, tokens, { fonts })
@@ -60,7 +62,7 @@ describe('newsline7 registration', () => {
       value: { add: (f: FakeFontFace) => added.push(f.family), delete: vi.fn() },
     })
     try {
-      render(<SkinScope scopeId="other" tokens={tokens}><p>other</p></SkinScope>)
+      render(<SkinScope scopeId="other" tokens={tokens} skinKey="wire-room"><p>other</p></SkinScope>)
       expect(added).toEqual([])
 
       render(
