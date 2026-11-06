@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Pulse.Core.Core.Extensions;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Xunit;
 
@@ -163,6 +164,7 @@ public sealed class EngineTierPolicyTests
             services.AddEngineGeneration(new ConfigurationBuilder().Build());
             services.AddEngineRuntimeSeams();
             services.AddExerciseClock();
+            services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
             wire(services);
 
             services.Count(d => d.ServiceType == typeof(EngineTierPolicyRegistry)).Should().Be(

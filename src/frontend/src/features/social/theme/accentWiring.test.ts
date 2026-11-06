@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
 import appSource from '../../../App.tsx?raw'
+import registrationSource from '../registerSocialChannel.tsx?raw'
 import postBodySource from '../components/post/PostBody.tsx?raw'
 
 function css(pathFromSocial: string): string {
@@ -52,11 +53,13 @@ describe('the accent consumers all read the variable the scope sets', () => {
 })
 
 describe('the production tree mounts the scope', () => {
-  it('App.tsx wraps the social channel in <SocialBrandScope>, inside BrandThemeProvider', () => {
+  it('Social registers with SocialBrandScope as its theme scope, under BrandThemeProvider', () => {
     // Pins the wiring that makes `--pulse-ac` exist at all. If the scope moves (e.g. into
-    // SocialChannel itself), update this test, do not delete it.
-    expect(appSource).toMatch(
-      /<BrandThemeProvider>[\s\S]*<SocialBrandScope>\s*<SocialChannel\s*\/>\s*<\/SocialBrandScope>/,
-    )
+    // SocialChannel itself), update this test, do not delete it. Since channels-foundation
+    // 12 the channel router mounts the registered element inside its `themeScope`.
+    expect(registrationSource).toMatch(/element:\s*<SocialChannel\s*\/>/)
+    expect(registrationSource).toMatch(/themeScope:\s*SocialBrandScope\b/)
+    expect(appSource).toMatch(/import '\.\/features\/social\/registerSocialChannel'/)
+    expect(appSource).toMatch(/<BrandThemeProvider>[\s\S]*<ShellLayout>[\s\S]*<ChannelRouter\s*\/>/)
   })
 })

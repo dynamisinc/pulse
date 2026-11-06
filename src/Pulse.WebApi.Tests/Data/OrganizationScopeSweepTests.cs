@@ -141,7 +141,16 @@ public sealed class OrganizationScopeSweepTests
         // the same read the overlay GET performs, never a client-supplied id.
         // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
         // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
-        ["ResolvedScope"] = 30,
+        // channels-foundation/04: +1 for ContentPublishService.ClockAsync — the funnel's scenario-time fallback and time
+        // zone read of the IExerciseContext exercise (the FollowService pattern), never a request field.
+        // channels-foundation/09: +1 for ExerciseChannelEnabledReader — the realtime disabled-channel gate's read of
+        // EnabledChannels for the SERVER-resolved exercise a broadcast fans out for (never a client id), in its own scope.
+        // channels-foundation/10 (#706): +1 for AlertReader.ReadTimeAsync — the alert source's ONE read of the exercise
+        // row (time zone, persisted scenario instant) by the server-resolved scope (the request's, or the expiry sweep's
+        // own per-exercise scope).
+        // channels-foundation 08 (#704): +1 for ChannelEnablement.IsEnabledAsync — the enablement gate's read of the
+        // resolved exercise's EnabledChannels by the IExerciseContext id.
+        ["ResolvedScope"] = 34,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
@@ -179,7 +188,9 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/21: +1 for PasswordResetService — a by-id read of the person's OWN organization's name
         // (token.OrganizationId, stamped by the server at issue) for the password policy's context words. Still a
         // by-known-id lookup, never an enumeration.
-        ["TenantRoot"] = 2,
+        // #602 L-5: +1 for BootstrapService.SlugTakenAsync — an EXISTENCE probe (AnyAsync, no row returned) by the unique
+        // slug, so a re-created default organization takes the backfill's -2/-3 suffix instead of tripping the index.
+        ["TenantRoot"] = 3,
     };
 
     [Fact]

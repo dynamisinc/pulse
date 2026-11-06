@@ -41,7 +41,7 @@ import type { RosterCardDto } from './types'
 export interface CardProps {
   card: RosterCardDto
   /** `RosterCardsDto.exerciseName`. */
-  exerciseName: string
+  exerciseName: string | null
 }
 
 /** The name's class: the large face, stepping down for a long and then a very long name. */
@@ -60,7 +60,7 @@ function CardImpl({ card, exerciseName }: CardProps) {
   return (
     <article className={styles.card} data-testid="roster-card">
       <header className={styles.cardHeader}>
-        <p className={styles.exercise}>{exerciseName}</p>
+        {exerciseName && <p className={styles.exercise}>{exerciseName}</p>}
         <p className={styles.training}>Training exercise</p>
       </header>
 

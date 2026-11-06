@@ -103,6 +103,25 @@ public class ObserveStageTests
     }
 
     [Fact]
+    public void AfterAClockRewind_TheSilenceReFiresOnTheNormalCadence_NotWhenTheOldMarkerIsPassed()
+    {
+        var s = SeededStoryline(window: 20);
+        var clock = new FakeScenarioClock();
+        s.Tick(clock.Set(240)); // silent well past the window
+        s.RecordEngineReaction(240); // e.g. an ENGINE PAUSED hold re-based the cadence every tick up to 240
+
+        // A runtime reset rewinds the clock to 0 but keeps the storyline registered; officials are still silent.
+        s.Tick(clock.Set(0));
+        ObserveStage.Observe([s], NoAddressing, clock, minMinutesBetweenReactions: 3)
+            .InactionTriggers.Should().BeEmpty("the cadence restarts from the rewind minute");
+
+        s.Tick(clock.Set(3));
+        ObserveStage.Observe([s], NoAddressing, clock, minMinutesBetweenReactions: 3)
+            .InactionTriggers.Should().ContainSingle(
+                "the cadence (3) has elapsed since the rewind — not ~240 minutes later when the clock passes the old marker");
+    }
+
+    [Fact]
     public void AnOffPlatformMarker_IsSurfacedAsAnAddressingCandidate_NotMatchedHere()
     {
         var s = SeededStoryline();

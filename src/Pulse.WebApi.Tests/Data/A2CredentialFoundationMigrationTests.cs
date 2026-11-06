@@ -19,20 +19,20 @@ using Pulse.WebApi.Data.Entities;
 [Collection(MsSqlCollection.Name)]
 public sealed class A2CredentialFoundationMigrationTests
 {
-    private const string PreviousMigration = "20261017120000_AdminIdentityFoundation";
-    private const string MigrationUnderTest = "20261019200000_A2CredentialFoundation";
+    private const string PreviousMigration = "20261029174012_Channels_M1_ContentFoundation";
+    private const string MigrationUnderTest = "20261106150645_A2CredentialFoundation";
 
     private readonly MsSqlContainerFixture _fixture;
 
     public A2CredentialFoundationMigrationTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     [RequiresDockerFact]
-    public void TheMigration_IsTheLatest_AndSortsAfterAdminIdentityFoundation()
+    public void TheMigration_IsTheLatest_AndSortsAfterChannelsM1()
     {
         using var context = new PulseDbContext(
             new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
         var migrations = context.Database.GetMigrations();
-        migrations.Should().EndWith([PreviousMigration, MigrationUnderTest], "A2's one migration follows A1's");
+        migrations.Should().EndWith([PreviousMigration, MigrationUnderTest], "A2's one migration follows the channels M1 migration");
     }
 
     [RequiresDockerFact]

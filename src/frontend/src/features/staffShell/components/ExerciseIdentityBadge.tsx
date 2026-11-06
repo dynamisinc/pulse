@@ -48,6 +48,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffAssignments } from '@/features/staff/hooks/useStaffAssignments'
+import { selectInternalName } from '@/features/staff/hooks/useActiveExerciseInternalName'
 import { useSetActiveExercise } from '@/features/staff/hooks/useSetActiveExercise'
 import { friendlyErrorMessage, sameExercise } from '@/features/staff/components/switcherShared'
 import type { Enrollment } from '@/features/staff/types'
@@ -69,25 +70,28 @@ export interface ExerciseIdentityBadgeProps {
 }
 
 interface BadgeTextProps extends ExerciseIdentityBadgeProps {
-  exerciseName: string
+  /** INTERNAL name (never the participant-facing scope name); null renders no name line. */
+  exerciseName: string | null
 }
 
 /** The two text lines (name, role · cell), shared by static and menu-button forms. */
 function BadgeText({ exerciseName, role, cell }: BadgeTextProps) {
   return (
     <>
-      <Typography
-        sx={{
-          fontSize: 12,
-          fontWeight: 700,
-          whiteSpace: 'nowrap',
-          // Tablet portrait: a long exercise name WRAPS (never clipped, never ellipsised) so the
-          // identity badge shrinks instead of pushing the header past the viewport.
-          [STAFF_TABLET_PORTRAIT_MEDIA]: { whiteSpace: 'normal', lineHeight: 1.15 },
-        }}
-      >
-        {exerciseName}
-      </Typography>
+      {exerciseName && (
+        <Typography
+          sx={{
+            fontSize: 12,
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+            // Tablet portrait: a long exercise name WRAPS (never clipped, never ellipsised) so the
+            // identity badge shrinks instead of pushing the header past the viewport.
+            [STAFF_TABLET_PORTRAIT_MEDIA]: { whiteSpace: 'normal', lineHeight: 1.15 },
+          }}
+        >
+          {exerciseName}
+        </Typography>
+      )}
       <Typography
         sx={{
           fontSize: 9.5,
@@ -146,7 +150,9 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
   }, [scope.exerciseId])
 
   const activeExerciseId = justSwitchedTo?.exerciseId ?? scope.exerciseId
-  const displayName = justSwitchedTo?.exerciseName ?? scope.exerciseName
+  // INTERNAL name from the assignments, never the (nullable) participant-facing scope name.
+  const displayName =
+    justSwitchedTo?.exerciseName ?? selectInternalName(assignments, scope.exerciseId)
 
   // Dismissal is ALWAYS allowed (Esc, Tab, backdrop): a slow or stalled switch must
   // never trap a keyboard user in the modal menu. Closing does not cancel the
@@ -184,7 +190,7 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={`Switch exercise — current: ${displayName}, ${role} ${cell}`}
+        aria-label={`Switch exercise — current: ${displayName ? `${displayName}, ` : ''}${role} ${cell}`}
         onClick={event => handleOpen(event.currentTarget)}
         sx={{
           ...badgeFrameSx,
@@ -309,7 +315,7 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
  * a switcher menu button with two or more. See the module header.
  */
 export function ExerciseIdentityBadge({ role, cell }: ExerciseIdentityBadgeProps) {
-  const { exerciseName } = useExerciseContext()
+  const { exerciseId } = useExerciseContext()
   const assignmentsQuery = useStaffAssignments()
   // The switch mutation's `resetQueries()` clears the assignments while they refetch.
   // Keep the last-known list so `SwitchableBadge` (the menu, the trigger, and the
@@ -330,7 +336,11 @@ export function ExerciseIdentityBadge({ role, cell }: ExerciseIdentityBadgeProps
       title="Exercise identity — static while conduct is live (COR-005)"
       sx={{ ...badgeFrameSx, ...badgeTabletSx }}
     >
-      <BadgeText exerciseName={exerciseName} role={role} cell={cell} />
+      <BadgeText
+        exerciseName={selectInternalName(assignments, exerciseId)}
+        role={role}
+        cell={cell}
+      />
     </Box>
   )
 }

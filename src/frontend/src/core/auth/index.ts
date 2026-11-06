@@ -46,3 +46,4 @@ export { endSession, resetClientSession } from './endSession'
 // identity-auth-roles/17: the client mirror of the backend role matrix.
 export { can, usePermissions, LEAD_ONLY_RAISE_REASON } from './rolePermissions'
 export type { StaffAction, PermissionSubject, Permissions } from './rolePermissions'
+export { rememberReturnTo, takeReturnTo, clearReturnTo, isSafeReturnToPath } from './returnTo'

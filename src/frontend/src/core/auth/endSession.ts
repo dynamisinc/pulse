@@ -74,6 +74,7 @@ import { postCountsStore } from '@/features/social/services/postCountsStore'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
 import { runSessionResets } from './sessionReset'
+import { clearReturnTo } from './returnTo'
 
 /**
  * Fully tears down the client session: drops all cached server-state so no
@@ -100,5 +101,6 @@ export function resetClientSession(): void {
   editedPostsStore.reset()
   postCountsStore.reset()
   resetReplyIntent()
+  clearReturnTo()
   runSessionResets()
 }

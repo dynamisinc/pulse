@@ -305,13 +305,13 @@ describe('every icon-only participant control in the AC is wrapped', () => {
     ['components/Composer.tsx', 'label="Add emoji"', '<EmojiPickerButton'],
     ['components/media/MediaViewer.tsx', 'label="Previous image"', 'aria-label="Previous image"'],
     ['components/media/MediaViewer.tsx', 'label="Next image"', 'aria-label="Next image"'],
-    ['components/media/VideoPlayer.tsx', 'label="Mute"', 'aria-label="Mute"'],
+    ['core/media/player/VideoPlayer.tsx', 'label="Mute"', 'aria-label="Mute"'],
     [
-      'components/media/VideoPlayer.tsx',
+      'core/media/player/VideoPlayer.tsx',
       "label={fullscreen ? 'Exit full screen' : 'Expand'}",
       "aria-label={fullscreen ? 'Exit full screen' : 'Expand'}",
     ],
-    ['components/media/VideoPlayer.tsx', 'label="Play"', 'aria-label="Play"'],
+    ['core/media/player/VideoPlayer.tsx', 'label="Play"', 'aria-label="Play"'],
     ['explore/SearchBox.tsx', 'label="Clear search"', 'aria-label="Clear search"'],
     ['layout/ComposeModal.tsx', 'label="Close"', 'aria-label="Close"'],
     ['layout/DetailHeader.tsx', 'label="Back"', 'aria-label="Back"'],
@@ -322,7 +322,8 @@ describe('every icon-only participant control in the AC is wrapped', () => {
   ]
 
   it.each(WRAPPED)('%s: <ParticipantTooltip %s> wraps the control', (file, label, control) => {
-    const source = readSrcFile(`features/social/${file}`)
+    // The player moved to core/media/player (channels-foundation 14); the rest is Social's.
+    const source = readSrcFile(file.startsWith('core/') ? file : `features/social/${file}`)
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const open = source.search(new RegExp(`<ParticipantTooltip\\s+${escaped}`))
     expect(open, `no <ParticipantTooltip ${label}> in ${file}`).toBeGreaterThanOrEqual(0)

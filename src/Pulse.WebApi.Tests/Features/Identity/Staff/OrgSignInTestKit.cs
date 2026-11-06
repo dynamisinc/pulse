@@ -113,19 +113,31 @@ public sealed class OrgSignInTestKit
 
     public PulseDbContext Context() => _fixture.CreateContext();
 
-    /// <summary>The service as a request would build it: the chained provider over the given allowlist.</summary>
+    /// <summary>
+    /// The service as a request would build it: the chained provider over the given allowlist, both sharing ONE
+    /// request-scoped <see cref="StaffPasswordVerifier"/> (over <paramref name="hasher"/> when given — a counting spy).
+    /// </summary>
     public static OrgStaffLoginService Service(
         PulseDbContext context,
         ISessionIssuer issuer,
-        IList<DynamisStaffAccount>? allowlist = null) =>
-        new(
+        IList<DynamisStaffAccount>? allowlist = null,
+        IPasswordHasher<Person>? hasher = null,
+        StaffSignInTiming? timing = null,
+        Microsoft.Extensions.Logging.ILogger<OrgStaffLoginService>? logger = null)
+    {
+        var verifier = TestPasswordVerifiers.New(hasher);
+        return new(
             context,
             new PulsePasswordIdentityProvider(
                 context,
                 new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions
                 {
                     Accounts = allowlist is null ? [] : [.. allowlist],
-                }))),
+                })),
+                verifier),
+            verifier,
+            timing ?? TestSignInTiming.NoFloor,
             issuer,
-            NullLogger<OrgStaffLoginService>.Instance);
+            logger ?? NullLogger<OrgStaffLoginService>.Instance);
+    }
 }

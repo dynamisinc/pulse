@@ -53,8 +53,11 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before identity-auth-roles/16 (A1) — the shape UAT holds when the A1 cut deploys.</summary>
     private const string BeforeAdminIdentity = "20261017011709_DemoFeedbackNamedLookalikePairs";
 
+    /// <summary>The last migration before channels-foundation/01 (M1) — the shape UAT holds when the December channels cut deploys.</summary>
+    private const string BeforeChannelsM1 = "20261017120000_AdminIdentityFoundation";
+
     /// <summary>The last migration before identity-auth-roles/21 (A2) — the shape UAT holds when the A2 cut deploys.</summary>
-    private const string BeforeA2Credentials = "20261017120000_AdminIdentityFoundation";
+    private const string BeforeA2Credentials = "20261029174012_Channels_M1_ContentFoundation";
 
     private readonly MsSqlContainerFixture _fixture;
 
@@ -213,6 +216,54 @@ public class IdempotentMigrationScriptTests
     }
 
     [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpChannelsM1_OverAnExistingInjectItem_AndReplaysAsANoOp()
+    {
+        // channels-foundation/01 (lesson #413): the UAT shape on M1 deploy day — a run-sheet item written before
+        // InjectItems.ContentItemId existed — taken forward by the SCRIPT, batch by batch, as sqlcmd -b runs it. The
+        // index and the composite foreign key over that column name it in the same migration that adds it.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeChannelsM1);
+
+        var exerciseId = await database.InsertTenantExerciseAsync();
+        var injectItemId = await database.InsertLegacyInjectItemAsync(exerciseId);
+        var script = database.GenerateIdempotentScript();
+
+        // M1's filtered indexes reach the batch inside EXEC(N'…') (#413).
+        script.Should().Contain("EXEC(N'CREATE UNIQUE INDEX [IX_ContentItems_ExerciseId_ExternalSource_ExternalRef]")
+            .And.Contain("EXEC(N'CREATE INDEX [IX_ContentItems_ExerciseId_ScheduledScenarioTime]");
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the Channels_M1 batch must compile and run in the script, not just under Migrate()");
+        await AssertChannelsM1OverLegacyRowsAsync(database, injectItemId);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertChannelsM1OverLegacyRowsAsync(database, injectItemId);
+    }
+
+    private static async Task AssertChannelsM1OverLegacyRowsAsync(ScriptDatabase database, Guid injectItemId)
+    {
+        foreach (var table in new[]
+                 {
+                     "Outlets", "ContentItems", "ContentItemRevisions", "ContentItemMedia", "ChannelAlerts",
+                     "PortalConfigs", "PortalResources", "WeatherZones",
+                 })
+        {
+            (await database.TableExistsAsync(table)).Should().BeTrue("M1 creates {0}", table);
+        }
+
+        (await database.TableExistsAsync("PortalDisplays")).Should().BeFalse("PortalDisplay is Deferred (Q-35) and never created");
+        (await database.ScalarAsync<int>(
+                $"SELECT COUNT(*) FROM [InjectItems] WHERE [Id] = '{injectItemId}' AND [ContentItemId] IS NULL"))
+            .Should().Be(1, "an existing inject survives untouched with no content reference");
+    }
+
+    [RequiresDockerFact]
     public async Task TheDeployScript_BringsUpA2Credentials_OverA1Rows_AndReplaysAsANoOp()
     {
         // identity-auth-roles/21 (lesson #413): the UAT shape on A2 deploy day — an A1 world (people, staff and participant
@@ -287,6 +338,17 @@ public class IdempotentMigrationScriptTests
             SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
             WHERE a.[Id] = '{seed.PioAccount}' AND e.[Role] = 'pio' AND e.[PersonaId] IS NULL
             """)).Should().Be(1, "the pio account's role moves to its enrollment");
+        (await Count($"""
+            SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
+            WHERE a.[Id] = '{seed.StaffRoleAccount}' AND e.[Id] = a.[Id] AND e.[Role] = 'controller'
+              AND e.[PersonaId] IS NULL AND e.[PersonId] IS NULL AND e.[IsLead] = 0 AND e.[ExerciseId] = '{seed.Exercise}'
+            """)).Should().Be(
+                1,
+                "#602 Low-2: a legacy STAFF-role account carrying a persona takes the backfill's CASE ... ELSE NULL branch — "
+                + "its role is lower-cased onto its same-id enrollment and the persona is dropped (the enrollment check "
+                + "constraint refuses one on a staff role); an account-backed controller is never the lead");
+        (await Count($"SELECT COUNT(*) FROM [Enrollments] WHERE [ExerciseId] = '{seed.Exercise}' AND [IsLead] = 1"))
+            .Should().Be(1, "the exercise still has exactly one lead — the person-backed controller");
         (await Count("SELECT COUNT(*) FROM sys.columns WHERE [object_id] = OBJECT_ID('Accounts') AND [name] IN ('Role', 'PersonaId')"))
             .Should().Be(0, "the old homes are dropped once the data has moved");
 
@@ -321,6 +383,7 @@ public class IdempotentMigrationScriptTests
         Guid PersonaId,
         Guid ParticipantAccount,
         Guid PioAccount,
+        Guid StaffRoleAccount,
         Guid ControllerSession,
         Guid AdminSession,
         Guid ParticipantSession,
@@ -338,6 +401,7 @@ public class IdempotentMigrationScriptTests
             var personaId = Guid.NewGuid();
             var participantAccount = Guid.NewGuid();
             var pioAccount = Guid.NewGuid();
+            var staffRoleAccount = Guid.NewGuid();
             var controllerSession = Guid.NewGuid();
             var adminSession = Guid.NewGuid();
             var participantSession = Guid.NewGuid();
@@ -354,7 +418,8 @@ public class IdempotentMigrationScriptTests
                     ('{adminAssignment}', '{admin}', '{exercise}', N'orgAdmin', SYSDATETIMEOFFSET());
                 INSERT INTO [Accounts] ([Id], [ExerciseId], [Username], [DisplayName], [Role], [PersonaId], [CreatedAt], [FailedLoginCount]) VALUES
                     ('{participantAccount}', '{exercise}', N'user_{participantAccount:N}', N'Legacy Participant', N'participant', '{personaId}', SYSDATETIMEOFFSET(), 0),
-                    ('{pioAccount}', '{exercise}', N'user_{pioAccount:N}', N'Legacy PIO', N'pio', NULL, SYSDATETIMEOFFSET(), 0);
+                    ('{pioAccount}', '{exercise}', N'user_{pioAccount:N}', N'Legacy PIO', N'pio', NULL, SYSDATETIMEOFFSET(), 0),
+                    ('{staffRoleAccount}', '{exercise}', N'user_{staffRoleAccount:N}', N'Legacy Staff-Role Account', N'Controller', '{personaId}', SYSDATETIMEOFFSET(), 0);
                 INSERT INTO [Sessions] ([Id], [TokenHash], [Kind], [ExerciseId], [PrincipalId], [StaffUserId], [AccountId], [PersonaId],
                                         [Role], [ActingHumanId], [IsReadOnly], [IssuedAt], [ExpiresAt], [RefreshExpiresAt]) VALUES
                     ('{controllerSession}', N'hash-{controllerSession:N}', N'staff', '{exercise}', N'{controller}', '{controller}', NULL, NULL,
@@ -373,7 +438,7 @@ public class IdempotentMigrationScriptTests
 
             return new LegacyIdentityRows(
                 exercise, controller, admin, controllerAssignment, adminAssignment, personaId, participantAccount, pioAccount,
-                controllerSession, adminSession, participantSession, post, wentLiveAt);
+                staffRoleAccount, controllerSession, adminSession, participantSession, post, wentLiveAt);
         }
     }
 

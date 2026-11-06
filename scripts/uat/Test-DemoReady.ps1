@@ -18,7 +18,9 @@
          `freeze`: never leave FROZEN.
       3. Engine review queue (GET /api/engine/review-queue): 0 pending drafts (queued, counting down or held).
          WARN on 1 to 5, FAIL on more.
-      4. Generation provider (GET /api/engine/settings): the effective provider is Fake (DF-38).
+      4. Generation provider (GET /api/engine/settings): the effective provider is Fake (DF-38). With
+         -AllowLiveProvider a live provider (AzureOpenAI or ClaudeFoundry) is a PASS too, for a demo that runs the live AI on
+         purpose; a live provider configured but cut to Fake is then a WARN (the live AI will not answer).
       5. White noise (GET /api/staff/noise) is `off`, and media marking (GET /api/staff/chrome-settings,
          `watermarkEnabled`) is on. Noise posts newer than the seed anchor cannot be flagged: GET /api/feed has no
          origin field, so that line is a SKIP that reports the noise post count and the last one's scenario time.
@@ -72,11 +74,18 @@
 .PARAMETER JsonPath
     Where -Json writes.
 
+.PARAMETER AllowLiveProvider
+    Check 4 accepts a live generation provider (AzureOpenAI or ClaudeFoundry) as well as Fake. Use it when the demo runs the live
+    AI on purpose instead of DF-38's Fake provider; without it a live provider FAILS check 4.
+
 .EXAMPLE
     pwsh scripts/uat/Test-DemoReady.ps1
 
 .EXAMPLE
     pwsh scripts/uat/Test-DemoReady.ps1 -Json
+
+.EXAMPLE
+    pwsh scripts/uat/Test-DemoReady.ps1 -AllowLiveProvider     # the demo runs the live AI on purpose
 
 .EXAMPLE
     $env:PULSE_STAFF_SECRET = Get-Clipboard; pwsh scripts/uat/Test-DemoReady.ps1; $env:PULSE_STAFF_SECRET = $null
@@ -93,6 +102,7 @@ param(
     [string] $PackPath = (Join-Path $PSScriptRoot '../../docs/demo/pack/pack.json'),
     [switch] $Json,
     [string] $JsonPath,
+    [switch] $AllowLiveProvider,
     [string] $Subscription = '2a127d53-c9bf-471a-8196-3155eae6cb1b',
     [string] $ResourceGroup = 'rg-pulse-uat-centralus',
     [string] $WebAppName = 'app-pulse-api-uat-dynamis'
@@ -432,13 +442,26 @@ function Test-ReviewQueue {
 }
 
 function Test-GenerationProvider {
-    <# Check 4. #>
-    param([string] $BaseUrl, [string] $Token)
+    <# Check 4. -AllowLiveProvider: a live provider passes too (the demo runs the live AI on purpose). #>
+    param([string] $BaseUrl, [string] $Token, [switch] $AllowLiveProvider)
     $r = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/engine/settings' -Token $Token
     if ($r.Status -ne 200 -or $r.Json -isnot [System.Collections.IDictionary]) { Add-ReadyResult 4 'Generation provider' FAIL "expected GET /api/engine/settings 200; got $($r.Status)"; return }
     $effective = Get-PrintableText $r.Json['effectiveProvider'] -Max 40
-    if ($effective -ceq 'Fake') { Add-ReadyResult 4 'Generation provider' PASS 'expected Fake (DF-38); got Fake' }
-    else { Add-ReadyResult 4 'Generation provider' FAIL "expected Fake (DF-38); got $effective (configured $(Get-PrintableText $r.Json['provider'] -Max 40)). Cut generation to Fake in the console's engine settings" }
+    $configured = Get-PrintableText $r.Json['provider'] -Max 40
+    if (-not $AllowLiveProvider) {
+        if ($effective -ceq 'Fake') { Add-ReadyResult 4 'Generation provider' PASS 'expected Fake (DF-38); got Fake' }
+        else { Add-ReadyResult 4 'Generation provider' FAIL "expected Fake (DF-38); got $effective (configured $configured). Cut generation to Fake in the console's engine settings, or pass -AllowLiveProvider if the demo runs the live AI on purpose" }
+        return
+    }
+    # The live providers the API can select (Pulse.Core ServiceCollectionExtensions); anything else is not one.
+    $liveProviders = @('AzureOpenAI', 'ClaudeFoundry')
+    $effective = $effective.Trim()
+    $expected = 'expected Fake or a live provider (-AllowLiveProvider)'
+    if (-not $effective) { Add-ReadyResult 4 'Generation provider' FAIL "$expected; got no effective provider (configured $configured)" }
+    elseif ($effective -cin $liveProviders) { Add-ReadyResult 4 'Generation provider' PASS "$expected; got $effective, the live AI" }
+    elseif ($effective -cne 'Fake') { Add-ReadyResult 4 'Generation provider' FAIL "$expected; got '$effective', which is neither Fake nor a live provider ($($liveProviders -join ', '))" }
+    elseif ($configured.Trim() -and $configured.Trim() -cne 'Fake') { Add-ReadyResult 4 'Generation provider' WARN "$expected; got Fake, but $configured is configured: generation was cut to Fake, so the live AI will not answer. Restore the provider in the console's engine settings if the demo needs it" }
+    else { Add-ReadyResult 4 'Generation provider' PASS "$expected; got Fake" }
 }
 
 function Test-NoiseAndWatermark {
@@ -689,6 +712,7 @@ function Invoke-DemoReadyCheck {
         [string] $PackPath,
         [switch] $Json,
         [string] $JsonPath,
+        [switch] $AllowLiveProvider,
         [string] $Subscription,
         [string] $ResourceGroup,
         [string] $WebAppName
@@ -724,7 +748,7 @@ function Invoke-DemoReadyCheck {
             $tierState = Invoke-ReadyStep 2 'Pause tier' { Test-PauseTier -BaseUrl $baseUrl -Token $token }
             Test-Wave4Schema -TierState $tierState
             Invoke-ReadyStep 3 'Engine review queue' { Test-ReviewQueue -BaseUrl $baseUrl -Token $token }
-            Invoke-ReadyStep 4 'Generation provider' { Test-GenerationProvider -BaseUrl $baseUrl -Token $token }
+            Invoke-ReadyStep 4 'Generation provider' { Test-GenerationProvider -BaseUrl $baseUrl -Token $token -AllowLiveProvider:$AllowLiveProvider }
             Invoke-ReadyStep 5 'White noise and media marking' { Test-NoiseAndWatermark -BaseUrl $baseUrl -Token $token }
             $pinnedStatus = Invoke-ReadyStep 6 'Exercise pins' { Test-ExercisePins -BaseUrl $baseUrl -Token $token -Pack $pack }
             Invoke-ReadyStep 7 'Run sheet' { Test-RunSheet -BaseUrl $baseUrl -Token $token -Pack $pack }
@@ -768,7 +792,8 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $runArguments = @{
     ExerciseId = $ExerciseId; ApiHost = $ApiHost; SiteUrl = $SiteUrl; StaffUsername = $StaffUsername; PackPath = $PackPath
-    Json = $Json; JsonPath = $JsonPath; Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName
+    Json = $Json; JsonPath = $JsonPath; AllowLiveProvider = $AllowLiveProvider
+    Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName
 }
 $exitCode = Invoke-DemoReadyCheck @runArguments | Select-Object -Last 1
 exit ([int] $exitCode)

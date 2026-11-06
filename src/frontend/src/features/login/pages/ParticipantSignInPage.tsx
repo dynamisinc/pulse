@@ -176,6 +176,7 @@ import { resolveExerciseContext } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
 import { isStandalone } from '@/features/pwa/install/installEnv'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { takeReturnTo } from '@/core/auth/returnTo'
 import { completeSignIn } from '../completeSignIn'
 import { extractJoinToken } from '../linkToken'
 import { classifyJoinFailure, signInWithLink } from '../services/joinService'
@@ -246,7 +247,7 @@ function useResolvedExerciseName(): string | undefined {
     queryFn: resolveExerciseContext,
     retry: false,
   })
-  return data?.exerciseName
+  return data?.exerciseName ?? undefined
 }
 
 /**
@@ -315,7 +316,7 @@ export function ParticipantSignInPage() {
   function finishSignIn(envelope: LoginEnvelope) {
     completeSignIn(
       { token: envelope.token, refreshToken: envelope.refreshToken },
-      { persist: true, navigate, queryClient },
+      { persist: true, navigate, queryClient, returnTo: takeReturnTo() },
     )
   }
 

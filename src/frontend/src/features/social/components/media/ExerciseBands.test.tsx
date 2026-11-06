@@ -140,7 +140,7 @@ describe('ExerciseBands — what they draw (DF-4)', () => {
 // The stylesheet (read off disk)
 // -----------------------------------------------------------------------------
 
-const css = readSrcFile('features/social/components/media/ExerciseBands.module.css')
+const css = readSrcFile('core/media/player/ExerciseBands.module.css')
   .replace(/\/\*[\s\S]*?\*\//g, '')
 
 /** The body of the rule whose selector is exactly `selector`. */
@@ -248,8 +248,8 @@ describe('ExerciseBands — stacking in every host', () => {
   const bandsZ = zIndex(rule('.bands'))
 
   it.each([
-    ['features/social/components/media/VideoPlayer.module.css', '.topBar'],
-    ['features/social/components/media/VideoPlayer.module.css', '.playToggle'],
+    ['core/media/player/VideoPlayer.module.css', '.topBar'],
+    ['core/media/player/VideoPlayer.module.css', '.playToggle'],
     ['features/social/components/media/MediaTabGrid.module.css', '.playBadge'],
     ['features/social/components/media/MediaTabGrid.module.css', '.tileButton:focus-visible::after'],
     ['features/social/components/media/MediaGrid.module.css', '.tile:focus-visible::after'],
@@ -277,11 +277,11 @@ describe('ExerciseBands — stacking in every host', () => {
 
 describe('Two worlds: no COBRA / MUI on any file that draws the bands', () => {
   it.each([
-    'features/social/components/media/ExerciseBands.tsx',
+    'core/media/player/ExerciseBands.tsx',
     'features/social/components/media/MediaGrid.tsx',
     'features/social/components/media/MediaTabGrid.tsx',
     'features/social/components/media/MediaViewer.tsx',
-    'features/social/components/media/VideoPlayer.tsx',
+    'core/media/player/VideoPlayer.tsx',
     'features/social/components/ComposerMedia.tsx',
     'features/social/components/post/PostLinkCard.tsx',
     'features/social/pages/Profile.tsx',
