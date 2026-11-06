@@ -27,6 +27,7 @@
 import type { ReactNode } from 'react'
 import { useOptionalPreview } from '@/features/staffShell/previewContext'
 import { ChannelNotFound } from './ChannelNotFound'
+import { ChannelPending } from './ChannelPending'
 import { useEnabledChannels } from './enabled'
 
 export interface ChannelRouteProps {
@@ -46,22 +47,7 @@ export function ChannelRoute({ channelId, children }: ChannelRouteProps) {
   const enabled = isEnabled(channelId)
   const pending = status === 'loading' || (!enabled && isRefreshing)
 
-  if (pending) {
-    return (
-      <div role="status" style={{ minHeight: '50vh', padding: '48px 16px' }}>
-        <span style={visuallyHidden}>Loading…</span>
-      </div>
-    )
-  }
+  if (pending) return <ChannelPending />
 
   return enabled ? <>{children}</> : <ChannelNotFound />
 }
-
-const visuallyHidden = {
-  position: 'absolute',
-  width: '1px',
-  height: '1px',
-  overflow: 'hidden',
-  clip: 'rect(0 0 0 0)',
-  whiteSpace: 'nowrap',
-} as const
