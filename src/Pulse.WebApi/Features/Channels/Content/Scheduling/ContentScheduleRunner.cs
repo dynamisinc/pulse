@@ -59,11 +59,16 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 /// inject or engine output.
 /// </para>
 /// <para>
-/// <b>Cadence.</b> One sweep every <see cref="ContentScheduleRunnerOptions.Interval"/>, and at once when any exercise's
-/// clock changes (a jump, a resume: <see cref="ContentScheduleClockObserver"/> pokes <see cref="ContentScheduleSignal"/>).
-/// No database work while the host starts (the first sweep waits one interval or a wake-up); a failing sweep backs off,
-/// doubling up to <see cref="ContentScheduleRunnerOptions.MaxFailureBackoff"/>, and a repeated failure is logged once.
-/// One poisoned item is logged once and never stops the rest.
+/// <b>Cadence, and sleeping while idle (#673).</b> One sweep every <see cref="ContentScheduleRunnerOptions.Interval"/>
+/// while a scheduled item waits in an exercise whose clock is RUNNING (its scenario time moves, so it can come due with
+/// no write). Otherwise the runner SLEEPS (<see cref="ContentScheduleRunnerOptions.IdleSleep"/>, indefinitely by
+/// default) so the serverless database can auto-pause: nothing scheduled can come due without a write or a clock change,
+/// and each wakes it through <see cref="ContentScheduleSignal"/> — the funnel's schedule (after commit), any clock change
+/// (a start, a jump, leaving Freeze: <c>WakeOnClockChange</c>), and the coordinated <c>BackgroundWorkSafetySweep</c>. No
+/// database work while the host starts (the first sweep waits one interval or a wake-up, and is what picks up items left
+/// due by a restart); a failing sweep backs off, doubling up to
+/// <see cref="ContentScheduleRunnerOptions.MaxFailureBackoff"/>, and a repeated failure is logged once. One poisoned item
+/// is logged once and never stops the rest.
 /// </para>
 /// <para>
 /// <b>Inert in a host that does not compose the world.</b> The pause tiers and the exercise clock are what make a publish
@@ -90,7 +95,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     /// <param name="pauseTiers">The in-memory tiered-pause state; null (not composed) makes the runner inert.</param>
     /// <param name="clock">The native exercise clock (scenario time, COR-053); null (not composed) makes the runner inert.</param>
     /// <param name="timeProvider">The server clock driving the cadence only.</param>
-    /// <param name="signal">The wake-up line a clock change pokes.</param>
+    /// <param name="signal">The wake-up line a schedule, a clock change and the safety sweep poke.</param>
     /// <param name="options">The cadences.</param>
     /// <param name="logger">Diagnostics logger.</param>
     public ContentScheduleRunner(
@@ -118,21 +123,23 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     }
 
     /// <summary>
-    /// The wait before the next sweep: <see cref="ContentScheduleRunnerOptions.Interval"/>, and after
-    /// <paramref name="consecutiveFailures"/> failed sweeps in a row the interval doubled per further failure, never more
-    /// than <see cref="ContentScheduleRunnerOptions.MaxFailureBackoff"/> and never less than the interval.
+    /// The wait before the next sweep: <see cref="ContentScheduleRunnerOptions.Interval"/> while the last sweep left an
+    /// item waiting in a running exercise, <see cref="ContentScheduleRunnerOptions.IdleSleep"/> (until woken) otherwise —
+    /// and after <paramref name="consecutiveFailures"/> failed sweeps in a row the interval doubled per further failure,
+    /// never more than <see cref="ContentScheduleRunnerOptions.MaxFailureBackoff"/> and never less than the interval.
     /// </summary>
+    /// <param name="waiting">How many items the last successful sweep left waiting in an exercise whose clock runs.</param>
     /// <param name="consecutiveFailures">How many sweeps in a row have failed (0 after a success).</param>
     /// <param name="options">The cadences.</param>
     /// <returns>How long to wait (a wake-up still cuts it short).</returns>
-    public static TimeSpan NextDelay(int consecutiveFailures, ContentScheduleRunnerOptions options)
+    public static TimeSpan NextDelay(int waiting, int consecutiveFailures, ContentScheduleRunnerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         var interval = options.Interval > TimeSpan.Zero ? options.Interval : TimeSpan.FromSeconds(5);
         if (consecutiveFailures <= 0)
         {
-            return interval;
+            return waiting > 0 ? interval : options.IdleSleep;
         }
 
         var cap = options.MaxFailureBackoff > interval ? options.MaxFailureBackoff : interval;
@@ -149,11 +156,18 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>How many items this sweep published.</returns>
-    public async Task<int> RunTickAsync(CancellationToken cancellationToken = default)
+    public async Task<int> RunTickAsync(CancellationToken cancellationToken = default) =>
+        (await SweepAsync(cancellationToken).ConfigureAwait(false)).Published;
+
+    /// <summary>
+    /// The sweep behind <see cref="RunTickAsync"/>: how many items it published, and how many it left WAITING in an
+    /// exercise whose clock runs (they can come due with no write, so the loop keeps its cadence instead of sleeping).
+    /// </summary>
+    internal async Task<(int Published, int Waiting)> SweepAsync(CancellationToken cancellationToken = default)
     {
         if (_pauseTiers is not { } pauseTiers || _clock is not { } clock)
         {
-            return 0;
+            return (0, 0);
         }
 
         List<ScheduledItem> scheduled;
@@ -182,7 +196,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
             if (exerciseIds.Count == 0)
             {
                 _itemFailures.Clear();
-                return 0;
+                return (0, 0);
             }
 
             // org-scope-exempt(ResolvedScope): the ids are the exercises of scheduled items the trusted discovery read above
@@ -208,8 +222,11 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         }
 
         var published = 0;
+        var waiting = 0;
         foreach (var group in scheduled.GroupBy(item => item.ExerciseId))
         {
+            // Blocked exercises (not live, frozen, scenario time unknown) leave nothing WAITING: none of their items can
+            // come due until a lifecycle start or a clock change, and a clock change wakes the runner.
             if (!exercises.TryGetValue(group.Key, out var exercise)
                 || !ExerciseLifecycleStates.BehaviourOf(exercise.Status).ScenarioContentFires
                 || pauseTiers.GetTier(group.Key) == PauseTier.Freeze
@@ -219,13 +236,25 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                 continue;
             }
 
-            foreach (var item in group.Where(item => item.ScheduledScenarioTime <= scenarioNow))
+            var running = clock.IsRunning(group.Key);
+            foreach (var item in group)
             {
+                if (item.ScheduledScenarioTime > scenarioNow)
+                {
+                    waiting += running ? 1 : 0;
+                    continue;
+                }
+
                 try
                 {
-                    if (await PublishItemAsync(item, exercise, cancellationToken).ConfigureAwait(false))
+                    switch (await PublishItemAsync(item, exercise, cancellationToken).ConfigureAwait(false))
                     {
-                        published++;
+                        case ItemOutcome.Published:
+                            published++;
+                            break;
+                        case ItemOutcome.StillScheduled:
+                            waiting += running ? 1 : 0;
+                            break;
                     }
 
                     _itemFailures.TryRemove(item.ItemId, out _);
@@ -237,6 +266,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 #pragma warning disable CA1031 // One item's fault must not stop scheduled publishing for any other item.
                 catch (Exception ex)
                 {
+                    waiting += running ? 1 : 0; // a fault is retried, not abandoned
                     var signature = FailureSignature(ex);
                     if (!_itemFailures.TryGetValue(item.ItemId, out var logged)
                         || !string.Equals(logged, signature, StringComparison.Ordinal))
@@ -249,7 +279,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
             }
         }
 
-        return published;
+        return (published, waiting);
     }
 
     /// <inheritdoc />
@@ -265,6 +295,9 @@ public sealed partial class ContentScheduleRunner : BackgroundService
             return;
         }
 
+        // The first wait is the interval (or a wake-up), never an idle sleep: that first sweep is what picks up items left
+        // due by a restart, since nothing else wakes the runner for them.
+        var delay = NextDelay(waiting: 1, consecutiveFailures: 0, _options);
         var consecutiveFailures = 0;
         string? lastLoggedFailure = null;
 
@@ -272,8 +305,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         {
             try
             {
-                await _signal.WaitAsync(NextDelay(consecutiveFailures, _options), _timeProvider, stoppingToken)
-                    .ConfigureAwait(false);
+                await _signal.WaitAsync(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -282,7 +314,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 
             try
             {
-                await RunTickAsync(stoppingToken).ConfigureAwait(false);
+                var (_, waiting) = await SweepAsync(stoppingToken).ConfigureAwait(false);
                 if (consecutiveFailures > 0)
                 {
                     LogSweepRecovered(consecutiveFailures);
@@ -290,6 +322,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 
                 consecutiveFailures = 0;
                 lastLoggedFailure = null;
+                delay = NextDelay(waiting, consecutiveFailures, _options);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -305,6 +338,8 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                     LogSweepFailed(ex, consecutiveFailures);
                     lastLoggedFailure = signature;
                 }
+
+                delay = NextDelay(waiting: 0, consecutiveFailures, _options);
             }
 #pragma warning restore CA1031
         }
@@ -314,8 +349,8 @@ public sealed partial class ContentScheduleRunner : BackgroundService
     private static string FailureSignature(Exception exception) =>
         $"{exception.GetType().FullName}: {exception.Message}";
 
-    /// <summary>Publishes one due item in its own scope; <c>true</c> when this call published it.</summary>
-    private async Task<bool> PublishItemAsync(ScheduledItem item, ExerciseFacts exercise, CancellationToken cancellationToken)
+    /// <summary>Publishes one due item in its own scope, and says what became of it.</summary>
+    private async Task<ItemOutcome> PublishItemAsync(ScheduledItem item, ExerciseFacts exercise, CancellationToken cancellationToken)
     {
         // A fresh scope per item: each publish owns a clean unit of work, so one item's conflict or fault cannot leave
         // tracked state behind for the next.
@@ -350,7 +385,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         if (await services.GetRequiredService<ScheduledByReader>().ReadAsync(item.ItemId, cancellationToken).ConfigureAwait(false)
             is not { } scheduledBy)
         {
-            return false;
+            return ItemOutcome.Gone;
         }
 
         var caller = scheduledBy.Caller;
@@ -365,7 +400,7 @@ public sealed partial class ContentScheduleRunner : BackgroundService
         switch (result.Outcome)
         {
             case ContentPublishOutcome.Ok:
-                return true;
+                return ItemOutcome.Published;
 
             case ContentPublishOutcome.Invalid or ContentPublishOutcome.Held:
                 var error = result.Errors.Count == 0
@@ -376,15 +411,35 @@ public sealed partial class ContentScheduleRunner : BackgroundService
                         .ConfigureAwait(false))
                 {
                     LogPublishRefused(item.ExerciseId, item.ItemId, result.Outcome);
+                    return ItemOutcome.ReturnedToDraft;
                 }
 
-                return false;
+                return ItemOutcome.StillScheduled;
+
+            case ContentPublishOutcome.NotFound:
+                return ItemOutcome.Gone;
 
             default:
-                // Conflict: another instance or a staff action got there first, or the item is no longer due. NotFound:
-                // deleted meanwhile. Skip silently.
-                return false;
+                // Conflict: another instance or a staff action got there first, or the item is no longer due. Skip
+                // silently; if it is still scheduled the next sweep sees it as it is now.
+                return ItemOutcome.StillScheduled;
         }
+    }
+
+    /// <summary>What a sweep's publish attempt left behind.</summary>
+    private enum ItemOutcome
+    {
+        /// <summary>Published by this call.</summary>
+        Published,
+
+        /// <summary>Refused and returned to draft (no longer the runner's).</summary>
+        ReturnedToDraft,
+
+        /// <summary>Deleted or invisible since discovery.</summary>
+        Gone,
+
+        /// <summary>Possibly still scheduled (a lost race or a staff change); the next sweep looks again.</summary>
+        StillScheduled,
     }
 
     [LoggerMessage(
@@ -428,10 +483,17 @@ public sealed partial class ContentScheduleRunner : BackgroundService
 public sealed class ContentScheduleRunnerOptions
 {
     /// <summary>
-    /// The period between sweeps — and the wait before the FIRST sweep after start-up; a clock change cuts it short.
-    /// Default 5 s.
+    /// The period between sweeps while an item waits in a running exercise — and the wait before the FIRST sweep after
+    /// start-up, and the base the failure backoff doubles from; a wake-up cuts it short. Default 5 s.
     /// </summary>
     public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The wait after a sweep that left nothing waiting in a running exercise; a wake-up cuts it short. Default
+    /// <see cref="Timeout.InfiniteTimeSpan"/>: an idle runner does no database work until a schedule, a clock change or the
+    /// safety sweep wakes it, so the database can auto-pause between exercises (#673).
+    /// </summary>
+    public TimeSpan IdleSleep { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
     /// The longest wait between sweeps while sweeps keep failing (the wait doubles from <see cref="Interval"/> per

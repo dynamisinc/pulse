@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Channels.Content.Scheduling;
 
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Channels.Content.Publish;
+using Pulse.WebApi.Features.BackgroundWork;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 
@@ -26,10 +27,10 @@ public static class ContentSchedulingServiceCollectionExtensions
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(new ContentScheduleRunnerOptions());
-        services.TryAddSingleton<ContentScheduleSignal>();
+        // #673: the runner sleeps while idle; a schedule (the funnel), any clock change and the safety sweep wake it.
+        services.AddWakeSignal<ContentScheduleSignal>(wakeOnClockChange: true);
         services.TryAddScoped<ScheduledByReader>();
         services.TryAddScoped<IScheduledContentPublisher, ContentPublishService>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IExerciseClockChangeObserver, ContentScheduleClockObserver>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ContentScheduleRunner>(provider => new ContentScheduleRunner(
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetService<PauseTierRegistry>(),

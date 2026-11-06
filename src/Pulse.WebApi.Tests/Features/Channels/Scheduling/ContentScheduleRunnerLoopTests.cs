@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Features.BackgroundWork;
 using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
@@ -23,16 +24,18 @@ using Xunit;
 public sealed class ContentScheduleRunnerLoopTests
 {
     [Fact]
-    public void NextDelay_IsTheInterval_AndDoublesPerFailedSweep_UpToTheCap()
+    public void NextDelay_IsTheIntervalWhileAnItemWaits_SleepsWhenIdle_AndDoublesPerFailedSweep_UpToTheCap()
     {
         var defaults = new ContentScheduleRunnerOptions();
 
-        ContentScheduleRunner.NextDelay(0, defaults).Should().Be(TimeSpan.FromSeconds(5));
+        ContentScheduleRunner.NextDelay(waiting: 2, consecutiveFailures: 0, defaults).Should().Be(TimeSpan.FromSeconds(5));
+        ContentScheduleRunner.NextDelay(waiting: 0, consecutiveFailures: 0, defaults).Should().Be(
+            Timeout.InfiniteTimeSpan, "an idle runner sleeps until woken, so the serverless database can auto-pause (#673)");
         Enumerable.Range(1, 7)
-            .Select(failures => ContentScheduleRunner.NextDelay(failures, defaults).TotalSeconds)
+            .Select(failures => ContentScheduleRunner.NextDelay(waiting: 0, failures, defaults).TotalSeconds)
             .Should().Equal([5, 10, 20, 40, 60, 60, 60], "interval, 2x, 4x, 8x, then the 60 s cap");
-        ContentScheduleRunner.NextDelay(10_000, defaults).Should().Be(TimeSpan.FromSeconds(60), "no overflow");
-        ContentScheduleRunner.NextDelay(3, new ContentScheduleRunnerOptions { MaxFailureBackoff = TimeSpan.FromSeconds(1) })
+        ContentScheduleRunner.NextDelay(0, 10_000, defaults).Should().Be(TimeSpan.FromSeconds(60), "no overflow");
+        ContentScheduleRunner.NextDelay(0, 3, new ContentScheduleRunnerOptions { MaxFailureBackoff = TimeSpan.FromSeconds(1) })
             .Should().Be(TimeSpan.FromSeconds(5), "a failing sweep never retries faster than the interval");
     }
 
@@ -51,7 +54,7 @@ public sealed class ContentScheduleRunnerLoopTests
             await Task.Delay(TimeSpan.FromMilliseconds(400));
             harness.Sweeps.Should().Be(0, "start-up does no database work: the first sweep waits the interval or a wake-up");
 
-            new ContentScheduleClockObserver(harness.Signal).ClockChanged(Guid.NewGuid()); // a controller's jump
+            new WakeOnClockChange(harness.Signal).ClockChanged(Guid.NewGuid()); // a controller's jump
             (await harness.WaitForSweepsAsync(1, TimeSpan.FromSeconds(10))).Should().BeTrue("a clock change starts a sweep at once");
         }
         finally

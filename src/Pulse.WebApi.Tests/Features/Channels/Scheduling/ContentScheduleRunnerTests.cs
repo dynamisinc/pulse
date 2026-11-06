@@ -489,12 +489,45 @@ public sealed class ContentScheduleRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task TheClockObserver_WakesTheRunner()
+    public async Task ASchedule_WakesTheSleepingRunner_AfterItCommits()
     {
-        var signal = new ContentScheduleSignal();
-        new ContentScheduleClockObserver(signal).ClockChanged(_harness.ExerciseId);
+        using var root = _harness.InA();
+        var signal = root.Services.GetRequiredService<ContentScheduleSignal>();
+        await signal.WaitAsync(TimeSpan.Zero, TimeProvider.System, CancellationToken.None); // drain
 
-        (await signal.WaitAsync(TimeSpan.FromMinutes(5), TimeProvider.System, CancellationToken.None)).Should().BeTrue();
+        await ScheduleAsync("2033-09-04T09:00:00Z");
+
+        (await signal.WaitAsync(TimeSpan.Zero, TimeProvider.System, CancellationToken.None)).Should().BeTrue(
+            "the runner sleeps while idle (#673), so a new schedule must wake it");
+    }
+
+    [Fact]
+    public async Task TheSweep_KeepsItsCadence_OnlyWhileAnItemWaitsInAnExerciseWhoseClockRuns()
+    {
+        (await Runner().SweepAsync()).Waiting.Should().Be(0, "nothing scheduled: the runner may sleep");
+
+        var id = await ScheduleAsync("2033-09-04T09:00:00Z");
+        (await Runner().SweepAsync()).Should().Be((0, 1), "the clock runs, so 09:00 comes due with no write");
+
+        await _tiers.SetTierAsync(_harness.ExerciseId, PauseTier.Freeze, "human-ctl");
+        (await Runner().SweepAsync()).Waiting.Should().Be(0, "frozen: nothing comes due until leaving Freeze wakes the runner");
+        await _tiers.SetTierAsync(_harness.ExerciseId, PauseTier.Running, "human-ctl");
+
+        _harness.Clock.Jump(_harness.ExerciseId, 60);
+        (await Runner().SweepAsync()).Should().Be((1, 0), "published; nothing left waiting");
+        (await _harness.ItemAsync(id)).Status.Should().Be("published");
+    }
+
+    [Fact]
+    public async Task AnItemInAnExerciseWithNoRunningClock_LeavesTheRunnerAsleep()
+    {
+        using (var b = _harness.In(_harness.OtherExerciseId))
+        {
+            var created = await b.Funnel.CreateDraftAsync(OtherRequest(), Author);
+            await b.Funnel.ScheduleAsync(Guid.Parse(created.Item!.Id), "2033-09-04T09:00:00Z", null, Scheduler);
+        }
+
+        (await Runner().SweepAsync()).Waiting.Should().Be(0, "B's clock never started: only its start (a clock change) can make it due");
     }
 
     private void SetStatus(Guid exerciseId, string status)

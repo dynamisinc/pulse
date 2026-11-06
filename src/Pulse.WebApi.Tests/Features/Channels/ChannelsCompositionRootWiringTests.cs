@@ -251,11 +251,11 @@ public sealed class ChannelsCompositionRootWiringTests
     [Fact]
     public void ProgramCs_RegistersTheContentScheduleRunner_ThroughAddChannels()
     {
-        // Story 05: the runner is a hosted service on the REAL host, woken by clock changes; no Program.cs edit.
+        // Story 05: the runner is a hosted service on the REAL host; no Program.cs edit. Its wake-up wiring (#673) is
+        // guarded beside the other sleepers in IdleBackgroundWorkCompositionRootTests.
         using var factory = new WiringProbeFactory();
         factory.Services.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
             .Which.IsActive.Should().BeTrue("Program.cs composes the pause tiers and the exercise clock the runner needs");
-        factory.Services.GetServices<IExerciseClockChangeObserver>().OfType<ContentScheduleClockObserver>().Should().ContainSingle();
 
         using var scope = factory.Services.CreateScope();
         ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();

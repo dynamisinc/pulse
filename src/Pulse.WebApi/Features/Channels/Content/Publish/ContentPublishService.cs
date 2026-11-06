@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Injects;
@@ -88,6 +89,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     private readonly IAlertRaiser? _alertRaiser;
     private readonly IPairedSocialPoster? _pairedPoster;
     private readonly IExerciseClock? _clock;
+    private readonly ContentScheduleSignal? _scheduleSignal;
     private readonly TimeProvider _time;
     private readonly ILogger<ContentPublishService> _logger;
 
@@ -106,6 +108,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     /// <param name="clock">The native exercise clock (COR-053).</param>
     /// <param name="timeProvider">The wall clock; <see cref="TimeProvider.System"/> when absent.</param>
     /// <param name="logger">Diagnostics for post-commit failures.</param>
+    /// <param name="scheduleSignal">Woken after a schedule commits, so the sleeping scheduler (story 05) sweeps at once.</param>
     public ContentPublishService(
         PulseDbContext db,
         IExerciseContext exerciseContext,
@@ -120,7 +123,8 @@ public sealed partial class ContentPublishService : IContentPublishService
         IPairedSocialPoster? pairedPoster = null,
         IExerciseClock? clock = null,
         TimeProvider? timeProvider = null,
-        ILogger<ContentPublishService>? logger = null)
+        ILogger<ContentPublishService>? logger = null,
+        ContentScheduleSignal? scheduleSignal = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -143,6 +147,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         _clock = clock;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ContentPublishService>.Instance;
+        _scheduleSignal = scheduleSignal;
     }
 
     /// <inheritdoc />
@@ -403,6 +408,9 @@ public sealed partial class ContentPublishService : IContentPublishService
         {
             return conflict;
         }
+
+        // After commit: the scheduler sleeps while idle (#673), so a new schedule wakes it (a past time is due at once).
+        _scheduleSignal?.Wake();
 
         return await OkAsync(item, warnings: null);
     }
