@@ -88,13 +88,13 @@ public sealed class LinkCardIsolationTests
     [RequiresDockerFact]
     public async Task TheExerciseName_IsTheCallersExercise()
     {
-        var exerciseA = await _world.SeedExerciseAsync(name: "Exercise A name");
-        await _world.SeedExerciseAsync(name: "Exercise B name");
+        var exerciseA = await _world.SeedExerciseAsync(name: "Exercise A internal", participantName: "Exercise A name");
+        await _world.SeedExerciseAsync(name: "Exercise B internal", participantName: "Exercise B name");
         var staff = await _world.SeedStaffAsync((exerciseA, "controller"));
 
         var result = await _world.GenerateAsync(exerciseA, staff);
 
-        result.Sheet!.ExerciseName.Should().Be("Exercise A name");
+        result.Sheet!.ExerciseName.Should().Be("Exercise A name", "the caller's own exercise's participant-facing name");
     }
 
     [RequiresDockerFact]
