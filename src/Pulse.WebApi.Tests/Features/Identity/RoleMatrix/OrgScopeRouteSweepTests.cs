@@ -66,6 +66,9 @@ public sealed class OrgScopeRouteSweepTests
         ["PATCH /api/org/exercises/{exerciseId:guid}"] = "org-admin exercise management, resolved InOrganization (a foreign id is the bare 404)",
         ["POST /api/org/exercises/{exerciseId:guid}/archive"] = "org-admin exercise archive, resolved InOrganization (a foreign id is the bare 404)",
         ["POST /api/org/people/{personId:guid}/password-reset"] = "org-admin copy-link password reset (#576), OrgAdminOnly on an org-scope session, tenant-bound by the caller's organization (a foreign id is the bare 404)",
+        ["GET /api/org/people"] = "the org people directory (#574): OrgAdminOnly on an org-scope session, the caller's organization only (InOrganization)",
+        ["GET /api/org/people/{personId:guid}"] = "one person in the org directory (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
+        ["PATCH /api/org/people/{personId:guid}"] = "org-admin grant/revoke and disable/enable (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
     };
 
     /// <summary>
