@@ -177,4 +177,13 @@ public sealed record OverlayStateResponse
 
     /// <summary>The overlay message. Phase-1: empty.</summary>
     public string Message { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether the exercise has ENDED (EndEx): <c>true</c> exactly when the lifecycle state is <c>completed</c> (or
+    /// its legacy alias <c>complete</c>), <c>false</c> in every other state. Additive to the frozen triple (Tom,
+    /// 2026-10-19): in <c>completed</c> the overlay <see cref="State"/> stays <c>none</c> so participants can still
+    /// READ the run, and this flag is what tells the shell to say the exercise has ended and to offer no write.
+    /// Set by the lifecycle overlay projection only; carries no staff field and no time (XC-002, COR-053).
+    /// </summary>
+    public bool Ended { get; init; }
 }

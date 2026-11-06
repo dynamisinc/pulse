@@ -155,8 +155,12 @@ start too early, **Pause** the world ([section 9](#9-pausing-and-freezing)) whil
 2. In **End the exercise?**, read the exercise name, then type `END` in **Type END to confirm**.
 3. Select **End exercise** (the red button). The state pill changes to **ENDEX**.
 
-EndEx cannot be undone from the console. After EndEx, white noise stops, a Freeze is refused, and anyone who opens
-or reloads Pulse sees the end-of-exercise page.
+EndEx cannot be undone from the console. After EndEx, white noise stops and a Freeze is refused. Players who
+already have Pulse open see it change on its own, with no reload: a banner reading **This exercise has ended. You
+can still read posts, but nothing new can be posted.** appears at the top, and the feed, threads, profiles,
+notifications and their Following and Pinned tabs stay readable. Posting, replying, liking, reposting, pinning,
+following and editing are all turned off, and Pulse refuses any attempt to write. Anyone who opens or reloads Pulse
+after EndEx sees the same read-only view, so players can look back over what happened.
 
 #### On a tablet
 
@@ -168,13 +172,9 @@ once, so a double tap or a stray touch cannot end the exercise. The typed `END`,
 log entry are the same as on a desktop. **Cancel** (or Esc on a hardware keyboard) closes the dialog and puts you
 back on **End exercise**.
 
-> **Important: EndEx does not yet close the world on its own.** Two gaps remain today:
->
-> - **Open tabs are not told.** A player who already has the feed (or the holding page) open keeps seeing it until
->   they reload. Nothing is pushed to their screen at EndEx.
-> - **The AI engine is not stopped by EndEx.** Engine posts (for example, a burst you approve late, or one Swamped
->   mode auto-sends) can still reach a feed that is already open. The exception is **ambient chatter**: ambient
->   posting stops at EndEx and Freeze ([section 10](#ambient-chatter)).
+> **Important: EndEx does not stop the AI engine on its own.** Engine posts (for example, a burst you approve late,
+> or one Swamped mode auto-sends) can still reach a feed that is already open. The exception is **ambient chatter**:
+> ambient posting stops at EndEx and Freeze ([section 10](#ambient-chatter)).
 >
 > Close out by hand, in this order:
 >
@@ -182,8 +182,8 @@ back on **End exercise**.
 > 2. Stop the engine: **Pause engine** ([section 9](#9-pausing-and-freezing)) and set the engine switch to
 >    **ENGINE · STOPPED** ([section 10](#10-the-ai-engine)). Turn **Swamped mode** off. Do this before EndEx.
 > 3. Select **End exercise** as above.
-> 4. Announce EndEx in the room or on your bridge, and ask players to **reload or close** their Pulse tabs. A reload
->    shows the end-of-exercise page.
+> 4. Announce EndEx in the room or on your bridge. Players do not need to reload: their open tabs switch to the
+>    read-only view with the "exercise has ended" banner.
 
 ### Who can start and end
 

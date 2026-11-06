@@ -129,7 +129,8 @@ import { ComplianceChrome } from './components/ComplianceChrome'
 import { AlertBar } from './components/AlertBar/AlertBar'
 import { ChannelNav } from './components/ChannelNav'
 import { ParticipantSignOutControl } from './components/ParticipantSignOutControl'
-import { OverlayLayer } from './components/OverlayLayer'
+import { OverlayLayer, useExerciseEnded } from './components/OverlayLayer'
+import { ExerciseEndedProvider } from './writeGate'
 
 export interface ShellLayoutProps {
   /** The channel mounted into the shell (social now; portal/news/press/weather later). */
@@ -255,6 +256,8 @@ export function ShellLayout({ children }: ShellLayoutProps) {
 
   const { variant: resolvedVariant, pending: variantPending } = useShellState()
   const { now: scenarioNow } = useScenarioTime()
+  // Exercise ended (read-only review): published to the write affordances; never remounts.
+  const ended = useExerciseEnded()
 
   // Kiosk requests from the mounted channel (`useRequestShellKiosk`, PP-2). A count,
   // like the account-control claims below, so overlapping requests (a route swap)
@@ -279,53 +282,55 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   const mountProps: ShellMountProps = { variant, scenarioNow, variantPending }
 
   return (
-    <div
-      data-testid="pulse-shell-root"
-      data-shell-variant={variant}
-      style={isKiosk ? kioskShellRootStyle : shellRootStyle}
-    >
-      {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
-          inset vars the content region below consumes. Not mounted in kiosk:
-          the EXERCISE chip replaces them (Q-33). */}
-      {isKiosk ? <KioskExerciseChip /> : <ComplianceChrome />}
-
-      {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
-          Persists across every channel; renders a zero-height empty live
-          region when there are no active alerts. */}
-      <AlertBar />
-
-      {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
-          the content region (never inside its reset boundary) — it is shell
-          chrome, not channel content (COR-060). Not mounted in kiosk. */}
-      {!isKiosk && <ChannelNav />}
-
-      {/* Participant sign-out (feature: login, story 04). Its own sibling —
-          see the module header for why this is not folded into ChannelNav.
-          Absent while a mounted channel has claimed the account control
-          (it renders its own Sign out), and in kiosk (a display has no
-          operator at it, and no focusable control). */}
-      {!isKiosk && accountClaims === 0 && <ParticipantSignOutControl />}
-
-      {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
-          inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
+    <ExerciseEndedProvider ended={ended}>
       <div
-        data-testid="pulse-shell-content-region"
-        style={isKiosk ? kioskContentRegionStyle : contentRegionStyle}
+        data-testid="pulse-shell-root"
+        data-shell-variant={variant}
+        style={isKiosk ? kioskShellRootStyle : shellRootStyle}
       >
-        <ShellContextProvider value={mountProps}>
-          <ShellAccountControlClaimProvider value={claimAccountControl}>
-            <ShellKioskRequestProvider value={requestKiosk}>
-              {children}
-            </ShellKioskRequestProvider>
-          </ShellAccountControlClaimProvider>
-        </ShellContextProvider>
-      </div>
+        {/* Fixed compliance banners (z=chrome). Publishes the --pulse-chrome-*
+            inset vars the content region below consumes. Not mounted in kiosk:
+            the EXERCISE chip replaces them (Q-33). */}
+        {isKiosk ? <KioskExerciseChip /> : <ComplianceChrome />}
 
-      {/* Overlay layer: pause/EndEx (z=overlay, below chrome) + break-fiction
-          (z=breakFiction, above everything incl. chrome). Renders null when
-          overlayState is 'none'. Kept last so its paint order matches its
-          z-order for equal-context layers. */}
-      <OverlayLayer />
-    </div>
+        {/* EAS-analog alert host — fixed just below the top chrome (z=alertBar).
+            Persists across every channel; renders a zero-height empty live
+            region when there are no active alerts. */}
+        <AlertBar />
+
+        {/* Shell-owned channel nav: desktop strip + mobile tab bar. A SIBLING of
+            the content region (never inside its reset boundary) — it is shell
+            chrome, not channel content (COR-060). Not mounted in kiosk. */}
+        {!isKiosk && <ChannelNav />}
+
+        {/* Participant sign-out (feature: login, story 04). Its own sibling —
+            see the module header for why this is not folded into ChannelNav.
+            Absent while a mounted channel has claimed the account control
+            (it renders its own Sign out), and in kiosk (a display has no
+            operator at it, and no focusable control). */}
+        {!isKiosk && accountClaims === 0 && <ParticipantSignOutControl />}
+
+        {/* The ONE place a channel mounts: zero-styling reset boundary, chrome
+            inset, own stacking context at SHELL_Z.content (AC1/AC3). */}
+        <div
+          data-testid="pulse-shell-content-region"
+          style={isKiosk ? kioskContentRegionStyle : contentRegionStyle}
+        >
+          <ShellContextProvider value={mountProps}>
+            <ShellAccountControlClaimProvider value={claimAccountControl}>
+              <ShellKioskRequestProvider value={requestKiosk}>
+                {children}
+              </ShellKioskRequestProvider>
+            </ShellAccountControlClaimProvider>
+          </ShellContextProvider>
+        </div>
+
+        {/* Overlay layer: pause/EndEx (z=overlay, below chrome) + break-fiction
+            (z=breakFiction, above everything incl. chrome). Renders null when
+            overlayState is 'none'. Kept last so its paint order matches its
+            z-order for equal-context layers. */}
+        <OverlayLayer />
+      </div>
+    </ExerciseEndedProvider>
   )
 }

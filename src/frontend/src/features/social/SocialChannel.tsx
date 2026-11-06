@@ -74,7 +74,7 @@
  * tokens, FontAwesome icons, no COBRA, no MUI.
  */
 
-import { useCallback, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useSession } from '@/core/auth'
 import {
   useClaimShellAccountControl,
@@ -99,6 +99,7 @@ import { usePhoneLayout } from './layout/usePhoneLayout'
 import { useRouteFocus } from './layout/useRouteFocus'
 import { useScrollRestoration } from './layout/useScrollRestoration'
 import styles from './SocialChannel.module.css'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** The `id` the skip link targets. */
 const MAIN_ID = 'social-main'
@@ -121,6 +122,8 @@ export function SocialChannel() {
 function SocialFrame() {
   const { variant } = useShellContext()
   const session = useSession()
+  // False once the exercise has ended (or the session is read-only): no Post / compose.
+  const canWrite = useCanWrite()
   const { self, loading: directoryLoading } = useSocialDirectory()
   const { location, kind } = useSocialNavigation()
   // Phones (< 600px) get the bottom tab bar instead of the left rail (MT-D2).
@@ -136,8 +139,10 @@ function SocialFrame() {
   // The Post button is absent -- not disabled -- unless this mount may compose AND
   // the session can post (a persona-less session would only open a modal that says
   // "posting isn't available"). The composer self-guards on `isReadOnly` too.
-  const canCompose =
+  const mayCompose =
     affordancesAvailable(variant) && !session.isReadOnly && session.personaId !== undefined
+  // The Post buttons: absent once the exercise has ended.
+  const canCompose = mayCompose && canWrite
   // A staff `preview` / `kiosk` mount must never expose a sign-out (it would sign
   // the STAFF user out); only a real participant mount gets the account card.
   const showAccount = variant === 'full' || variant === 'readOnly'
@@ -166,6 +171,22 @@ function SocialFrame() {
     if (composeOpen) setComposeOpen(false)
   }
 
+  // The modal's opener (the Post button) is gone once the exercise has ended; if closing the
+  // modal then leaves focus on <body>, hand it to the main region instead.
+  const wasComposeOpenRef = useRef(false)
+  useEffect(() => {
+    if (composeOpen) {
+      wasComposeOpenRef.current = true
+      return
+    }
+    if (!wasComposeOpenRef.current) return
+    wasComposeOpenRef.current = false
+    const active = document.activeElement
+    if ((active === null || active === document.body) && postButtonRef.current === null) {
+      mainRef.current?.focus()
+    }
+  }, [composeOpen])
+
   const openCompose = useCallback(() => setComposeOpen(true), [])
   const closeCompose = useCallback(() => setComposeOpen(false), [])
 
@@ -183,7 +204,7 @@ function SocialFrame() {
 
       {/* `inert` while the compose modal is open: nothing behind it can take focus
           or be read by assistive tech (the modal also traps Tab itself). */}
-      <div className={styles.frame} inert={composeOpen}>
+      <div className={styles.frame} inert={composeOpen && mayCompose}>
         {phone ? (
           <BottomTabBar
             {...(canCompose ? { onCompose: openCompose } : {})}
@@ -218,7 +239,9 @@ function SocialFrame() {
       {/* Outside the (inert-while-composing) frame on purpose: see the header. */}
       <NotificationsEngine />
 
-      {composeOpen && <ComposeModal onClose={closeCompose} returnFocusRef={postButtonRef} />}
+      {composeOpen && mayCompose && (
+        <ComposeModal onClose={closeCompose} returnFocusRef={postButtonRef} />
+      )}
     </div>
   )
 }

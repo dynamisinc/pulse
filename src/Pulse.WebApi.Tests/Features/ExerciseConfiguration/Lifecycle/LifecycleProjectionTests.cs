@@ -27,7 +27,8 @@ public sealed class LifecycleProjectionTests
     [InlineData("staged", "full")]
     [InlineData("live", "full")]
     [InlineData("paused", "readOnly")]
-    [InlineData("completed", "readOnly")]
+    [InlineData("completed", "full")]
+    [InlineData("complete", "full")]
     [InlineData("archived", "readOnly")]
     public async Task ShellVariantProjection_MapsEachLifecycleStateOntoItsVariant(string status, string expected)
     {
@@ -58,6 +59,28 @@ public sealed class LifecycleProjectionTests
             "the variant must agree with AC7: a Staged world whose ambient content runs needs a live stream to show it");
         staged.ParticipantWritesAccepted.Should().BeTrue(
             "and a Staged world that accepts participant writes needs the composer the 'full' variant carries");
+    }
+
+    /// <summary>
+    /// <b>Tom's ruling (ended read-only review F-1) — pinned so nobody "tidies" Completed back to <c>readOnly</c>.</b>
+    /// After EndEx participants keep reading: <c>affordancesAvailable('readOnly')</c> would hide Notifications,
+    /// the Following / Pinned tabs and the explore stream after a cold load. Writes are NOT the variant's job in
+    /// <c>completed</c>: the lifecycle refuses them, and the overlay's <c>ended</c> flag hides the client controls.
+    /// </summary>
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("complete")]
+    public async Task ShellVariantProjection_Completed_IsFull_SoTheReadsSurviveEndEx(string status)
+    {
+        LifecycleShellVariantProjection.VariantFor(status).Should().Be(
+            ShellVariants.Full, "the ended review keeps every read affordance; only 'full' grants them");
+
+        ExerciseLifecycleStates.BehaviourOf(status).ParticipantWritesAccepted.Should().BeFalse(
+            "a 'full' completed shell is safe only because the lifecycle still refuses participant writes");
+
+        var overlay = await new LifecycleOverlayStateProjection(new NoSteeringOverlaySource())
+            .ProjectAsync(SourceIn(status));
+        overlay.Ended.Should().BeTrue("the client hides its write controls from the 'ended' flag (useCanWrite)");
     }
 
     /// <summary>Every emitted variant is inside the frozen client union — a coined value blanks the shell.</summary>
@@ -124,6 +147,50 @@ public sealed class LifecycleProjectionTests
         response.State.Should().Be(ParticipantShellDefaults.OverlayState);
         response.Register.Should().Be(ParticipantShellDefaults.OverlayRegister);
         response.Message.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The ended, read-only review (Tom, 2026-10-19): the lifecycle projection sets the additive <c>ended</c> flag
+    /// exactly in <c>completed</c> (and its legacy alias), with the overlay state left at <c>none</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("build", false)]
+    [InlineData("staged", false)]
+    [InlineData("live", false)]
+    [InlineData("paused", false)]
+    [InlineData("completed", true)]
+    [InlineData("complete", true)]
+    [InlineData("Completed", true)]
+    [InlineData("archived", false)]
+    [InlineData("active", false)]
+    [InlineData("scheduled", false)]
+    [InlineData("running", false)]
+    [InlineData("", false)]
+    public async Task OverlayProjection_SetsEnded_OnlyInCompleted(string status, bool ended)
+    {
+        LifecycleOverlayComposer.IsEnded(status).Should().Be(ended);
+        LifecycleOverlayComposer.IsEnded(null).Should().BeFalse("a missing status has not ended (fail closed)");
+
+        var response = await new LifecycleOverlayStateProjection(new NoSteeringOverlaySource())
+            .ProjectAsync(SourceIn(status));
+
+        response.Ended.Should().Be(ended, "'ended' is true exactly when the exercise is completed ('{0}')", status);
+        if (ended)
+        {
+            response.State.Should().Be("none", "completed is never the blocking 'endex' overlay (#390 ruling)");
+        }
+    }
+
+    /// <summary>A steering overlay cannot clear the flag: it is the lifecycle's, set after composition.</summary>
+    [Fact]
+    public async Task OverlayProjection_InCompleted_StaysEnded_WhateverSteeringContributes()
+    {
+        var freeze = new OverlayContribution(LifecycleOverlayWire.Pause, LifecycleOverlayWire.InFiction, "held");
+
+        var response = await new LifecycleOverlayStateProjection(new StubSteeringOverlaySource(freeze))
+            .ProjectAsync(SourceIn("completed"));
+
+        response.Ended.Should().BeTrue();
     }
 
     // ---------------------------------------------------------------------------------------------

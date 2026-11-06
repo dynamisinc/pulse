@@ -201,6 +201,8 @@ export function ThreadView({
 
   // The reply box exists only for a session that can write AS a persona (D1-011:
   // absent, never disabled).
+  // Not gated on `useCanWrite`: an already-open reply draft stays mounted at EndEx (the
+  // composer itself hides when ended with no draft, and disables submit when one is open).
   const canReply = affordances && !session.isReadOnly && session.personaId !== undefined
 
   // Live reply append streams for the same sessions the feed's pill does.

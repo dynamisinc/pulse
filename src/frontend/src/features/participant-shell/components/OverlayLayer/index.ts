@@ -9,5 +9,5 @@
  */
 
 export { OverlayLayer } from './OverlayLayer'
-export { useOverlayState } from './overlayState'
+export { useOverlayState, useExerciseEnded } from './overlayState'
 export type { OverlayRegister, OverlayState, OverlayStateKind } from './types'
