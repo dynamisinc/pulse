@@ -28,6 +28,7 @@ public sealed class ArticleBodyProfileTests
     [InlineData("<ul><li>a</li></ul><ol><li>b</li></ol>")]
     [InlineData("<blockquote>Plain quote</blockquote>")]
     [InlineData("<blockquote class=\"pull-quote\">We are ready.</blockquote>")]
+    [InlineData("<blockquote class=\"pull-quote\"><p>We are ready.</p><cite>Mayor Ruiz</cite></blockquote>")]
     [InlineData("<figure data-media-id=\"" + MediaId + "\"><figcaption>The bridge at dawn.</figcaption></figure>")]
     [InlineData("<pulse-post data-id=\"" + MediaId + "\"></pulse-post>")]
     public void TheArticleAnatomy_SurvivesUnchanged(string html)
@@ -58,6 +59,7 @@ public sealed class ArticleBodyProfileTests
     [InlineData("<h4>Too small</h4>", "Too small")]
     [InlineData("<table><tr><td>x</td></tr></table>", "x")]
     [InlineData("<div class=\"x\"><span>a</span></div>", "a")]
+    [InlineData("<cite class=\"x\" onclick=\"steal()\">Name</cite>", "<cite>Name</cite>")]
     public void ScriptsHandlersBadUrlsIframesAndInlineStyles_AreStripped(string html, string expected)
     {
         _registry.Sanitize(ArticleBodyProfile.Name, html).Should().Be(expected);
@@ -80,5 +82,35 @@ public sealed class ArticleBodyProfileTests
     public void ReferenceAttributes_MustBeGuids_AndNothingElseSurvives(string html, string expected)
     {
         _registry.Sanitize(ArticleBodyProfile.Name, html).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("blockquote", "CLASS")]
+    [InlineData("p", "class")]
+    public void AValueRuleForAnAttributeTheProfileDoesNotAllow_IsRefusedByTheRegistry(string element, string attribute)
+    {
+        var profile = ArticleBodyProfile.Profile with
+        {
+            AttributeValuePatterns = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.IReadOnlyDictionary<string, System.Text.RegularExpressions.Regex>>
+            {
+                [element] = new System.Collections.Generic.Dictionary<string, System.Text.RegularExpressions.Regex>
+                {
+                    [attribute] = new System.Text.RegularExpressions.Regex("\\Ax\\z"),
+                },
+            },
+        };
+
+        var register = () => new SanitizerProfileRegistry([new SanitizerProfileRegistration("bad-rule", profile)]);
+
+        register.Should().Throw<System.ArgumentException>().WithMessage("*value rule*");
+    }
+
+    [Fact]
+    public void ASelfClosedPostEmbed_IsAnOpenTag_SoTheEditorMustEmitAnExplicitClose()
+    {
+        // Custom elements are not void: "<pulse-post/>" opens, and later content nests inside until the input ends. Not
+        // exploitable (everything is still allowlisted), but story 17 must emit <pulse-post ...></pulse-post> (README).
+        _registry.Sanitize(ArticleBodyProfile.Name, "<pulse-post data-id=\"" + MediaId + "\"/><p>after</p>")
+            .Should().Be("<pulse-post data-id=\"" + MediaId + "\"><p>after</p></pulse-post>");
     }
 }

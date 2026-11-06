@@ -30,8 +30,7 @@ Foundation 02 (interface, `ChannelVocabulary`) and 04 (funnel resolves descripto
 ## Implementation notes (as built)
 - Files: `src/Pulse.WebApi/Features/News/{ArticleKindDescriptor,ArticlePayload,ArticlePayloadReader,ArticleBodyProfile,NewsServiceCollectionExtensions}.cs`
   and `README.md` there, which is the seam contract for stories 03–19 (payload, projection, body markup). One `AddNewsChannel()` line is in `Program.cs`.
-- **Alert suggestion:** `DefaultAlertMapping` is a property and cannot see the item. It returns the kind-level shape (`advisory`, headline null =
-  the item's). The item-conditional rule ("only when breaking") is `SuggestAlert(ContentItem)`, a new default member on `IContentKindDescriptor`.
+- **Alert suggestion:** `DefaultAlertMapping` is a property and cannot see the item. It returns null on purpose, so an item-blind reader never pre-fills an alert. The item-conditional rule ("only when breaking") is `SuggestAlert(ContentItem)`, a new default member on `IContentKindDescriptor`.
   The F17 dialog must call `SuggestAlert`. `href` = the permalink is filled by the funnel when the controller raises it.
 - **Foundation additions (additive, defaults unchanged).** The descriptor could not see the write's media, so `PayloadValidationContext`
   gained `Media` and `HeroMediaId`. `SanitizerProfile` gained `AttributeValuePatterns`, which holds `blockquote` to `class="pull-quote"`

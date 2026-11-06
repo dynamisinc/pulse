@@ -34,6 +34,10 @@ public sealed class ArticleKindDescriptor : IContentKindDescriptor
     public const string OneHeroMessage =
         "An article has at most one hero: heroMediaId and every media entry with role \"hero\" must name the same item.";
 
+    /// <summary>The message when a media entry is marked hero but heroMediaId does not name it.</summary>
+    public const string HeroRoleNeedsHeroIdMessage =
+        "A media entry with role \"hero\" must also be named by heroMediaId (the hero is the heroMediaId item).";
+
     /// <summary>The message when the hero is a video without a poster frame.</summary>
     public const string VideoHeroPosterMessage =
         "A video hero needs a poster frame. Wait for the upload's poster to finish processing, or choose an image hero.";
@@ -41,7 +45,7 @@ public sealed class ArticleKindDescriptor : IContentKindDescriptor
     private static readonly FrozenSet<string> MediaKindsAllowed =
         new[] { MediaKinds.Image, MediaKinds.Video }.ToFrozenSet(StringComparer.Ordinal);
 
-    /// <summary>The kind-level suggestion shape: an advisory whose headline is the item's own (headline null).</summary>
+    /// <summary>The suggestion's shape: an advisory (the headline is filled per item).</summary>
     private static readonly PublishAlertOptions AdvisorySuggestion = new() { Severity = ChannelVocabulary.SeverityAdvisory };
 
     /// <inheritdoc />
@@ -58,10 +62,11 @@ public sealed class ArticleKindDescriptor : IContentKindDescriptor
 
     /// <inheritdoc />
     /// <remarks>
-    /// The KIND-level shape of the suggestion: an <c>advisory</c> with the item's headline. Whether an item gets it at all
-    /// depends on its payload, so the publish dialog must ask <see cref="SuggestAlert"/> (only a breaking article suggests).
+    /// Null on purpose: whether an article suggests an alert depends on ITS payload (only a breaking article does, NWS-012),
+    /// which an item-blind property cannot know. A consumer that reads this property therefore pre-fills nothing, the
+    /// safe side; the publish dialog asks <see cref="SuggestAlert"/>.
     /// </remarks>
-    public PublishAlertOptions? DefaultAlertMapping => AdvisorySuggestion;
+    public PublishAlertOptions? DefaultAlertMapping => null;
 
     /// <summary>
     /// The alert the publish dialog pre-fills for <paramref name="item"/>: an <c>advisory</c> whose headline is the article's
@@ -91,14 +96,14 @@ public sealed class ArticleKindDescriptor : IContentKindDescriptor
         var article = ArticlePayloadReader.Read(payload, errors);
         await CheckHeroAsync(context, errors, cancellationToken);
 
-        if (errors.Count > 0)
+        if (article is null || errors.Count > 0)
         {
             return PayloadValidationResult.Invalid(errors[0], [.. errors.Skip(1)]);
         }
 
         // The funnel stores the object it passed in: replace its content with the normalized form.
         payload.Clear();
-        foreach (var (key, value) in article!.ToStoredJson())
+        foreach (var (key, value) in article.ToStoredJson())
         {
             payload[key] = value?.DeepClone();
         }
@@ -127,19 +132,26 @@ public sealed class ArticleKindDescriptor : IContentKindDescriptor
             return;
         }
 
-        var hero = context.HeroMediaId ?? (heroes.Count == 1 ? heroes[0] : null);
-        if (hero is null)
+        if (heroes.Count == 1 && context.HeroMediaId is null)
+        {
+            // The funnel stores the hero from heroMediaId only; a role-only hero would silently be no hero.
+            errors.Add(HeroRoleNeedsHeroIdMessage);
+            return;
+        }
+
+        if (context.HeroMediaId is not { } hero)
         {
             return;
         }
 
-        // Exercise-scoped by the central query filter; the funnel already proved the asset is in scope.
+        // The central query filter scopes this too; the explicit exercise check is defence in depth. The funnel already
+        // refused a hero outside the exercise, so a missing row here fails closed rather than passing.
         var asset = await context.Db.MediaAssets
             .AsNoTracking()
-            .Where(candidate => candidate.Id == hero)
+            .Where(candidate => candidate.Id == hero && candidate.ExerciseId == context.ExerciseId)
             .Select(candidate => new { candidate.Kind, candidate.PosterMediaAssetId })
             .FirstOrDefaultAsync(cancellationToken);
-        if (asset is { Kind: MediaKinds.Video, PosterMediaAssetId: null })
+        if (asset is null || asset is { Kind: MediaKinds.Video, PosterMediaAssetId: null })
         {
             errors.Add(VideoHeroPosterMessage);
         }

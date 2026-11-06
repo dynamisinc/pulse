@@ -147,7 +147,12 @@ public sealed class ArticleKindDescriptorTests
     [Theory]
     [InlineData("Bridge\nclosed")]
     [InlineData("Bridge\u0000closed")]
-    [InlineData("Bridge ‮desolc")]
+    [InlineData("Bridge \u202Edesolc")]
+    [InlineData("Bridge\u2028closed")]
+    [InlineData("Bridge\u200Bclosed")]
+    [InlineData("Bridge\uFEFFclosed")]
+    [InlineData("Bridge\u200Fclosed")]
+    [InlineData("Bridge\u061Cclosed")]
     public async Task ControlAndBidiCharacters_AreRefused(string value)
     {
         var result = await ValidateAsync(WithField("breaking.text", value));
@@ -231,12 +236,14 @@ public sealed class ArticleKindDescriptorTests
     }
 
     [Fact]
-    public void DefaultAlertMapping_IsTheKindLevelAdvisoryShape_AndSuggestAlertIsWhatTheInterfaceDispatches()
+    public void DefaultAlertMapping_IsNull_SoAnItemBlindReaderNeverPreFillsAnAlert_AndSuggestAlertIsWhatTheInterfaceDispatches()
     {
-        _descriptor.DefaultAlertMapping.Should().BeEquivalentTo(new PublishAlertOptions { Severity = "advisory", Headline = null });
+        _descriptor.DefaultAlertMapping.Should().BeNull("only a breaking article suggests an alert, which the property cannot see");
 
         IContentKindDescriptor asInterface = _descriptor;
-        asInterface.SuggestAlert(Item("""{"breaking":null}""")).Should().BeNull("the interface call reaches the article override");
+        asInterface.SuggestAlert(Item("""{"breaking":null}""")).Should().BeNull();
+        asInterface.SuggestAlert(Item("""{"breaking":{"text":"x"}}"""))!.Severity
+            .Should().Be("advisory", "the interface call reaches the article override");
     }
 
     private Task<PayloadValidationResult> ValidateAsync(JsonObject payload) =>

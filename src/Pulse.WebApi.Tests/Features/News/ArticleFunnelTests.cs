@@ -140,11 +140,14 @@ public sealed class ArticleFunnelTests
         var heroIdDisagrees = await scope.Funnel.CreateDraftAsync(
             Article(harness) with { HeroMediaId = first.ToString(), Media = [Media(first, "inline"), Media(second, "hero")] },
             FunnelHarness.Controller);
+        var roleOnly = await scope.Funnel.CreateDraftAsync(
+            Article(harness) with { Media = [Media(first, "hero")] }, FunnelHarness.Controller);
         var oneHero = await scope.Funnel.CreateDraftAsync(
             Article(harness) with { HeroMediaId = first.ToString(), Media = [Media(first, "hero"), Media(second, "inline")] },
             FunnelHarness.Controller);
 
         twoHeroRoles.Errors.Should().Equal(ArticleKindDescriptor.OneHeroMessage);
+        roleOnly.Errors.Should().Equal(ArticleKindDescriptor.HeroRoleNeedsHeroIdMessage);
         heroIdDisagrees.Errors.Should().Equal(ArticleKindDescriptor.OneHeroMessage);
         oneHero.Outcome.Should().Be(ContentPublishOutcome.Ok, string.Join("; ", oneHero.Errors));
     }
@@ -160,15 +163,12 @@ public sealed class ArticleFunnelTests
 
         var refused = await scope.Funnel.CreateDraftAsync(
             Article(harness) with { HeroMediaId = bare.ToString(), Media = [Media(bare, "hero")] }, FunnelHarness.Controller);
-        var refusedByRoleOnly = await scope.Funnel.CreateDraftAsync(
-            Article(harness) with { Media = [Media(bare, "hero")] }, FunnelHarness.Controller);
         var inlineVideo = await scope.Funnel.CreateDraftAsync(
             Article(harness) with { Media = [Media(bare, "inline")] }, FunnelHarness.Controller);
         var ok = await scope.Funnel.CreateDraftAsync(
             Article(harness) with { HeroMediaId = withPoster.ToString(), Media = [Media(withPoster, "hero")] }, FunnelHarness.Controller);
 
         refused.Errors.Should().Equal(ArticleKindDescriptor.VideoHeroPosterMessage);
-        refusedByRoleOnly.Errors.Should().Equal(ArticleKindDescriptor.VideoHeroPosterMessage);
         inlineVideo.Outcome.Should().Be(ContentPublishOutcome.Ok, "only a HERO video needs a poster");
         ok.Outcome.Should().Be(ContentPublishOutcome.Ok, string.Join("; ", ok.Errors));
     }

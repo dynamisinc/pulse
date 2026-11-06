@@ -12,7 +12,7 @@ using Pulse.WebApi.Features.Channels.Contracts;
 /// <remarks>
 /// <para>
 /// <b>Survives:</b> <c>p</c>, <c>br</c>, <c>strong</c>, <c>em</c>, <c>h2</c>, <c>h3</c>, <c>ul</c>/<c>ol</c>/<c>li</c>,
-/// <c>blockquote</c> (its <c>class</c> only when exactly <c>pull-quote</c>), <c>figure</c> (<c>data-media-id</c>, a GUID)
+/// <c>blockquote</c> (its <c>class</c> only when exactly <c>pull-quote</c>) with a <c>cite</c> attribution (no attributes), <c>figure</c> (<c>data-media-id</c>, a GUID)
 /// with <c>figcaption</c>, <c>a[href]</c> (http/https/mailto or a host-relative path; <c>rel</c> forced), and the
 /// <c>&lt;pulse-post data-id="GUID"&gt;</c> embed placeholder (story 06 renders it).
 /// </para>
@@ -39,7 +39,7 @@ public static partial class ArticleBodyProfile
     {
         AllowedElements = new[]
         {
-            "p", "br", "strong", "em", "h2", "h3", "ul", "ol", "li", "blockquote", "figure", "figcaption", "a",
+            "p", "br", "strong", "em", "h2", "h3", "ul", "ol", "li", "blockquote", "cite", "figure", "figcaption", "a",
             PostEmbedElement,
         }.ToFrozenSet(StringComparer.Ordinal),
         AllowedAttributes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
@@ -51,11 +51,14 @@ public static partial class ArticleBodyProfile
         },
         AttributeValuePatterns = new Dictionary<string, IReadOnlyDictionary<string, Regex>>(StringComparer.Ordinal)
         {
-            ["blockquote"] = new Dictionary<string, Regex>(StringComparer.Ordinal) { ["class"] = PullQuote() },
-            ["figure"] = new Dictionary<string, Regex>(StringComparer.Ordinal) { ["data-media-id"] = GuidValue() },
-            [PostEmbedElement] = new Dictionary<string, Regex>(StringComparer.Ordinal) { ["data-id"] = GuidValue() },
-        },
+            ["blockquote"] = Rule("class", PullQuote()),
+            ["figure"] = Rule("data-media-id", GuidValue()),
+            [PostEmbedElement] = Rule("data-id", GuidValue()),
+        }.ToFrozenDictionary(StringComparer.Ordinal),
     };
+
+    private static FrozenDictionary<string, Regex> Rule(string attribute, Regex pattern) =>
+        new Dictionary<string, Regex>(StringComparer.Ordinal) { [attribute] = pattern }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static FrozenSet<string> Set(params string[] values) => values.ToFrozenSet(StringComparer.Ordinal);
 
