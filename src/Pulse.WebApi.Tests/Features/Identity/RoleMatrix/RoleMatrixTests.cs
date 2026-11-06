@@ -270,6 +270,15 @@ public sealed class RoleMatrixTests
         Probe("POST /api/weather/zones", ControllerOnly);
         Probe("PUT /api/weather/zones/{id:guid}", ControllerOnly);
         Probe("DELETE /api/weather/zones/{id:guid}", ControllerOnly);
+
+        // exercise-portal 03 (#769): portal config is the planner's and the controller's (story AC "Staff write"). The
+        // body binds and validates (so no role gets a 400 before the gate decides), and its stale version makes an
+        // admitted probe stop at the handler's 409 without writing a row.
+        Probe(
+            "PUT /api/portal/config",
+            PlannerOrController,
+            "{\"layoutKey\":\"anchor\",\"modules\":[{\"id\":\"weather\",\"enabled\":true}],\"version\":999}");
+
         Probe("DELETE /api/staff/posts/{postId:guid}", ControllerOnly);
         Probe("PUT /api/staff/noise", ControllerOnly);
         Probe("PUT /api/staff/noise/pool", ControllerOnly);

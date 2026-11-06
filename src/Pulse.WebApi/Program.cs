@@ -29,6 +29,7 @@ using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.Press;                  // press-room 01
 using Pulse.WebApi.Features.Weather;                // weather-source 01
+using Pulse.WebApi.Features.Portal;                 // exercise-portal 03
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -302,6 +303,7 @@ builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool +
 builder.Services.AddChannels();
 builder.Services.AddWeather();                  // weather-source (E6): kind descriptors (01), zones (02); read, delivery follow
 builder.Services.AddPress();                    // press-room (E5): release kind, seam defaults, org newsrooms (01)
+builder.Services.AddPortal();                   // exercise-portal (E3): 03 config; 04 resources and 21 filler add inside AddPortal
 
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
@@ -550,6 +552,7 @@ app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
 app.MapChannels();             // channels-foundation 03+ (/api/outlets*, 10: /api/alerts*; later stories add routes inside MapChannels)
 app.MapWeather();              // weather-source 02+ (/api/weather/zones*; later weather stories add routes inside MapWeather)
+app.MapPortal();               // exercise-portal 03+ (/api/portal, /api/portal/config; 04/21 add routes inside MapPortal)
 
 // Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
 // the controller-role filter on every mutation). MapPostPins() stays at TOP LEVEL on purpose: a view-only session
