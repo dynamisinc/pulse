@@ -229,6 +229,23 @@ public sealed class EasyLoginDtoContractTests
             """);
     }
 
+    /// <summary>
+    /// exercise-build-golive/09 (§8.4): with no participant-facing name the sheet's <c>exerciseName</c> is a PRESENT
+    /// <c>null</c> (the frozen TypeScript is <c>exerciseName: string | null</c>, and the client guard rejects a body
+    /// without the key) — the one nullable member in this contract that is written rather than omitted.
+    /// </summary>
+    [Fact]
+    public void RosterCardsDto_WritesANullExerciseName_RatherThanOmittingIt()
+    {
+        var dto = new RosterCardsDto { ExerciseName = null, Cards = [], Skipped = [] };
+
+        AssertWire(
+            dto,
+            """
+            { "exerciseName": null, "cards": [], "skipped": [] }
+            """);
+    }
+
     [Fact]
     public void DayWordStatusDto_MatchesTheFrozenType()
     {
@@ -523,6 +540,14 @@ public sealed class EasyLoginDtoContractTests
                 name!.Name.Should().Be(
                     char.ToLowerInvariant(property.Name[0]) + property.Name[1..],
                     "{0}.{1} is camelCase on the wire", type.Name, property.Name);
+
+                // exercise-build-golive/09: the one member the frozen TypeScript types as `string | null` (key present).
+                if (type == typeof(RosterCardsDto) && property.Name == nameof(RosterCardsDto.ExerciseName))
+                {
+                    property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition.Should().Be(
+                        JsonIgnoreCondition.Never, "RosterCardsDto.exerciseName is written as null, never omitted");
+                    continue;
+                }
 
                 if (nullability.Create(property).ReadState == NullabilityState.Nullable)
                 {

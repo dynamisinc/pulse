@@ -165,6 +165,7 @@ public sealed class ExerciseReadinessService
                 e.TimeZone,
                 e.ComplianceChromeEnabled,
                 e.WatermarkEnabled,
+                e.ParticipantName,
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (exercise is null)
@@ -262,10 +263,11 @@ public sealed class ExerciseReadinessService
         var blocking = new List<ReadinessItem>
         {
             Check("controller-enrolled", "Controller enrolled", controllers > 0, "No controller is enrolled."),
-            NotChecked(
+            Check(
                 "participant-name",
                 "Participant-facing name",
-                "Not checked yet — arrives with story 09 (participant-facing name)."),
+                !string.IsNullOrWhiteSpace(exercise.ParticipantName),
+                "No participant-facing name is set. Participants would see only the brand header."),
             Check(
                 "participant-access",
                 "Participant access",
