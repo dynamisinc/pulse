@@ -107,9 +107,7 @@ purifier.addHook('uponSanitizeAttribute', (node, data) => {
   // `class` survives only as EXACTLY the pull-quote marker on a blockquote (the server's
   // article-rich rule: any other value is dropped, not normalised).
   if (data.attrName === 'class') {
-    if (node.nodeName === 'BLOCKQUOTE' && data.attrValue.trim() === PULL_QUOTE_CLASS) {
-      data.attrValue = PULL_QUOTE_CLASS
-    } else {
+    if (node.nodeName !== 'BLOCKQUOTE' || data.attrValue !== PULL_QUOTE_CLASS) {
       data.keepAttr = false
     }
   }

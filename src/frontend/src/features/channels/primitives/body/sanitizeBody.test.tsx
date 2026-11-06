@@ -193,6 +193,10 @@ describe('sanitizeBodyHtml: the article-rich markers (news 06)', () => {
     // Any other value is dropped, not normalised (story 01's article-rich rule).
     expect(sanitizeBodyHtml('<blockquote class="evil pull-quote huge">q</blockquote>'))
       .toBe('<blockquote>q</blockquote>')
+    // DOMPurify trims every attribute value before the hook sees it, so padding is harmless.
+    expect(sanitizeBodyHtml('<blockquote class=" pull-quote ">q</blockquote>'))
+      .toBe('<blockquote class="pull-quote">q</blockquote>')
+    expect(sanitizeBodyHtml('<blockquote class="Pull-Quote">q</blockquote>')).toBe('<blockquote>q</blockquote>')
   })
 
   it.each([

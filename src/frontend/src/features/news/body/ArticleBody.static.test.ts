@@ -85,24 +85,61 @@ describe('body stylesheets', () => {
   })
 })
 
+/** A rule's selector list split on TOP-LEVEL commas (not those inside `:where(…)`). */
+function selectorList(selectorText: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let current = ''
+  for (const ch of selectorText) {
+    if (ch === '(') depth += 1
+    if (ch === ')') depth -= 1
+    if (ch === ',' && depth === 0) {
+      parts.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  parts.push(current.trim())
+  return parts.filter(Boolean)
+}
+
+/** Collapses every `(…)` group, so a `:where(p, ul)` argument list reads as one token. */
+function collapseGroups(selector: string): string {
+  let out = selector
+  for (let previous = ''; previous !== out;) {
+    previous = out
+    out = out.replace(/\([^()]*\)/g, '[]')
+  }
+  return out
+}
+
 describe('nothing in the body stylesheets cascades into an embedded post (SOC-002/004)', () => {
   it.each([
     ['SanitizedBody', readSrcFile('features/channels/primitives/body/SanitizedBody.module.css')],
     ['ArticleBody', readSrcFile('features/news/body/ArticleBody.module.css')],
-  ])('%s: every descendant element rule excludes the pulse-post subtree or is child-scoped', (_name, css) => {
+    ['PullQuote', readSrcFile('features/news/body/PullQuote.module.css')],
+  ])('%s: every descendant selector excludes the pulse-post subtree or targets a direct child', (_name, css) => {
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? []
-    const descendant = rules
-      .map(selector => selector.trim())
-      .filter(selector => /^\.(body|articleBody|dropCap)\s/.test(selector))
-    expect(descendant.length).toBeGreaterThan(0)
-    for (const selector of descendant) {
-      const excluded = selector.includes(':not(pulse-post *)')
-      const childScoped = />\s*(:where|p|h2|h3)/.test(selector)
-      // Rules on the body container itself (a custom property), the placeholder host, or
-      // the visually-hidden new-tab note: none reaches inside an embed.
-      const containerOnly = /sanitized-body'\]\)$/.test(selector)
-      const tagOnlyHost = /pulse-post\s*$/.test(selector) || selector.includes('[data-new-tab-note]')
-      expect(excluded || childScoped || containerOnly || tagOnlyHost, selector).toBe(true)
+    const selectors = rules
+      .filter(rule => !rule.trim().startsWith('@'))
+      .flatMap(selectorList)
+      // A rule on a single class (the container, a host, a scroll region) reaches nothing inside.
+      .filter(selector => /\s/.test(selector.replace(/\([^)]*\)/g, '')))
+    expect(selectors.length).toBeGreaterThan(0)
+    for (const selector of selectors) {
+      const excluded = selector.includes(':where(:not(pulse-post *))')
+      // `.x <container> > child…`: a direct child of the body cannot be inside a <pulse-post>.
+      const onBody = selector.includes(":global([data-testid='sanitized-body'])")
+      const shape = collapseGroups(selector)
+      const directChild = onBody && /^\.\w+\s+:global\[\]\s*>\s*[^\s>]+$/.test(shape)
+      // The body container itself (a custom property only).
+      const container = onBody && /^\.\w+\s+:global\[\]$/.test(shape)
+      // The embed host, the hidden new-tab note, and the pull quote (React content never has
+      // the class; the sanitizer only lets authors put it on a body blockquote).
+      const knownSafe = /^\.body (pulse-post|\[data-new-tab-note\])$/.test(selector)
+        || /blockquote\.pull-quote/.test(selector)
+      expect(excluded || directChild || container || knownSafe, selector).toBe(true)
     }
   })
 })
