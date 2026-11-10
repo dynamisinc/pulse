@@ -21,6 +21,7 @@ refuses it and nothing changes.
 | Rename or archive an exercise | Yes | Yes, for exercises you plan | No | No |
 | Change settings, chrome or practice mode | Only through a planner enrollment | Yes | No | No |
 | Stage the exercise | Only through a planner enrollment | Yes | No | No |
+| Add, remove or change the role of staff on an exercise | Only through a planner enrollment | Yes | No | No |
 | Set the lead controller | Only through a planner enrollment | Yes | No | No |
 | Start, pause, resume or end the exercise, and the pause tiers | Only through a controller enrollment | No | Yes | No |
 | Roster, links, day word, view-only code | Only through an enrollment | Yes | Yes | No |
@@ -133,7 +134,7 @@ It changes only the exercise you are signed in to. To change another exercise, s
 
 ![Exercise configuration, with the section list on the left and the Identity & schedule section open.](img/exercise-settings.png)
 
-The section list on the left has seven sections. **Readiness** is listed first, but the page still
+The section list on the left has eight sections. **Readiness** is listed first, but the page still
 opens on **Identity & schedule**.
 
 | Section | What it controls |
@@ -145,6 +146,7 @@ opens on **Identity & schedule**.
 | **Compliance chrome** | Exercise banners and the EXERCISE watermark |
 | **Practice / sandbox** | Whether this exercise is a rehearsal |
 | **Import participant accounts** | The older account import (see [below](#importing-participant-accounts-older-method)) |
+| **Staff** | Who can plan, run and evaluate this exercise (see [Staff assignment](#staff-assignment)) |
 
 ### Identity & schedule, Channels, and Theming & outlets
 
@@ -238,6 +240,17 @@ controller is marked with a star and the word **Lead**.
 - **Add staff.** Under **Add staff**, pick a person from your organisation, pick a role (planner,
   controller or evaluator) and select **Add staff**. Only people who do not yet have a role on
   this exercise are listed. If the list is empty, everyone already has a role.
+
+  **The person must already be in your organisation.** The **Person** list shows only people who
+  already belong to your organisation and are not disabled. Adding someone to an exercise does not
+  create an account. To bring in someone new, ask Dynamis support to set up their staff account
+  first; they will then appear in the list.
+
+  > **Not yet available:** inviting a new person by email. It arrives with staff invites in a later
+  > update.
+
+  Someone who is already a **player** in this exercise cannot also be given a staff role in it.
+  Pulse refuses with "That person already has a role in this exercise."
 - **Change a role.** Use the role menu on the person's row and confirm. The person is signed out
   of this exercise so they pick up the new role when they sign back in.
 - **Remove someone.** Select **Remove** on their row and confirm. They lose their role on this
