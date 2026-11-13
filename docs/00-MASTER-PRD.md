@@ -36,7 +36,7 @@ Observed Looking Glass core functionality from the ATL Critical Infrastructure E
 | Agency accounts responding to citizen posts | **Replace** | E2, E7 |
 | Many scripted voices reporting same events | **Exceed** — adaptive generation, not just scripts | E8 |
 
-**Not in Looking Glass, but core to Pulse:** adaptive content generation reacting to participant action/inaction (E8), first-class evaluation telemetry (E10), and native Cadence/Beat integration (E9).
+**Not in Looking Glass, but core to Pulse:** adaptive content generation reacting to participant action/inaction (E8), first-class evaluation telemetry (E10), and native Cadence/Beat integration (E9). *Proposed (2026-11-02):* a staff-only map of geo-referenced content (E11 GeoPulse).
 
 ## 3. Scope decisions (settled this session)
 
@@ -68,6 +68,9 @@ Observed Looking Glass core functionality from the ATL Critical Infrastructure E
 | E8 | Adaptive Content Engine | Generated public reaction to participant action and inaction — the differentiator | `08-adaptive-content-engine.md` |
 | E9 | Ecosystem Integration | Cadence inject firing into Pulse channels; Beat media pipeline; telemetry out | `09-ecosystem-integration.md` |
 | E10 | Evaluation & AAR | Everything observable is measurable: timelines, sentiment, response metrics, replay | `10-evaluation-aar.md` |
+| E11 | GeoPulse *(proposed 2026-11-02)* | Staff-only map of geo-referenced content: participant and persona location tags, staff geo-references, live map, AAR section | `12-geopulse.md` |
+
+> E11's file is `12-…` because `11-ADVERSARIAL-REVIEW.md` already holds that number. E11 is **proposed** and not yet placed in a phase (see its §5 Q1).
 
 ### Dependency shape
 
@@ -81,6 +84,7 @@ E1 (foundation)
 E7 Controller Surface (operates E2/E4/E5/E6, gates E8)
 E9 Integration (touches all; hard dependency for Cadence-driven exercises)
 E10 Evaluation (consumes telemetry from all)
+E11 GeoPulse (proposed; maps E2 content, tagged via E2 composer + E7 console; feeds E10)
 ```
 
 ### Phasing (revised 2026-07-09 — engine-first strategy)
@@ -93,6 +97,8 @@ Product decision: the adaptive engine is the anticipated most-used capability an
   **Pilot mode (Phases 1–2, pre-portal) is explicitly defined:** participant login lands on the Social feed (the Portal is Phase 3); official *social posts* are qualifying responses for storyline expectations (the Press Room doesn't exist yet); high-priority alerts deliver via platform notifications (SOC-072) until the cross-channel alert bar (PRT-010) lands; the exercise clock is native to E1 (COR-050) from day one — it never waits for Cadence integration.
 - **Phase 3 — Looking Glass parity channels:** E3 Portal, E4 News, E5 Press Room, E6 Weather — with engine hooks extended to news/press reactions as each channel lands.
 - **Phase 4 — Ecosystem & evaluation depth:** E9 (Cadence fire-into-Pulse, Beat pipeline), E10 full (timeline UI, replay, metrics — computed over telemetry captured since Phase 1), E8 maturity (Auto mode hardening, misinformation depth).
+
+- **E11 GeoPulse (proposed 2026-11-02, phase not yet decided):** suggested placement is after the December channels release. Its location model and participant tag (F11.1–F11.2) can land earlier as the SOC-001 location-tag follow-up the posts backlog already records.
 
 Consequences of engine-first: the E8 cost/latency spike and persona voice-profile quality (COR-020) become near-term priorities, not future concerns; E7's review queue ships in Phase 1 rather than as a later hook. Phasing is a recommendation; epics are written so stories can be cut independently.
 
@@ -143,6 +149,10 @@ Story agents should assume alignment with the existing Dynamis stack unless an e
 | **Compliance chrome** | Configurable exercise/classification banners rendered outside the simulated apps' frame |
 | **Cast** | The set of personas seeded into an exercise |
 | **Exercise instance** | One isolated exercise world on the shared platform |
+| **Location tag** | A public place label on a post ("📍 Riverside Park"), added by its author from the exercise's place list (E11) |
+| **Geo-reference** | A staff-only placement of any post on the GeoPulse map; never changes the post or what participants see (E11) |
+| **Place list** | The exercise's named, coordinate-bearing places (gazetteer) used for location tags and staff placement (E11) |
+| **GeoPulse** | The staff-only map of geo-referenced content (E11) — a staff surface, not a participant channel |
 
 ## 8. Open questions (tracked, not blocking)
 
@@ -151,3 +161,4 @@ Story agents should assume alignment with the existing Dynamis stack unless an e
 3. ~~Naming inside the simulation~~ **Resolved** (knockout-screened 2026-07-09; formal trademark clearance still required before customer-facing use): social app = **Pulse** (product name, in-fiction too); portal = templated **"[City] Today"**; TV outlet = **Newsline 7**; paper = **The Courier-Ledger**; wire = **The National Wire**; tabloid = **The Scoop**; press room = **The Wire Room**; weather = **The Weather Desk**. All remain theme-configurable per exercise; these are shipping defaults. Rejected on screen: Chatter (Salesforce), PressWire (crowded industry), StormCenter (KUBRA), The Daily Blast (The Blast/Daily Blast Live), Warble/Murmur (crowded), The Beacon (diluted).
 4. Standalone video platform and Lookbook-style second social — deferred; candidate Phase 4 epics.
 5. Misinformation depth (coordinated campaigns, manipulated media) — baseline mechanics in E8; advanced scenarios need SME input.
+6. E11 GeoPulse (proposed 2026-11-02) — phase placement, basemap provider, and fictional-geography basemaps are open; see `12-geopulse.md` §5.
