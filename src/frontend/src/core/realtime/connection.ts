@@ -47,6 +47,20 @@
  *     connection was actually up or coming up) so a consumer can tell a deliberate
  *     stop from "auto-reconnect exhausted" and re-attach instead of giving up.
  *
+ * EXERCISE SWITCH + TERMINAL CLOSE (#856). A staff exercise switch rewrites the session's principal
+ * server-side WITHOUT a sign-in, so nothing above ran `stop()`. Since the ASP.NET Core servicing
+ * update the server refuses a long-poll/SSE request whose user differs from its negotiate request
+ * (403), so a connection left running through a switch goes quiet on networks that fall back from
+ * WebSockets. Two remedies live here:
+ *   - `reconnect()` (called by `useSetActiveExercise` once the new scope is resolved): stop and
+ *     rebuild on the current token, but only if a connection was up/coming up or a consumer is
+ *     subscribed. Consumers see the usual `Disconnected('stopped')` then `Connected`.
+ *   - a TERMINAL close that is not a sign-out (auto-reconnect exhausted, e.g. repeated 403s):
+ *     rebuild ONCE with the current token. The attempt budget is spent when it is made and only
+ *     refilled by a successful connect, so a hub that keeps refusing us causes one extra attempt,
+ *     not a storm; after that consumers' own polling fallback / recovery driver takes over. No
+ *     rebuild when no token is stored (signed out: fail closed).
+ *
  * TESTABILITY. `createRealtimeConnection({ hubUrl, buildConnection })` lets a
  * test point the connection at a fake transport (or override the hub URL)
  * without a real WebSocket; the app uses the lazy shared `realtimeConnection`
@@ -121,6 +135,20 @@ export interface RealtimeConnection {
 
   /** The current connection state (`Disconnected` before the first start). */
   readonly state: HubConnectionState
+}
+
+/**
+ * The app's shared connection: {@link RealtimeConnection} plus the one operation only the
+ * session layer needs. Kept off the base interface so a consumer's test double need not fake it.
+ */
+export interface ManagedRealtimeConnection extends RealtimeConnection {
+  /**
+   * Re-establishes the connection on the then-current session token after the session's
+   * principal changed WITHOUT a sign-in (a staff exercise switch, #856). Stops the live
+   * connection (if any) and starts a fresh one with every `subscribe`d handler re-attached.
+   * Does nothing when nothing is started and nothing subscribed. Never throws or rejects.
+   */
+  reconnect(): Promise<void>
 }
 
 /** Options for {@link createRealtimeConnection} — overrides used by tests. */
@@ -246,7 +274,7 @@ async function closeQuietly(
  * below) touches neither the network nor `window`. After `stop()` it is built
  * afresh on the next `subscribe`/`start` (see the module header).
  */
-class SharedRealtimeConnection implements RealtimeConnection {
+class SharedRealtimeConnection implements ManagedRealtimeConnection {
   private readonly buildConnection: (hubUrl: string) => HubConnection
   private readonly hubUrlOverride: string | undefined
   private readonly stateListeners = new Set<RealtimeStateListener>()
@@ -259,6 +287,8 @@ class SharedRealtimeConnection implements RealtimeConnection {
    * chain of every earlier close: one hung negotiate must not make every later stop() hang.
    */
   private closing: Promise<void> = Promise.resolve()
+  /** True once a terminal close has been answered with a rebuild; refilled by a good connect. */
+  private rebuildSpent = false
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
     this.buildConnection = options.buildConnection ?? createDefaultHubConnection
@@ -301,6 +331,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
           // it came up after all): do not announce a connection that is already abandoned.
           throw new Error(STOPPED_DURING_START)
         }
+        this.rebuildSpent = false
         this.emitState(HubConnectionState.Connected)
       })
       .catch((error: unknown) => {
@@ -346,6 +377,43 @@ class SharedRealtimeConnection implements RealtimeConnection {
     return this.closing
   }
 
+  reconnect(): Promise<void> {
+    const live =
+      (this.connection !== null && this.connection.state !== HubConnectionState.Disconnected) ||
+      this.startPromise !== null
+    if (!live && this.subscriptions.size === 0) return Promise.resolve()
+    // A deliberate switch refills the budget: this is a new situation, not a retry of the last.
+    this.rebuildSpent = false
+    const closed = this.stop()
+    this.start().catch(() => {
+      // The consumers' own recovery (polling fallback, retry on Disconnected) owns a failed start.
+    })
+    return closed
+  }
+
+  /**
+   * The auto-reconnect budget is exhausted and the hub connection is dead. If someone is still
+   * signed in, build a fresh connection ONCE on the current token (the old one may have been
+   * refused because its principal changed - #856). See the module header for the storm guard.
+   */
+  private rebuildAfterTerminalClose(closed: HubConnection): void {
+    if (this.rebuildSpent) return
+    if (this.connection !== closed) return
+    if (getAccessToken() === null) return
+    this.rebuildSpent = true
+    // Drop the dead connection so start() builds a new one (handlers come from the registry).
+    this.connection = null
+    try {
+      for (const { eventName, handler } of this.subscriptions) closed.off(eventName, handler)
+    } catch {
+      // Best effort; the connection is dead.
+    }
+    this.start().catch(() => {
+      // Failed: announce the loss so consumers fall back to polling. The budget stays spent.
+      this.emitState(HubConnectionState.Disconnected)
+    })
+  }
+
   private ensureConnection(): HubConnection {
     if (this.connection !== null) return this.connection
 
@@ -359,6 +427,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
     })
     connection.onreconnected(() => {
       if (this.connection !== connection) return
+      this.rebuildSpent = false
       this.emitState(HubConnectionState.Connected)
     })
     connection.onclose(() => {
@@ -366,6 +435,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
       // Auto-reconnect exhausted: clear the memo so start() can re-establish later.
       this.startPromise = null
       this.emitState(HubConnectionState.Disconnected)
+      this.rebuildAfterTerminalClose(connection)
     })
     for (const { eventName, handler } of this.subscriptions) connection.on(eventName, handler)
     this.connection = connection
@@ -389,7 +459,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
  */
 export function createRealtimeConnection(
   options: CreateRealtimeConnectionOptions = {},
-): RealtimeConnection {
+): ManagedRealtimeConnection {
   return new SharedRealtimeConnection(options)
 }
 
@@ -397,7 +467,7 @@ export function createRealtimeConnection(
  * The app-wide shared connection. Every consumer subscribes here — nothing else
  * should construct a `HubConnection`. Lazy: no side effects until first use.
  */
-export const realtimeConnection: RealtimeConnection = createRealtimeConnection()
+export const realtimeConnection: ManagedRealtimeConnection = createRealtimeConnection()
 
 // The shared connection belongs to ONE identity (see the module header), so every end of a
 // session - sign-out and every sign-in, both through `resetClientSession()` - stops it. Done

@@ -81,6 +81,7 @@
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { useExerciseScopeRefresh } from '@/core/exerciseContext'
+import { realtimeConnection } from '@/core/realtime/connection'
 import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
 import type { Enrollment } from '../types'
 
@@ -126,6 +127,11 @@ export function useSetActiveExercise(): UseMutationResult<
           { cause: error },
         )
       }
+
+      // 2b. The session's principal changed server-side, and the hub refuses a long-poll/SSE
+      //     request whose user differs from its negotiate (403; #856). Rebuild the shared hub
+      //     connection on the current token. Not awaited and never rejects.
+      void realtimeConnection.reconnect()
 
       // 3. The new scope is on the context. Discard the prior exercise's data
       //    and refetch the active queries under the new scope.

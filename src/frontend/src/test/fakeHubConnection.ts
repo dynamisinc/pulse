@@ -33,7 +33,7 @@ import {
   HubConnectionState,
   sessionAccessTokenFactory,
 } from '@/core/realtime/connection'
-import type { RealtimeConnection } from '@/core/realtime/connection'
+import type { ManagedRealtimeConnection } from '@/core/realtime/connection'
 
 type Handler = (...args: unknown[]) => void
 
@@ -158,7 +158,7 @@ export class FakeHubConnection {
 
 /** A real shared-connection wrapper over a series of fake transports. */
 export interface FakeTransport {
-  readonly connection: RealtimeConnection
+  readonly connection: ManagedRealtimeConnection
   /** Every `HubConnection` the wrapper has built, oldest first. */
   readonly fakes: FakeHubConnection[]
   /** The most recently built one (throws if nothing was built yet - a test bug). */

@@ -155,8 +155,11 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
-    public async Task HubConnection_PresentingItsTokenAsAccessTokenQueryParameter_ConnectsAndJoinsItsGroup()
+    public async Task HubConnection_PresentingItsTokenAsAuthorizationHeader_ConnectsAndJoinsItsGroup()
     {
+        // NOTE: the .NET SignalR client presents AccessTokenProvider's token as an Authorization: Bearer header,
+        // NOT as ?access_token=. The query-string path browsers use is driven raw by the
+        // HubNegotiate_*AccessTokenQueryParameter tests below (#855).
         // The seam a mistake here is INVISIBLE locally and fatal in UAT: a dark participant live feed with a
         // fully green suite. Gating the hub without this passing means the story shipped a regression, and the
         // whole reason the frontend accessTokenFactory ships in the same story is that the two halves have to
@@ -203,7 +206,7 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
-    public async Task HubConnection_PresentingAnUnknownTokenAsAccessTokenQueryParameter_IsStillRefused()
+    public async Task HubConnection_PresentingAnUnknownTokenAsAuthorizationHeader_IsStillRefused()
     {
         // The other half of the query-string path: accepting the parameter must not mean accepting anything
         // that arrives in it. An unresolvable token authenticates nothing, so the principal is never set.
@@ -225,6 +228,53 @@ public sealed class DefaultDenySessionGateTests
 
         await start.Should().ThrowAsync<Exception>("an unknown token resolves no session, so the gate refuses");
         connection.State.Should().Be(HubConnectionState.Disconnected);
+    }
+
+    [Fact]
+    public async Task HubNegotiate_PresentingItsTokenOnlyAsAccessTokenQueryParameter_Succeeds()
+    {
+        // #855: a browser cannot set an Authorization header on a WebSocket upgrade or an EventSource, so the
+        // query string is the ONLY way a real browser client reaches this hub. The .NET client tests above send a
+        // header, so this raw request (no Authorization header at all) is the one that walks that path through the
+        // real Program pipeline.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync(
+            $"hubs/exercise/negotiate?negotiateVersion=1&access_token={AcceptedToken}",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.RequestMessage!.Headers.Authorization.Should().BeNull("only the query string carries the token");
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.TryGetProperty("connectionToken", out _).Should().BeTrue(
+            "a successful negotiate hands back a connection token");
+    }
+
+    [Theory]
+    [InlineData("not-a-real-token")]
+    [InlineData("")]
+    public async Task HubNegotiate_PresentingAnUnknownOrEmptyAccessTokenQueryParameter_IsRefused(string token)
+    {
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync(
+            $"hubs/exercise/negotiate?negotiateVersion=1&access_token={token}",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HubNegotiate_PresentingNoTokenAtAll_IsRefused()
+    {
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync("hubs/exercise/negotiate?negotiateVersion=1", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
