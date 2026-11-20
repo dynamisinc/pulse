@@ -16,7 +16,8 @@ using Xunit;
 /// the same moment must never leave the exercise with zero planners: the guard counts under a lock in the same
 /// transaction as the write, so the second request waits for the first to commit, sees one planner left, and is refused
 /// with 409 <c>last-planner</c>. Contention is forced, not hoped for: a test-side transaction holds the exercise's
-/// enrollment rows while both requests start, then releases them so the two race for the guard's lock.
+/// enrollment rows while both requests start, then releases them so the two race for the guard's lock. When the two act
+/// on EACH OTHER, the loser has lost its own planner grant by the time its guard runs and is refused with 403 (#840).
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class LastPlannerRaceTests
@@ -85,8 +86,18 @@ public sealed class LastPlannerRaceTests
                 var results = await Task.WhenAll(first, second);
                 results.Count(r => r.Outcome == EnrollmentOutcome.Ok).Should().Be(1, "{0} round {1}: exactly one change wins", shape, round);
                 var refused = results.Single(r => r.Outcome != EnrollmentOutcome.Ok);
-                refused.Outcome.Should().Be(EnrollmentOutcome.Conflict, "{0} round {1}", shape, round);
-                refused.Error.Should().Be(EnrollmentService.LastPlannerError);
+                if (shape == "both-self-remove")
+                {
+                    // Each acts on their own row: the loser is still a planner, and the last one.
+                    refused.Outcome.Should().Be(EnrollmentOutcome.Conflict, "{0} round {1}", shape, round);
+                    refused.Error.Should().Be(EnrollmentService.LastPlannerError);
+                }
+                else
+                {
+                    // #840: the loser was removed / demoted by the winner before its own guard ran, so it no longer holds
+                    // the planner grant it was authorized on. Its own authority is answered first: 403, not 409.
+                    refused.Outcome.Should().Be(EnrollmentOutcome.Forbidden, "{0} round {1}", shape, round);
+                }
             }
 
             await using var read = _kit.ReadContext();

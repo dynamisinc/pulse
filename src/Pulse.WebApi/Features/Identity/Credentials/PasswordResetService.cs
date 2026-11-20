@@ -3,7 +3,6 @@ namespace Pulse.WebApi.Features.Identity.Credentials;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,7 +19,8 @@ using Pulse.WebApi.Features.Realtime;
 /// <remarks>
 /// <para>
 /// <b>Order.</b> (1) The token is looked up; anything but a live, unused token naming an enabled person in the token's
-/// own organization is the uniform <see cref="InvalidTokenError"/>. (2) The password is checked against
+/// own organization — and, when it has an issuer, issued by someone who is STILL an enabled org admin of that
+/// organization (#842) — is the uniform <see cref="InvalidTokenError"/>. (2) The password is checked against
 /// <see cref="PasswordPolicy"/> (staff floor, §3.2) — a policy refusal does NOT consume the token, so the person can
 /// retry. (3) In ONE transaction: the token is claimed by a single conditional statement (a lost race is the uniform
 /// error), the password is hashed with the SAME <see cref="PasswordHasher{TUser}"/> sign-in verifies with, every
@@ -57,8 +57,6 @@ public sealed partial class PasswordResetService
 
     /// <summary>The audit outcome of a completed change.</summary>
     public const string SuccessOutcome = "success";
-
-    private const int DeadlockVictimErrorNumber = 1205;
 
     private static readonly PasswordHasher<Person> Hasher = new();
 
@@ -99,6 +97,29 @@ public sealed partial class PasswordResetService
     /// <returns>The outcome the endpoint maps to a status.</returns>
     public async Task<PasswordResetResult> ResetAsync(PasswordResetRequest? request, CancellationToken cancellationToken = default)
     {
+        // #858 review: the change locks two person rows (the issuer, then the person), so it can deadlock with a concurrent
+        // org-directory or enrollment change. SQL Server rolls the victim back whole — the token is still unclaimed — so the
+        // redemption is retried ONCE from the top rather than telling a legitimate holder their link is invalid. A second
+        // deadlock is the uniform invalid-token, as before.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await ResetOnceAsync(request, cancellationToken);
+            }
+            catch (Exception exception) when (SqlDeadlock.IsDeadlock(exception))
+            {
+                _dbContext.ChangeTracker.Clear();
+                if (attempt >= 2)
+                {
+                    return PasswordResetResult.Invalid(InvalidTokenError);
+                }
+            }
+        }
+    }
+
+    private async Task<PasswordResetResult> ResetOnceAsync(PasswordResetRequest? request, CancellationToken cancellationToken)
+    {
         var now = _timeProvider.GetUtcNow();
 
         var token = await _tokens.FindRedeemableAsync(request?.Token, now, cancellationToken);
@@ -129,6 +150,15 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(InvalidTokenError);
         }
 
+        // #842: a link handed out by an org admin is only as good as that admin's authority. An issuer who has since been
+        // demoted or disabled (or who is gone, or who is not of the token's organization) voids it: the same uniform
+        // answer as an expired link. Bounded by the token's OWN organization. A null issuer (a self-delivered link) has
+        // no issuer authority to re-check.
+        if (token.IssuedByPersonId is { } issuedBy && !await IsEnabledOrgAdminAsync(issuedBy, token.OrganizationId, cancellationToken))
+        {
+            return PasswordResetResult.Invalid(InvalidTokenError);
+        }
+
         // org-scope-exempt(TenantRoot): a by-id lookup of the person's OWN organization (token.OrganizationId, which the
         // server stamped at issue) for its name — the policy refuses a password containing it — and its slug (an invite's
         // landing). Never an enumeration.
@@ -149,18 +179,8 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(policyError);
         }
 
-        CredentialChange? change;
-        try
-        {
-            change = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
-        }
-        catch (Exception exception) when (IsDeadlock(exception))
-        {
-            // Adversarial review S3 (#665): two concurrent redemptions can deadlock; SQL Server rolls the victim back, so
-            // nothing changed — the same uniform answer as losing the claim.
-            _dbContext.ChangeTracker.Clear();
-            return PasswordResetResult.Invalid(InvalidTokenError);
-        }
+        // A deadlock here (adversarial review S3, #665) propagates to ResetAsync, which retries once (see there).
+        var change = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
 
         if (change is null)
         {
@@ -175,9 +195,25 @@ public sealed partial class PasswordResetService
         return PasswordResetResult.Ok(landing);
     }
 
-    private static bool IsDeadlock(Exception exception) =>
-        exception is SqlException { Number: DeadlockVictimErrorNumber }
-        || exception.InnerException is SqlException { Number: DeadlockVictimErrorNumber };
+    /// <summary>
+    /// Inside the open transaction: locks <paramref name="personId"/>'s row while it is still an ENABLED org admin of
+    /// <paramref name="organizationId"/>, and answers whether it is (#842, Sonnet M3).
+    /// </summary>
+    private async Task<bool> LockEnabledOrgAdminAsync(Guid personId, Guid organizationId, CancellationToken cancellationToken) =>
+        await _dbContext.People
+            .InOrganization(organizationId)
+            .Where(p => p.Id == personId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken) == 1;
+
+    /// <summary>
+    /// Whether <paramref name="personId"/> is, right now, an ENABLED org admin of <paramref name="organizationId"/> (#842).
+    /// The early, lock-free check; <see cref="LockEnabledOrgAdminAsync"/> repeats it under a lock inside the change.
+    /// </summary>
+    private Task<bool> IsEnabledOrgAdminAsync(Guid personId, Guid organizationId, CancellationToken cancellationToken) =>
+        _dbContext.People
+            .AsNoTracking()
+            .InOrganization(organizationId)
+            .AnyAsync(p => p.Id == personId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null, cancellationToken);
 
     /// <summary>
     /// The single transaction of a credential change. Returns the revoked session ids and (for an invite) whether the
@@ -193,8 +229,28 @@ public sealed partial class PasswordResetService
     {
         List<Guid> revokedSessionIds;
         var hasGrant = false;
+
+        // The slow hash is computed BEFORE the transaction, so no lock is held across it.
+        var newHash = Hasher.HashPassword(person, newPassword);
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
+            // Sonnet M3 / S-001 (#842): the issuer's authority, re-checked UNDER A LOCK in this transaction — a locking no-op
+            // over the issuer's row only while it is still an enabled org admin of the token's organization. A demote or
+            // disable of the issuer that committed after the early check matches nothing (the uniform invalid-token); one
+            // that has not committed yet waits for this redemption. Locked BEFORE the person, matching the org-directory
+            // change's order (the organization's admins and the caller before the target), so the two cannot deadlock.
+            if (token.IssuedByPersonId is { } issuedBy && !await LockEnabledOrgAdminAsync(issuedBy, token.OrganizationId, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+
+            // #839: the person's row, before the claim and the sweep, serializing this change against a concurrent sign-in
+            // mint (PersonSessionLock): a sign-in that locked first has committed its session, which the sweep below
+            // revokes; one that locks after finds the new password hash and is refused. Taking it before the claim also
+            // makes two concurrent redemptions for the same person queue here instead of deadlocking on each other's tokens.
+            await PersonSessionLock.LockAsync(_dbContext, person.Id, token.OrganizationId, cancellationToken);
+
             if (!await _tokens.TryClaimAsync(token.Id, token.OrganizationId, now, cancellationToken))
             {
                 // Lost a race with a concurrent redemption (or it expired in between): the same uniform answer.
@@ -202,8 +258,12 @@ public sealed partial class PasswordResetService
                 return null;
             }
 
-            person.PasswordHash = Hasher.HashPassword(person, newPassword);
-            person.PasswordChangedAt = now;
+            // CR-001: the change is stamped from a clock read taken AFTER the lock and the claim, so it is never earlier
+            // than any session a sign-in committed before this change got the person lock.
+            var changedAt = _timeProvider.GetUtcNow();
+            now = changedAt;
+            person.PasswordHash = newHash;
+            person.PasswordChangedAt = changedAt;
             await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
 
             // The credential-change rule (§3.3): every outstanding token of BOTH purposes and every unconsumed org choice

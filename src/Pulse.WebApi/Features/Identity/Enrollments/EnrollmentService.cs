@@ -11,6 +11,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
@@ -67,6 +68,9 @@ public sealed partial class EnrollmentService
     /// in depth.
     /// </summary>
     public const string LeadChangedRetryError = "lead-changed-retry";
+
+    /// <summary>409: the change lost a deadlock twice to a concurrent change; nothing changed, retry.</summary>
+    public const string ConcurrentChangeError = "concurrent-change";
 
     /// <summary>
     /// The 409 error code for a removal or role change that would leave the exercise with NO active planner (story 20,
@@ -179,7 +183,10 @@ public sealed partial class EnrollmentService
     /// <param name="enrollmentId">The target enrollment (route value).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
-    public async Task<EnrollmentResult> SetLeadAsync(Guid enrollmentId, CancellationToken cancellationToken = default)
+    public Task<EnrollmentResult> SetLeadAsync(Guid enrollmentId, CancellationToken cancellationToken = default) =>
+        RetryOnDeadlockAsync(() => SetLeadOnceAsync(enrollmentId, cancellationToken));
+
+    private async Task<EnrollmentResult> SetLeadOnceAsync(Guid enrollmentId, CancellationToken cancellationToken)
     {
         // Planners only: an org admin acts through their own (planner) enrollment, not an org-scope twin.
         var caller = await _staffCaller.ResolveAsync(cancellationToken);
@@ -226,6 +233,18 @@ public sealed partial class EnrollmentService
         try
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            // W-002 (#840): the caller's own person (still enabled) and planner grant, re-checked and locked in this
+            // transaction, person row first.
+            if (await LockCallerAndTargetPeopleAsync(caller, targetPersonId: null, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
+
+            if (await LockCallerPlannerAsync(caller, exercise.Id, cancellationToken) is { } staleCaller)
+            {
+                return staleCaller;
+            }
 
             // ONE statement: UPDATE … SET IsLead = CASE WHEN Id = @id THEN 1 ELSE 0 END
             //                WHERE ExerciseId = @exercise AND (IsLead = 1 OR Id = @id).
@@ -319,11 +338,18 @@ public sealed partial class EnrollmentService
     /// <param name="role">The staff role: planner, controller or evaluator.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
-    public async Task<EnrollmentResult> GrantAsync(
+    public Task<EnrollmentResult> GrantAsync(
         Guid exerciseId,
         Guid? personId,
         string? role,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RetryOnDeadlockAsync(() => GrantOnceAsync(exerciseId, personId, role, cancellationToken));
+
+    private async Task<EnrollmentResult> GrantOnceAsync(
+        Guid exerciseId,
+        Guid? personId,
+        string? role,
+        CancellationToken cancellationToken)
     {
         var authorization = await AuthorizeAsync(cancellationToken);
         if (authorization.Refusal is { } refusal)
@@ -348,6 +374,19 @@ public sealed partial class EnrollmentService
         if (exercise is null)
         {
             return EnrollmentResult.NotFound();
+        }
+
+        // W-002 (#840): the grant commits in one transaction that first re-checks (and locks) the caller's own planner
+        // grant, so a planner demoted or removed while this request is in flight cannot still grant.
+        await using var transaction = await AmbientTransaction.BeginUnlessAmbientAsync(_dbContext, cancellationToken);
+        if (await LockCallerAndTargetPeopleAsync(caller, targetPersonId: null, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+        {
+            return stalePerson;
+        }
+
+        if (await LockCallerPlannerAsync(caller, exercise.Id, cancellationToken) is { } staleCaller)
+        {
+            return staleCaller;
         }
 
         // The person must belong to the exercise's own organization — a cross-tenant person is the bare 404 — and must be
@@ -405,6 +444,7 @@ public sealed partial class EnrollmentService
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitIfOwnedAsync(cancellationToken);
         }
         catch (DbUpdateException exception) when (IsUniqueKeyViolation(exception))
         {
@@ -425,7 +465,10 @@ public sealed partial class EnrollmentService
     /// <param name="role">The new staff role.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
-    public async Task<EnrollmentResult> ChangeRoleAsync(Guid enrollmentId, string? role, CancellationToken cancellationToken = default)
+    public Task<EnrollmentResult> ChangeRoleAsync(Guid enrollmentId, string? role, CancellationToken cancellationToken = default) =>
+        RetryOnDeadlockAsync(() => ChangeRoleOnceAsync(enrollmentId, role, cancellationToken));
+
+    private async Task<EnrollmentResult> ChangeRoleOnceAsync(Guid enrollmentId, string? role, CancellationToken cancellationToken)
     {
         var authorization = await AuthorizeAsync(cancellationToken);
         if (authorization.Refusal is { } refusal)
@@ -457,9 +500,17 @@ public sealed partial class EnrollmentService
         IReadOnlyList<Guid> revoked;
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
+            // #839 + #858 review: the caller's and the target's person rows first — the caller only while still enabled
+            // (and, at org scope, still an org admin), the target to serialize this sweep against a concurrent sign-in or
+            // exercise switch.
+            if (await LockCallerAndTargetPeopleAsync(caller, enrollment.PersonId, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
+
             // Story 20: lock the exercise's planner set (and the target), re-read the target, and refuse the last planner —
             // all inside the transaction the write commits in.
-            if (await LockAndGuardLastPlannerAsync(enrollment, newRole: staffRole, cancellationToken) is { } refused)
+            if (await LockAndGuardLastPlannerAsync(caller, enrollment, newRole: staffRole, cancellationToken) is { } refused)
             {
                 return refused;
             }
@@ -497,7 +548,10 @@ public sealed partial class EnrollmentService
     /// <param name="enrollmentId">The target enrollment.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
-    public async Task<EnrollmentResult> RevokeAsync(Guid enrollmentId, CancellationToken cancellationToken = default)
+    public Task<EnrollmentResult> RevokeAsync(Guid enrollmentId, CancellationToken cancellationToken = default) =>
+        RetryOnDeadlockAsync(() => RevokeOnceAsync(enrollmentId, cancellationToken));
+
+    private async Task<EnrollmentResult> RevokeOnceAsync(Guid enrollmentId, CancellationToken cancellationToken)
     {
         var authorization = await AuthorizeAsync(cancellationToken);
         if (authorization.Refusal is { } refusal)
@@ -520,8 +574,16 @@ public sealed partial class EnrollmentService
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+            // #839 + #858 review: the caller's and the target's person rows first — the caller only while still enabled
+            // (and, at org scope, still an org admin), the target to serialize this sweep against a concurrent sign-in or
+            // exercise switch.
+            if (await LockCallerAndTargetPeopleAsync(caller, enrollment.PersonId, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
+
             // Story 20: the last-planner guard, counted under a lock in THIS transaction (see LockAndGuardLastPlannerAsync).
-            if (await LockAndGuardLastPlannerAsync(enrollment, newRole: null, cancellationToken) is { } refused)
+            if (await LockAndGuardLastPlannerAsync(caller, enrollment, newRole: null, cancellationToken) is { } refused)
             {
                 return refused;
             }
@@ -560,11 +622,23 @@ public sealed partial class EnrollmentService
     /// was first read) and synced onto the tracked entity. Two planners removing each other concurrently therefore
     /// serialize: the second sees one planner left and is refused.
     /// </summary>
+    /// <remarks>
+    /// <b>The caller's own authority is re-checked under the same lock (#840).</b> An exercise-scope caller was authorized
+    /// as a planner before this transaction opened. Their own enrollment row is part of the lock and the re-read, so a
+    /// concurrent demotion or removal of the caller either commits first (and the caller, no longer an active planner, is
+    /// refused with 403) or waits behind this transaction. An org-scope admin acts on exercises through the org grant,
+    /// not an enrollment, so no row of theirs is checked.
+    /// </remarks>
+    /// <param name="caller">The authorized caller.</param>
     /// <param name="enrollment">The tracked target (already resolved inside the caller's scope / organization).</param>
     /// <param name="newRole">The role it is moving to, or <c>null</c> for a removal.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><c>null</c> to proceed; otherwise the refusal (409 <c>last-planner</c>, or the bare 404 for a target revoked meanwhile).</returns>
+    /// <returns>
+    /// <c>null</c> to proceed; otherwise the refusal (403 for an exercise-scope caller who is no longer an active planner,
+    /// 409 <c>last-planner</c>, or the bare 404 for a target revoked meanwhile).
+    /// </returns>
     private async Task<EnrollmentResult?> LockAndGuardLastPlannerAsync(
+        StaffCaller caller,
         Enrollment enrollment,
         string? newRole,
         CancellationToken cancellationToken)
@@ -572,12 +646,17 @@ public sealed partial class EnrollmentService
         var exerciseId = enrollment.ExerciseId;
         var targetId = enrollment.Id;
 
+        // An exercise-scope caller's own person; null for an org-scope admin, whose rows are never part of the check.
+        Guid? callerPersonId = caller.IsOrgScope ? null : caller.StaffUserId;
+
         // org-scope-exempt(TenantChecked): exerciseId is the target's exercise, just resolved by FindReachableAsync inside
-        // the caller's own scope and an InOrganization exercise; this only locks that one exercise's planners + the target.
+        // the caller's own scope and an InOrganization exercise; this only locks that one exercise's planners, the target
+        // and the caller's own row.
         await _dbContext.Enrollments
             .IgnoreQueryFilters()
             .Active()
-            .Where(e => e.ExerciseId == exerciseId && (e.Role == EnrollmentRoles.Planner || e.Id == targetId))
+            .Where(e => e.ExerciseId == exerciseId
+                && (e.Role == EnrollmentRoles.Planner || e.Id == targetId || (callerPersonId != null && e.PersonId == callerPersonId)))
             .ExecuteUpdateAsync(set => set.SetProperty(e => e.Role, e => e.Role), cancellationToken);
 
         // org-scope-exempt(TenantChecked): the same caller-reachable exercise as the lock above; read under that lock.
@@ -585,9 +664,17 @@ public sealed partial class EnrollmentService
             .IgnoreQueryFilters()
             .Active()
             .AsNoTracking()
-            .Where(e => e.ExerciseId == exerciseId && (e.Role == EnrollmentRoles.Planner || e.Id == targetId))
-            .Select(e => new { e.Id, e.Role, e.IsLead })
+            .Where(e => e.ExerciseId == exerciseId
+                && (e.Role == EnrollmentRoles.Planner || e.Id == targetId || (callerPersonId != null && e.PersonId == callerPersonId)))
+            .Select(e => new { e.Id, e.PersonId, e.Role, e.IsLead })
             .ToListAsync(cancellationToken);
+
+        // #840: the caller's own authority, re-read under the lock, answered before anything about the target.
+        if (callerPersonId is { } callerId
+            && !rows.Any(row => row.PersonId == callerId && string.Equals(row.Role, EnrollmentRoles.Planner, StringComparison.Ordinal)))
+        {
+            return EnrollmentResult.Forbidden();
+        }
 
         var fresh = rows.FirstOrDefault(row => row.Id == targetId);
         if (fresh is null || !EnrollmentRoles.IsStaffRole(fresh.Role))
@@ -735,6 +822,106 @@ public sealed partial class EnrollmentService
     private static string RolePayload(string? role, string? previousRole) => string.Create(
         CultureInfo.InvariantCulture,
         $"{{\"role\":{JsonSerializer.Serialize(role)},\"previousRole\":{JsonSerializer.Serialize(previousRole)}}}");
+
+    /// <summary>
+    /// Sonnet L6: an enrollment change locks several rows (the person, the exercise's planners, the target), so two
+    /// concurrent changes can deadlock. SQL Server rolls the victim back whole, so nothing changed: it is retried ONCE
+    /// from the top (re-authorizing and re-reading everything), then answered with a clean 409
+    /// <see cref="ConcurrentChangeError"/> instead of an unhandled 500.
+    /// </summary>
+    private async Task<EnrollmentResult> RetryOnDeadlockAsync(Func<Task<EnrollmentResult>> operation)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception exception) when (SqlDeadlock.IsDeadlock(exception))
+            {
+                _dbContext.ChangeTracker.Clear();
+                if (attempt >= 2)
+                {
+                    return EnrollmentResult.Conflict(ConcurrentChangeError);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Locks, in ONE statement, the caller's person row — only while the caller is still enabled and, for an org-scope
+    /// caller, still an org admin (#858 review: an org-scope caller's whole authority is that grant) — and the target's
+    /// person row (#839: serializing a session sweep against a concurrent sign-in or exercise switch; see
+    /// <see cref="PersonSessionLock"/>). One statement takes both rows in key order, so two changes that name the same
+    /// two people the other way round cannot deadlock on them.
+    /// </summary>
+    /// <param name="caller">The authorized caller.</param>
+    /// <param name="targetPersonId">The person whose sessions the change sweeps, or <c>null</c> when it sweeps none.</param>
+    /// <param name="organizationId">The exercise's organization (the caller's own, already bounded).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>null</c> to proceed; otherwise the 403 for a caller who no longer holds their authority.</returns>
+    private async Task<EnrollmentResult?> LockCallerAndTargetPeopleAsync(
+        StaffCaller caller,
+        Guid? targetPersonId,
+        Guid organizationId,
+        CancellationToken cancellationToken)
+    {
+        var callerId = caller.StaffUserId;
+        var orgScope = caller.IsOrgScope;
+
+        if (targetPersonId is not { } targetId || targetId == callerId)
+        {
+            var callerLocked = await _dbContext.People
+                .InOrganization(organizationId)
+                .Where(p => p.Id == callerId && p.DisabledAt == null && (!orgScope || p.OrgRole == Person.OrgAdminRole))
+                .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
+            return callerLocked == 1 ? null : EnrollmentResult.Forbidden();
+        }
+
+        var locked = await _dbContext.People
+            .InOrganization(organizationId)
+            .Where(p => p.Id == targetId
+                || (p.Id == callerId && p.DisabledAt == null && (!orgScope || p.OrgRole == Person.OrgAdminRole)))
+            .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
+        if (locked == 2)
+        {
+            return null;
+        }
+
+        // One row: it is the caller only when the target has no person row (nothing to sweep against); otherwise the
+        // caller did not match.
+        var targetExists = await _dbContext.People
+            .InOrganization(organizationId)
+            .AnyAsync(p => p.Id == targetId, cancellationToken);
+        return locked == 1 && !targetExists ? null : EnrollmentResult.Forbidden();
+    }
+
+    /// <summary>
+    /// W-002 (#840): for an exercise-scope caller, re-checks INSIDE the open transaction that they still hold an active
+    /// planner enrollment on <paramref name="exerciseId"/>, and locks it (a no-op <c>SET Role = Role</c>, held to commit),
+    /// so a concurrent demotion or removal of the caller either committed first (403 here) or waits behind this change.
+    /// Org-scope admins act through the org grant and are not checked here.
+    /// </summary>
+    /// <returns><c>null</c> to proceed; otherwise the 403.</returns>
+    private async Task<EnrollmentResult?> LockCallerPlannerAsync(StaffCaller caller, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        if (caller.IsOrgScope)
+        {
+            return null;
+        }
+
+        var callerId = caller.StaffUserId;
+
+        // org-scope-exempt(TenantChecked): exerciseId was just resolved inside the caller's own scope and organization,
+        // and the row is the caller's OWN enrollment (PersonId is their session-carried id).
+        var held = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .Active()
+            .Where(e => e.ExerciseId == exerciseId && e.PersonId == callerId && e.Role == EnrollmentRoles.Planner)
+            .ExecuteUpdateAsync(set => set.SetProperty(e => e.Role, e => e.Role), cancellationToken);
+
+        return held > 0 ? null : EnrollmentResult.Forbidden();
+    }
 
     private static bool IsLeadCheckViolation(SqlException? exception) =>
         exception is { Number: CheckConstraintErrorNumber }

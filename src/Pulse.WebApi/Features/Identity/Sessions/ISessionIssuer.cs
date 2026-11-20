@@ -27,6 +27,18 @@ public interface ISessionIssuer
     Task<SessionIssueResult> IssueAsync(
         SessionIssueRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cuts the live hub connections of the sessions an <see cref="IssueAsync"/> call that ran inside the CALLER's
+    /// transaction revoked (<see cref="SessionIssueResult.DeferredConnectionCuts"/>, #858 review M4). Call it only after
+    /// that transaction has committed; a mint that rolled back never calls it, so it cuts nothing. A no-op when nothing
+    /// was deferred.
+    /// </summary>
+    /// <param name="issued">The committed issue result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    Task CutDeferredConnectionsAsync(SessionIssueResult issued, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }
 
 /// <summary>
@@ -89,4 +101,11 @@ public sealed class SessionIssueResult
 
     /// <summary>The raw refresh token to hand to the client, or <c>null</c> when the session has no refresh material; only its hash is stored.</summary>
     public string? RefreshToken { get; init; }
+
+    /// <summary>
+    /// The sessions this issue revoked (the one-world-per-origin backstop) whose live hub connections were NOT cut yet,
+    /// because the issue ran inside the caller's open transaction (#858 review M4). The caller cuts them with
+    /// <see cref="ISessionIssuer.CutDeferredConnectionsAsync"/> after its commit. Empty when the issuer cut them itself.
+    /// </summary>
+    public IReadOnlyList<Guid> DeferredConnectionCuts { get; init; } = [];
 }
