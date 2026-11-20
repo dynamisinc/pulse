@@ -47,6 +47,36 @@
  *     connection was actually up or coming up) so a consumer can tell a deliberate
  *     stop from "auto-reconnect exhausted" and re-attach instead of giving up.
  *
+ * EXERCISE SWITCH + TERMINAL CLOSE (#856). A staff exercise switch rewrites the session's principal
+ * server-side WITHOUT a sign-in, so nothing above ran `stop()`. The server already cuts the
+ * session's hub connections on a switch (`StaffAssignmentService.SetActiveExerciseAsync` ->
+ * `RevokeAsync`), and SignalR's automatic reconnect then rejoins as exercise B - at a moment the
+ * console has not yet committed B's scope - while, since the ASP.NET Core servicing update, a
+ * long-poll/SSE request whose user changed is refused (403). So the client owns the transition:
+ *   - `stop('scope-changed')` BEFORE the switch request: A's frames stop at once and the
+ *     auto-reconnect cannot deliver B frames early. The reason `'scope-changed'` (not
+ *     `'stopped'`) tells consumers this is a missed-push window - they mark a gap and resync
+ *     once the connection is back - and that nobody should restart it yet.
+ *   - SUSPENSION. `stop('scope-changed')` also SUSPENDS the connection: while suspended,
+ *     `start()` builds nothing and REJECTS quietly (`SUSPENDED`), so a consumer's recovery driver
+ *     (the feed's poll loop, a re-attach) cannot reopen the hub mid-switch, nor after a switch
+ *     whose scope could not be re-resolved (fail closed). Rejecting is the honest answer: the
+ *     connection is not up, so a consumer keeps whatever fallback it has. Only `resume()` or a
+ *     plain `stop()` (sign-out / sign-in, via the session reset) lifts it, so a sign-out in the
+ *     middle of a switch cannot strand the next identity's connection.
+ *   - `resume()` once the new scope has been committed: lifts the suspension and starts on the
+ *     current token, with every handler re-attached. It does nothing when no handler is
+ *     subscribed or nobody is signed in, and it never rejects. If the connection is somehow
+ *     already Connected it announces `Connected` again, so gap consumers still resync under the
+ *     new scope.
+ *     If the switch fails to re-resolve, nobody calls it and the hub stays stopped.
+ *   - a TERMINAL close that is not a sign-out (auto-reconnect exhausted, e.g. repeated 403s):
+ *     rebuild ONCE with the current token. The attempt budget is spent when it is made and is
+ *     refilled only after a connection has stayed Connected for `STABLE_CONNECTION_MS`, so a hub
+ *     that accepts and then drops us cannot make a loop: at most one rebuild per window, then
+ *     consumers' own polling fallback / recovery driver takes over. No rebuild when no token is
+ *     stored (signed out: fail closed).
+ *
  * TESTABILITY. `createRealtimeConnection({ hubUrl, buildConnection })` lets a
  * test point the connection at a fake transport (or override the hub URL)
  * without a real WebSocket; the app uses the lazy shared `realtimeConnection`
@@ -58,7 +88,7 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { HubConnection } from '@microsoft/signalr'
 import { getAccessToken } from '@/core/auth/tokenStore'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeMountHandler, registerSessionReset } from '@/core/auth/sessionReset'
 import type { HotModule } from '@/core/auth/sessionReset'
 
 export { HubConnectionState } from '@microsoft/signalr'
@@ -68,13 +98,17 @@ export { HubConnectionState } from '@microsoft/signalr'
 export type RealtimeEventHandler = (payload: unknown) => void
 
 /**
- * Why a state transition happened, when the transport knows. Only one reason exists:
- * `'stopped'` accompanies the `Disconnected` that `stop()` causes (a DELIBERATE end,
- * e.g. the session's identity changed), as opposed to a bare `Disconnected`, which means
- * the connection was lost and auto-reconnect is exhausted. A consumer that polls as a
- * fallback should degrade on the latter and re-attach on the former.
+ * Why a state transition happened, when the transport knows. A bare `Disconnected` (no reason)
+ * means the connection was LOST and auto-reconnect is exhausted: a consumer that polls as a
+ * fallback should degrade. The two reasons are DELIBERATE ends:
+ *  - `'stopped'`: the session's identity changed (sign-out / sign-in). A consumer still started
+ *    re-attaches, and it is not a gap (its own session reset clears its state).
+ *  - `'scope-changed'`: the session's EXERCISE changed (staff switch, #856). Frames sent while
+ *    the connection is down are lost, so a consumer treats it as a GAP and resyncs when
+ *    `Connected` returns, but must NOT restart the connection itself: the switch owner calls
+ *    `resume()` once the new scope is committed.
  */
-export type RealtimeStateReason = 'stopped'
+export type RealtimeStateReason = 'stopped' | 'scope-changed'
 
 /** Observes connection-state transitions; `reason` is set only for a deliberate stop. */
 export type RealtimeStateListener = (
@@ -117,11 +151,51 @@ export interface RealtimeConnection {
    * that do not care (the session reset) may ignore the promise, and `start()` never
    * waits on it.
    */
-  stop(): Promise<void>
+  stop(reason?: RealtimeStateReason): Promise<void>
 
   /** The current connection state (`Disconnected` before the first start). */
   readonly state: HubConnectionState
+
+  /**
+   * True while `stop('scope-changed')` has the connection suspended (an exercise switch is in
+   * progress): `start()` is refused, and a polling consumer should skip its tick rather than
+   * read the NEW exercise's data into the OLD exercise's state. Optional so test doubles need not
+   * implement it.
+   */
+  readonly suspended?: boolean
 }
+
+/**
+ * The app's shared connection: {@link RealtimeConnection} plus the one operation only the
+ * session layer needs. Kept off the base interface so a consumer's test double need not fake it.
+ */
+export interface ManagedRealtimeConnection extends RealtimeConnection {
+  /**
+   * Starts the connection again after `stop('scope-changed')`, once the new exercise scope is
+   * committed (#856). Starts on the then-current token with every `subscribe`d handler
+   * re-attached. Lifts the suspension `stop('scope-changed')` put in place. Does nothing (beyond
+   * lifting it) when no handler is subscribed or no session token is stored. If the connection
+   * is already Connected it emits a fresh `Connected` so gap consumers resync. Never throws or
+   * rejects.
+   */
+  resume(): Promise<void>
+
+  /**
+   * Lifts a suspension without starting anything. Run when the exercise scope resolves on a
+   * fresh mount, so a console remounted after a fail-closed switch does not run with a hub that
+   * nobody is going to resume.
+   */
+  clearSuspension(): void
+}
+
+/** Why `start()` refused while the connection is suspended by `stop('scope-changed')`. */
+export const SUSPENDED = 'The realtime connection is suspended while the exercise scope changes.'
+
+/**
+ * How long a rebuilt connection must stay `Connected` before the terminal-close rebuild budget
+ * is refilled. A hub that accepts and then drops us inside this window gets no second rebuild.
+ */
+export const STABLE_CONNECTION_MS = 30_000
 
 /** Options for {@link createRealtimeConnection} — overrides used by tests. */
 export interface CreateRealtimeConnectionOptions {
@@ -246,7 +320,7 @@ async function closeQuietly(
  * below) touches neither the network nor `window`. After `stop()` it is built
  * afresh on the next `subscribe`/`start` (see the module header).
  */
-class SharedRealtimeConnection implements RealtimeConnection {
+class SharedRealtimeConnection implements ManagedRealtimeConnection {
   private readonly buildConnection: (hubUrl: string) => HubConnection
   private readonly hubUrlOverride: string | undefined
   private readonly stateListeners = new Set<RealtimeStateListener>()
@@ -259,10 +333,20 @@ class SharedRealtimeConnection implements RealtimeConnection {
    * chain of every earlier close: one hung negotiate must not make every later stop() hang.
    */
   private closing: Promise<void> = Promise.resolve()
+  /** True once a terminal close has been answered with a rebuild; refilled by a good connect. */
+  private rebuildSpent = false
+  /** Set by `stop('scope-changed')`; while true `start()` refuses. See the module header. */
+  private suspendedFlag = false
+  /** Refills the rebuild budget once the connection has stayed up for STABLE_CONNECTION_MS. */
+  private stableTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
     this.buildConnection = options.buildConnection ?? createDefaultHubConnection
     this.hubUrlOverride = options.hubUrl
+  }
+
+  get suspended(): boolean {
+    return this.suspendedFlag
   }
 
   get state(): HubConnectionState {
@@ -289,6 +373,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
   }
 
   start(): Promise<void> {
+    if (this.suspendedFlag) return Promise.reject(new Error(SUSPENDED))
     const connection = this.ensureConnection()
     if (connection.state === HubConnectionState.Connected) return Promise.resolve()
     if (this.startPromise !== null) return this.startPromise
@@ -301,6 +386,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
           // it came up after all): do not announce a connection that is already abandoned.
           throw new Error(STOPPED_DURING_START)
         }
+        this.armStableTimer()
         this.emitState(HubConnectionState.Connected)
       })
       .catch((error: unknown) => {
@@ -314,7 +400,10 @@ class SharedRealtimeConnection implements RealtimeConnection {
     return pending
   }
 
-  stop(): Promise<void> {
+  stop(reason: RealtimeStateReason = 'stopped'): Promise<void> {
+    // A scope change SUSPENDS (no start() until resume()); any other stop - a sign-out or
+    // sign-in - lifts a suspension, so a session that ends mid-switch cannot strand the next one.
+    this.suspendedFlag = reason === 'scope-changed'
     const connection = this.connection
     if (connection === null) return this.closing
 
@@ -328,6 +417,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
     // Disconnected and a start() builds a new connection rather than touching this one.
     this.connection = null
     this.startPromise = null
+    this.clearStableTimer()
     try {
       // Detach every handler first, so a frame still in flight from the old identity's
       // exercise reaches nobody - least of all a consumer already subscribed for the next one.
@@ -341,9 +431,83 @@ class SharedRealtimeConnection implements RealtimeConnection {
     // token clear that follows it) so a listener that re-attaches sees the world as it
     // will be, not as it was.
     void Promise.resolve().then(() => {
-      this.emitState(HubConnectionState.Disconnected, 'stopped')
+      this.emitState(HubConnectionState.Disconnected, reason)
     })
     return this.closing
+  }
+
+  resume(): Promise<void> {
+    this.suspendedFlag = false
+    if (this.subscriptions.size === 0) return Promise.resolve()
+    // Signed out meanwhile: there is no identity to connect as (negotiate would only 401).
+    if (getAccessToken() === null) return Promise.resolve()
+    // A deliberate resume starts a new situation, not a retry of the last close.
+    this.rebuildSpent = false
+    if (this.connection?.state === HubConnectionState.Connected) {
+      // Suspension makes this unreachable in practice; if it ever happens, consumers that
+      // recorded a gap must still resync under the new scope.
+      this.emitState(HubConnectionState.Connected)
+      return Promise.resolve()
+    }
+    const attempt = this.start()
+    const started = this.connection
+    return attempt.catch(() => {
+      // Failed. Consumers parked themselves on `'scope-changed'` (the feed holds in 'connecting'
+      // and does not poll), so they need a plain loss to fall back and retry: announce it - but
+      // only if this attempt is still the story (not re-suspended, not replaced, not up).
+      if (this.suspendedFlag || this.connection !== started) return
+      if (started?.state === HubConnectionState.Connected) return
+      this.emitState(HubConnectionState.Disconnected)
+    })
+  }
+
+  clearSuspension(): void {
+    this.suspendedFlag = false
+  }
+
+  private armStableTimer(): void {
+    this.clearStableTimer()
+    this.stableTimer = setTimeout(() => {
+      this.stableTimer = null
+      this.rebuildSpent = false
+    }, STABLE_CONNECTION_MS)
+  }
+
+  private clearStableTimer(): void {
+    if (this.stableTimer !== null) clearTimeout(this.stableTimer)
+    this.stableTimer = null
+  }
+
+  /**
+   * A terminal close (auto-reconnect exhausted) with a session still signed in: abandon the dead
+   * connection and start ONE fresh one on the current token (the old one may have been refused
+   * because its principal changed - #856). The dead connection is dropped, `startPromise`
+   * included, BEFORE listeners hear `Disconnected`, so a listener that calls `start()` straight
+   * away builds a fresh connection instead of reviving the dead one - and then owns the restart.
+   */
+  private handleTerminalClose(closed: HubConnection): void {
+    this.clearStableTimer()
+    this.startPromise = null
+    const rebuild = !this.rebuildSpent && getAccessToken() !== null
+    if (rebuild) {
+      this.rebuildSpent = true
+      this.connection = null
+      try {
+        for (const { eventName, handler } of this.subscriptions) closed.off(eventName, handler)
+      } catch {
+        // Best effort; the connection is dead.
+      }
+    }
+    this.emitState(HubConnectionState.Disconnected)
+    // A listener (or a stop()) already moved on: the restart is theirs.
+    if (!rebuild || this.connection !== null) return
+    const attempt = this.start()
+    const rebuilt = this.connection
+    attempt.catch(() => {
+      // Failed. Announce the loss only if the connection WE started is still the current one:
+      // a stop()/resume() that overtook it owns the story now. The budget stays spent.
+      if (this.connection === rebuilt) this.emitState(HubConnectionState.Disconnected)
+    })
   }
 
   private ensureConnection(): HubConnection {
@@ -355,17 +519,18 @@ class SharedRealtimeConnection implements RealtimeConnection {
     // background and must not speak for the shared connection any more.
     connection.onreconnecting(() => {
       if (this.connection !== connection) return
+      this.clearStableTimer()
       this.emitState(HubConnectionState.Reconnecting)
     })
     connection.onreconnected(() => {
       if (this.connection !== connection) return
+      this.armStableTimer()
       this.emitState(HubConnectionState.Connected)
     })
     connection.onclose(() => {
       if (this.connection !== connection) return
-      // Auto-reconnect exhausted: clear the memo so start() can re-establish later.
-      this.startPromise = null
-      this.emitState(HubConnectionState.Disconnected)
+      // Auto-reconnect exhausted: see handleTerminalClose.
+      this.handleTerminalClose(connection)
     })
     for (const { eventName, handler } of this.subscriptions) connection.on(eventName, handler)
     this.connection = connection
@@ -389,7 +554,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
  */
 export function createRealtimeConnection(
   options: CreateRealtimeConnectionOptions = {},
-): RealtimeConnection {
+): ManagedRealtimeConnection {
   return new SharedRealtimeConnection(options)
 }
 
@@ -397,7 +562,7 @@ export function createRealtimeConnection(
  * The app-wide shared connection. Every consumer subscribes here — nothing else
  * should construct a `HubConnection`. Lazy: no side effects until first use.
  */
-export const realtimeConnection: RealtimeConnection = createRealtimeConnection()
+export const realtimeConnection: ManagedRealtimeConnection = createRealtimeConnection()
 
 // The shared connection belongs to ONE identity (see the module header), so every end of a
 // session - sign-out and every sign-in, both through `resetClientSession()` - stops it. Done
@@ -406,6 +571,7 @@ export const realtimeConnection: RealtimeConnection = createRealtimeConnection()
 registerSessionReset(() => {
   void realtimeConnection.stop()
 }, import.meta.hot)
+registerExerciseScopeMountHandler(() => realtimeConnection.clearSuspension(), import.meta.hot)
 
 /**
  * Stops `connection` when Vite hot-replaces the module that calls this (dev only; `hot` is

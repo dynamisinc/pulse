@@ -114,7 +114,7 @@
 
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
 import { parseMediaAssetView } from '@/core/media/mediaGuards'
@@ -602,6 +602,8 @@ class RealtimeFeedController implements SessionResettableFeed {
       case HubConnectionState.Disconnected:
         if (reason === 'stopped') {
           this.reattach()
+        } else if (reason === 'scope-changed') {
+          this.holdForScopeChange()
         } else {
           this.enterPolling()
         }
@@ -609,6 +611,18 @@ class RealtimeFeedController implements SessionResettableFeed {
       default:
         break
     }
+  }
+
+  /**
+   * The shared connection was stopped for an exercise SWITCH (#856): a gap, not a loss. Do NOT
+   * degrade to polling and do NOT restart anything: the connection is suspended until the switch
+   * owner (`useSetActiveExercise`) resumes it once the new scope is committed, and its `Connected`
+   * brings this feed back to real-time. A feed that was already polling keeps its safety net
+   * (the recovery driver's `start()` is refused while suspended).
+   */
+  private holdForScopeChange(): void {
+    this.clearReconnectWindow()
+    if (this.currentMode === 'realtime') this.currentMode = 'connecting'
   }
 
   /**
@@ -704,6 +718,10 @@ class RealtimeFeedController implements SessionResettableFeed {
     // overlap — two concurrent polls could both observe baselined === false and race the
     // dedup/baseline state. Skip a tick while one is still running; the next cadence retries.
     if (this.pollInFlight) return
+    // An exercise switch is in progress (the connection is suspended): the server may already be
+    // on the NEW exercise, and its posts must not land in the OLD exercise's feed state before
+    // the switch commits. Skip this tick; the resume (or the post-commit reset) takes over.
+    if (this.connection.suspended === true) return
     // Self-heal: polling is the fallback for a connection that is NOT up. If it is up, whatever
     // degraded the feed has since been overtaken (a late-rejecting start), so stop polling.
     if (this.connection.state === HubConnectionState.Connected) {
@@ -845,6 +863,7 @@ export const defaultEngagementChangeSource: EngagementChangeSource = USE_MOCK_DA
 // session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
 // - `resetClientSession()` runs it with the other registered resets. See the module header (H-1).
 registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
+registerExerciseScopeReset(() => appWideFeed.resetForSession(), import.meta.hot)
 
 // Every valid `PostRemoved` on the app-wide transport is recorded in the session's removed-post
 // store (C5) — the one place `<Feed>` and the Explore baseline learn that a post must go. Wired

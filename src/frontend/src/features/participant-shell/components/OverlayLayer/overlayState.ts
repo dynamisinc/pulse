@@ -106,7 +106,7 @@ import { api } from '@/core/services/api'
 import { useExerciseContext, useOptionalExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getAccessToken } from '@/core/auth/tokenStore'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { onWriteRefused } from '@/core/services/writeRefusal'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
@@ -679,6 +679,7 @@ function useOverlayStateResolution(): { readonly state: OverlayState; readonly s
 }
 
 registerSessionReset(resetLiveForSession, import.meta.hot)
+registerExerciseScopeReset(resetLiveForSession, import.meta.hot)
 onWriteRefused(relearnAfterRefusedWrite, import.meta.hot)
 
 /**

@@ -176,7 +176,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { isServerClockInstalled, serverExerciseClock, setExerciseClock } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
@@ -275,6 +275,11 @@ interface PauseStoreState {
   readonly overlayRegister: OverlayRegister
   /** The last server refusal to surface, or `null`. Ambient like the tier itself. */
   readonly refusal: PauseRefusal | null
+  /**
+   * Bumped by the exercise-scope reset (#856) so a MOUNTED console re-runs its one-shot server
+   * resync for the current exercise, whichever order the reset and the render came in.
+   */
+  readonly resyncEpoch: number
 }
 
 /** A completed tier transition, returned so the hook can emit telemetry with context. */
@@ -297,6 +302,7 @@ let storeState: PauseStoreState = {
   tier: 'running',
   overlayRegister: 'out-of-fiction',
   refusal: null,
+  resyncEpoch: 0,
 }
 const storeListeners = new Set<() => void>()
 
@@ -460,12 +466,12 @@ function authoritativeTier(server: PauseTierServerState): PauseTier {
 }
 
 /**
- * Whether the live-mode one-shot resync GET has already been kicked off for this
+ * The exercise the live-mode one-shot resync GET was last kicked off for in this
  * runtime — `usePauseState()` is mounted by more than one surface (the pill and
  * the header), and only ONE of them should read the server tier (mirrors
  * `liveReviewStore.ensureStarted`'s idempotence).
  */
-let resyncStarted = false
+let resyncedFor: string | null = null
 
 /**
  * Bumped by everything that SUPERSEDES an in-flight server read: a controller's own
@@ -539,8 +545,13 @@ export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
 export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
-  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
-  resyncStarted = false
+  storeState = {
+    tier: 'running',
+    overlayRegister: 'out-of-fiction',
+    refusal: null,
+    resyncEpoch: storeState.resyncEpoch,
+  }
+  resyncedFor = null
   supersedeSequence = 0
   engineModeBeforePause = null
   transitionSequence = 0
@@ -558,8 +569,13 @@ export function resetPauseStateForTest(): void {
 function resetPauseStateForSession(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
-  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
-  resyncStarted = false
+  storeState = {
+    tier: 'running',
+    overlayRegister: 'out-of-fiction',
+    refusal: null,
+    resyncEpoch: storeState.resyncEpoch,
+  }
+  resyncedFor = null
   engineModeBeforePause = null
   transitionSequence++
   supersedeSequence++
@@ -569,6 +585,19 @@ function resetPauseStateForSession(): void {
 // Registered with `core/auth` (which cannot import this feature) rather than called from
 // `endSession`; the unregister is tied to Vite's hot replacement of this module.
 registerSessionReset(resetPauseStateForSession, import.meta.hot)
+
+/**
+ * The session's exercise changed (staff switch, #856): forget exercise A's pause state AND ask a
+ * mounted console to read B's tier itself, rather than relying on its `[exerciseId]` effect
+ * running after this reset (the render can come first).
+ */
+function resetPauseStateForScope(): void {
+  resetPauseStateForSession()
+  storeState = { ...storeState, resyncEpoch: storeState.resyncEpoch + 1 }
+  emitStoreChange()
+}
+
+registerExerciseScopeReset(resetPauseStateForScope, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -784,10 +813,12 @@ export function usePauseState(): PauseState {
   // gave. It still applies the tier's local effects (the pausable clock, the
   // bar's position) so the console never contradicts the server.
   useEffect(() => {
-    if (USE_MOCK_DATA || resyncStarted) return
-    resyncStarted = true
+    // Keyed on the EXERCISE, not a boolean: a staff switch changes `exerciseId` under a mounted
+    // console, and B's tier must be read even though A's was (#856).
+    if (USE_MOCK_DATA || resyncedFor === exerciseId) return
+    resyncedFor = exerciseId
     void refreshPauseTierFromServer(exerciseId)
-  }, [exerciseId])
+  }, [exerciseId, state.resyncEpoch])
 
   const resume = useCallback(() => setTier('running'), [setTier])
 

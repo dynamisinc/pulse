@@ -155,14 +155,13 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
-    public async Task HubConnection_PresentingItsTokenAsAccessTokenQueryParameter_ConnectsAndJoinsItsGroup()
+    public async Task HubConnection_PresentingItsTokenAsAuthorizationHeader_ConnectsAndJoinsItsGroup()
     {
-        // The seam a mistake here is INVISIBLE locally and fatal in UAT: a dark participant live feed with a
-        // fully green suite. Gating the hub without this passing means the story shipped a regression, and the
-        // whole reason the frontend accessTokenFactory ships in the same story is that the two halves have to
-        // land together. A browser cannot set an Authorization header on a WebSocket upgrade, so the ONLY way a
-        // real participant reaches this hub is the query parameter — nothing else exercises that path
-        // end-to-end through the real Program pipeline.
+        // The .NET SignalR client presents AccessTokenProvider's token as an Authorization: Bearer header, NOT as
+        // ?access_token=; the query-string path browsers use is driven raw by the Hub*AccessTokenQueryParameter
+        // tests below (#855). This one proves the header path end to end through the real Program pipeline: a
+        // mistake here is INVISIBLE locally and fatal in UAT (a dark live feed with a fully green suite), which is
+        // why the frontend accessTokenFactory ships in the same story as the gate.
         using var factory = new GateProbeFactory(AcceptedToken);
         var server = factory.Server;
 
@@ -203,10 +202,10 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
-    public async Task HubConnection_PresentingAnUnknownTokenAsAccessTokenQueryParameter_IsStillRefused()
+    public async Task HubConnection_PresentingAnUnknownTokenAsAuthorizationHeader_IsStillRefused()
     {
-        // The other half of the query-string path: accepting the parameter must not mean accepting anything
-        // that arrives in it. An unresolvable token authenticates nothing, so the principal is never set.
+        // The other half of the header path: an unresolvable bearer token authenticates nothing, so the
+        // principal is never set and the gate refuses. (The query-string equivalent is driven raw below.)
         using var factory = new GateProbeFactory(AcceptedToken);
         var server = factory.Server;
 
@@ -225,6 +224,162 @@ public sealed class DefaultDenySessionGateTests
 
         await start.Should().ThrowAsync<Exception>("an unknown token resolves no session, so the gate refuses");
         connection.State.Should().Be(HubConnectionState.Disconnected);
+    }
+
+    [Fact]
+    public async Task HubNegotiate_PresentingItsTokenOnlyAsAccessTokenQueryParameter_Succeeds()
+    {
+        // #855: a browser cannot set an Authorization header on a WebSocket upgrade or an EventSource, so the
+        // query string is the ONLY way a real browser client reaches this hub. The .NET client tests above send a
+        // header, so this raw request (no Authorization header at all) is the one that walks that path through the
+        // real Program pipeline.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync(
+            $"hubs/exercise/negotiate?negotiateVersion=1&access_token={AcceptedToken}",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.TryGetProperty("connectionToken", out _).Should().BeTrue(
+            "a successful negotiate hands back a connection token");
+    }
+
+    [Theory]
+    [InlineData("not-a-real-token")]
+    [InlineData("")]
+    public async Task HubNegotiate_PresentingAnUnknownOrEmptyAccessTokenQueryParameter_IsRefused(string token)
+    {
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync(
+            $"hubs/exercise/negotiate?negotiateVersion=1&access_token={token}",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HubNegotiate_PresentingNoTokenAtAll_IsRefused()
+    {
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync("hubs/exercise/negotiate?negotiateVersion=1", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HubConnect_LongPollingWithTheTokenOnlyAsAccessTokenQueryParameter_HandshakesAndReceivesAGroupSend()
+    {
+        // #855, the connect leg: negotiate alone proves little, because the transport request (the long poll a
+        // browser falls back to; SSE and WebSockets send the same query string) is authenticated separately. Drive
+        // the whole raw sequence with the token ONLY in ?access_token= and no Authorization header anywhere:
+        // negotiate -> first poll -> handshake -> group join -> a group send arrives on the next poll. The same
+        // stable session on every request is what keeps the 10.0 dispatcher's user-changed check (403) quiet.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        client.DefaultRequestHeaders.Authorization.Should().BeNull(
+            "this leg must authenticate by the query string alone, with no Authorization header on any request");
+
+        var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
+
+        using var firstPoll = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
+        firstPoll.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+        firstPoll.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+        firstPoll.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var handshake = new StringContent("{\"protocol\":\"json\",\"version\":1}\u001e");
+        using var handshakeResponse = await client.PostAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", handshake, cts.Token);
+        handshakeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var handshakeReply = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
+        handshakeReply.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await handshakeReply.Content.ReadAsStringAsync(cts.Token)).Should().StartWith("{}");
+
+        await factory.Connected.WaitForConnectedAsync();
+        var hubContext = factory.Services.GetRequiredService<IHubContext<ExerciseRealtimeHub>>();
+        await hubContext.Clients
+            .Group($"exercise:{GateProbeFactory.ResolvedExerciseId}")
+            .SendAsync("PostReceived", new { id = "post-over-query-string" }, cts.Token);
+
+        using var frames = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
+        frames.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await frames.Content.ReadAsStringAsync(cts.Token)).Should().Contain("post-over-query-string");
+    }
+
+    [Theory]
+    [InlineData("not-a-real-token")]
+    [InlineData("")]
+    public async Task HubConnect_LongPollingWithAnUnknownOrMissingAccessTokenOnTheTransportLeg_IsRefused(string token)
+    {
+        // The connection token negotiated with a VALID credential must not be a bearer: the transport leg
+        // authenticates on its own, so a request that arrives with a bad or absent access_token is refused.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
+
+        using var response = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={token}", cts.Token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HubConnect_WhenTheSessionBehindTheTokenChangesBetweenNegotiateAndTransport_IsRefusedWith403()
+    {
+        // The server behaviour the staff console's exercise-switch handling (#856) relies on: since the
+        // ASP.NET Core servicing update, HttpConnectionDispatcher refuses a long-poll/SSE request whose user
+        // differs from the negotiate request's. A staff exercise switch rewrites the session's principal, so a
+        // connection left running through one gets this 403 - which is why the client stops the hub BEFORE the
+        // switch and rebuilds it after. The stub resolves the same token to session S1 on the first call
+        // (negotiate) and to a different session on every later one.
+        using var factory = new GateProbeFactory(AcceptedToken, rotateSessionAfterFirstCall: true);
+        using var client = factory.CreateClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
+        factory.AuthenticationCalls[0].Should().Be(
+            1,
+            "negotiate must have authenticated exactly once, as session S1, or the 403 below proves nothing");
+
+        using var response = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
+
+        factory.AuthenticationCalls[0].Should().BeGreaterThan(1, "the transport request was authenticated as the rotated session");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task AccessTokenQueryParameter_OnANonHubApiRoute_IsIgnored()
+    {
+        // The query-string credential is a SignalR browser-transport accommodation, accepted under /hubs ONLY.
+        // On an API route (where it would leak into access logs and referrers for no benefit) it must be ignored,
+        // so a request carrying a perfectly valid token there, and no Authorization header, is still anonymous.
+        using var factory = new GateProbeFactory(AcceptedToken);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync($"api/feed?access_token={AcceptedToken}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    private static async Task<string> NegotiateAsync(HttpClient client, string token, CancellationToken cancellationToken)
+    {
+        using var negotiate = await client.PostAsync(
+            $"hubs/exercise/negotiate?negotiateVersion=1&access_token={token}", content: null, cancellationToken);
+        negotiate.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await negotiate.Content.ReadAsStringAsync(cancellationToken));
+        return body.RootElement.GetProperty("connectionToken").GetString()
+            ?? throw new InvalidOperationException("negotiate returned no connectionToken");
     }
 
     [Fact]
@@ -364,6 +519,10 @@ public sealed class DefaultDenySessionGateTests
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
         private readonly string? _acceptedToken;
+        private readonly bool _rotateSessionAfterFirstCall;
+
+        /// <summary>How many times the stubbed authenticator has resolved the accepted token (one slot, shared across scopes).</summary>
+        internal int[] AuthenticationCalls { get; } = new int[1];
 
         /// <summary>Completes once the server has finished a connection's <c>OnConnectedAsync</c> (its group join).</summary>
         public HubConnectedSignal Connected { get; } = new();
@@ -375,9 +534,14 @@ public sealed class DefaultDenySessionGateTests
         /// still driving the REAL middleware, the REAL token extraction and the REAL gate — the token→session
         /// lookup itself is covered by the session slice's own suites.
         /// </param>
-        public GateProbeFactory(string? acceptedToken = null)
+        /// <param name="rotateSessionAfterFirstCall">
+        /// When true the accepted token resolves to one session on the first authentication and to a DIFFERENT
+        /// session on every later one - the principal-changed-mid-connection case of an exercise switch.
+        /// </param>
+        public GateProbeFactory(string? acceptedToken = null, bool rotateSessionAfterFirstCall = false)
         {
             _acceptedToken = acceptedToken;
+            _rotateSessionAfterFirstCall = rotateSessionAfterFirstCall;
             Environment.SetEnvironmentVariable(
                 ConnectionStringEnvVar,
                 "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
@@ -396,8 +560,11 @@ public sealed class DefaultDenySessionGateTests
 
                 if (_acceptedToken is not null)
                 {
+                    // The authenticator is scoped (one per request), so the call count it rotates on is shared.
+                    var calls = AuthenticationCalls;
+                    var rotate = _rotateSessionAfterFirstCall;
                     services.AddScoped<ISessionAuthenticator>(
-                        _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId));
+                        _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId, rotate ? calls : null));
                 }
             });
         }
@@ -427,10 +594,15 @@ public sealed class DefaultDenySessionGateTests
         private readonly string _acceptedToken;
         private readonly Guid _exerciseId;
 
-        public SingleTokenSessionAuthenticator(string acceptedToken, Guid exerciseId)
+        private static readonly Guid RotatedSessionId = Guid.Parse("cccccccc-0000-4000-8000-00000000000c");
+
+        private readonly int[]? _rotatingCalls;
+
+        public SingleTokenSessionAuthenticator(string acceptedToken, Guid exerciseId, int[]? rotatingCalls = null)
         {
             _acceptedToken = acceptedToken;
             _exerciseId = exerciseId;
+            _rotatingCalls = rotatingCalls;
         }
 
         public Task<AuthenticatedSession?> AuthenticateAsync(string rawToken, CancellationToken cancellationToken)
@@ -438,7 +610,9 @@ public sealed class DefaultDenySessionGateTests
                 string.Equals(rawToken, _acceptedToken, StringComparison.Ordinal)
                     ? new AuthenticatedSession
                     {
-                        SessionId = StableSessionId,
+                        SessionId = _rotatingCalls is not null && System.Threading.Interlocked.Increment(ref _rotatingCalls[0]) > 1
+                            ? RotatedSessionId
+                            : StableSessionId,
                         ExerciseId = _exerciseId,
                         Kind = "participant",
                         PrincipalId = "gate-probe-principal",

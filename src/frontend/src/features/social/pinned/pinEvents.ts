@@ -20,7 +20,7 @@
  * Both are identity-scoped and forgotten at every session reset (sign-out, sign-in).
  */
 
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 
 /** What changed: the viewer's own like or personal pin, or (mock only) an exercise pin. */
 export type ViewerEngagementKind = 'like' | 'pin' | 'exercise'
@@ -101,3 +101,4 @@ export const pinState = {
 }
 
 registerSessionReset(() => pinState.reset(), import.meta.hot)
+registerExerciseScopeReset(() => pinState.reset(), import.meta.hot)

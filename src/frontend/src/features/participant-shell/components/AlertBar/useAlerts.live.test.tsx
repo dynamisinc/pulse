@@ -235,6 +235,34 @@ describe('useAlerts — live push (AlertsChanged)', () => {
   })
 })
 
+describe('useAlerts - an exercise switch (scope-changed, #856)', () => {
+  it('is a gap: no restart, and the alerts are re-read when the connection returns', async () => {
+    mockGet.mockResolvedValue(ok({ alerts: [] }))
+    renderHook(() => useAlerts(), { wrapper: makeWrapper(makeQueryClient()) })
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1))
+    expect(connection().startCalls()).toBe(1)
+
+    act(() => connection().transition(HubConnectionState.Disconnected, 'scope-changed'))
+    expect(connection().startCalls()).toBe(1)
+
+    act(() => connection().transition(HubConnectionState.Connected))
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
+  })
+
+  it('a resume() that fails announces a plain loss, and the alerts are re-read once the hub works', async () => {
+    mockGet.mockResolvedValue(ok({ alerts: [] }))
+    renderHook(() => useAlerts(), { wrapper: makeWrapper(makeQueryClient()) })
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1))
+
+    act(() => connection().transition(HubConnectionState.Disconnected, 'scope-changed'))
+    act(() => connection().transition(HubConnectionState.Disconnected)) // the resumed start failed
+    expect(connection().startCalls()).toBe(1) // a plain loss is not a restart cue either
+    act(() => connection().transition(HubConnectionState.Connected))
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
+  })
+})
+
 describe('useAlertsHistory — GET /alerts/history', () => {
   it('reads the first page with no cursor, then the next page by its cursor, de-duplicating by id', async () => {
     const newest = wireAlert({ id: 'h3', scenarioTime: '2026-12-02T16:00:00Z' })

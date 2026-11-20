@@ -76,13 +76,83 @@
  * the record in logs/telemetry — but it is NOT the user-facing message; treat it
  * as the machine's copy of an event the human is already being told about.
  *
+ * ### The hub connection (#856)
+ * The shared SignalR connection belongs to ONE principal for its life, and a switch changes it
+ * server-side (which also cuts the old connection; SignalR's own auto-reconnect would rejoin as
+ * the NEW exercise before the console has committed its scope, and the hub refuses long-poll/SSE
+ * requests whose user changed). So the hook owns the transition:
+ *   - BEFORE the POST: `stop('scope-changed')` - the old exercise's frames stop at once and
+ *     nothing can deliver the new exercise's frames early;
+ *   - POST fails DEFINITELY (a 4xx: the server answered and did not switch): `resume()` - the
+ *     session is still on the old scope, so reconnect on it. An AMBIGUOUS failure (timeout,
+ *     network error, 5xx: the switch may have landed) asks the SERVER what the scope is: B ->
+ *     the full commit below; A -> `resume()`; the re-resolve fails -> stay stopped;
+ *   - scope re-resolved and committed: run the exercise-scope resets of the module stores that
+ *     hold exercise data outside React Query, then `resume()` on the current token;
+ *   - scope re-resolve FAILS: the hub stays stopped (fail closed, like the provider itself).
+ *
+ * OVERLAPPING SWITCHES. Switches are SERIALIZED (a second POST waits for the first, so the
+ * server's final scope is the last one asked for), and only the LATEST switch resets the stores
+ * and resumes the hub: a stale switch finishing while a newer one is queued must not restart
+ * the hub (the newer one would only stop it again, on the wrong scope in between).
+ *
  * World: STAFF. Pure data hook — no UI, no COBRA.
  */
 
+import { useEffect, useRef } from 'react'
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
-import { useExerciseScopeRefresh } from '@/core/exerciseContext'
+import { useExerciseContext, useExerciseScopeRefresh } from '@/core/exerciseContext'
+import { realtimeConnection } from '@/core/realtime/connection'
+import { runExerciseScopeResets } from '@/core/auth/sessionReset'
 import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
 import type { Enrollment } from '../types'
+
+/** How long the switch POST may take before it is treated as an AMBIGUOUS failure. */
+export const SWITCH_POST_TIMEOUT_MS = 15_000
+
+/** Delay before the one re-read of the scope after an ambiguous failure, before failing closed. */
+export const SCOPE_REREAD_RETRY_MS = 2_000
+
+/** Counts switches as they are asked for; only the latest may reset the stores / resume the hub. */
+let latestSwitch = 0
+
+/** Switch tail: the next switch's POST waits for the previous switch to finish. */
+let switchQueue: Promise<unknown> = Promise.resolve()
+
+function serialize<T>(task: () => Promise<T>): Promise<T> {
+  const run = switchQueue.then(task, task)
+  switchQueue = run.catch(() => undefined)
+  return run
+}
+
+/** Test-only: forgets the generation counter and the queue between tests. */
+export function resetSetActiveExerciseForTests(): void {
+  latestSwitch = 0
+  switchQueue = Promise.resolve()
+}
+
+/** Rejects (ambiguously: no status) if `promise` has not settled within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new StaffAssignmentError('The exercise switch request timed out.')),
+      ms,
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * True only when the server ANSWERED with a client error: the switch was refused, so the
+ * session is still on the old exercise. Anything else (no response, a timeout, a 5xx) is
+ * ambiguous: the switch may have landed.
+ */
+function isDefiniteRefusal(error: unknown): boolean {
+  if (!(error instanceof StaffAssignmentError)) return false
+  const status = error.status
+  return status !== undefined && status >= 400 && status < 500 && status !== 408
+}
 
 /**
  * Switches the caller's active exercise. `mutate(exerciseId)` /
@@ -100,36 +170,95 @@ export function useSetActiveExercise(): UseMutationResult<
 > {
   const queryClient = useQueryClient()
   const refreshExerciseScope = useExerciseScopeRefresh()
+  // The exercise the provider currently holds. A ref (updated after each commit), not this
+  // render's closure: an overlapping earlier switch may have committed a different exercise.
+  const currentExerciseId = useExerciseContext().exerciseId
+  const heldExerciseIdRef = useRef(currentExerciseId)
+  useEffect(() => {
+    heldExerciseIdRef.current = currentExerciseId
+  }, [currentExerciseId])
+
+  /**
+   * A changed scope is committed: ALWAYS reset the module stores (a stale switch's commit must
+   * not leave them holding the old exercise if the latest switch then fails), but only the
+   * LATEST switch starts the hub.
+   */
+  const commitScope = (generation: number): void => {
+    runExerciseScopeResets()
+    if (generation === latestSwitch) void realtimeConnection.resume()
+  }
+
+  /** The POST failed. Decide, from what the server says, which scope the hub resumes on. */
+  const recoverFromFailedPost = async (error: unknown, generation: number): Promise<void> => {
+    if (isDefiniteRefusal(error)) {
+      if (generation === latestSwitch) void realtimeConnection.resume()
+      return
+    }
+    // Ambiguous: the switch may have landed. Ask the server; the client never guesses.
+    try {
+      await queryClient.cancelQueries()
+      const scope = await refreshExerciseScope({ retryOnceAfterMs: SCOPE_REREAD_RETRY_MS })
+      if (scope.exerciseId !== heldExerciseIdRef.current) {
+        // It landed after all: this is a full switch.
+        commitScope(generation)
+        await queryClient.resetQueries()
+      } else if (generation === latestSwitch) {
+        void realtimeConnection.resume()
+      }
+    } catch {
+      // The scope is unknown: the provider has failed closed. The hub stays stopped.
+      queryClient.removeQueries()
+    }
+  }
 
   return useMutation<Enrollment, StaffAssignmentError, string>({
-    mutationFn: setActiveExercise,
-    onSuccess: async () => {
-      // 1. Nothing issued under the prior scope may still be in flight — the
-      //    server has already switched, so its answer would be new-exercise
-      //    data arriving under the old scope.
-      await queryClient.cancelQueries()
+    // The whole transition runs INSIDE the mutation, so `isPending` stays true across it and
+    // `isSuccess` means "switched AND re-scoped", never just "POST returned 200".
+    mutationFn: async (exerciseId: string) => {
+      const generation = ++latestSwitch
+      // Old exercise's frames stop NOW, before the server switches (see the header).
+      void realtimeConnection.stop('scope-changed')
+      return serialize(async () => {
+        let enrollment: Enrollment
+        try {
+          enrollment = await withTimeout(setActiveExercise(exerciseId), SWITCH_POST_TIMEOUT_MS)
+        } catch (error) {
+          await recoverFromFailedPost(error, generation)
+          throw error
+        }
 
-      // 2. Ask the SERVER what the scope now is; the provider commits it
-      //    atomically (no remount, no intervening unresolved state).
-      try {
-        await refreshExerciseScope()
-      } catch (error) {
-        // The switch landed but the new scope is unknown. Everything cached
-        // belongs to an exercise this session has left: drop it rather than
-        // leave it reachable. The provider has already failed closed and is
-        // rendering its own recovery notice in place of this whole tree
-        // (WR-007) — this error is for the machine, not for the human.
-        queryClient.removeQueries()
-        throw new StaffAssignmentError(
-          'Your active exercise was switched, but your session scope could not be re-resolved. '
-          + 'Reload the console to continue.',
-          { cause: error },
-        )
-      }
+        // 1. Nothing issued under the prior scope may still be in flight — the
+        //    server has already switched, so its answer would be new-exercise
+        //    data arriving under the old scope.
+        await queryClient.cancelQueries()
 
-      // 3. The new scope is on the context. Discard the prior exercise's data
-      //    and refetch the active queries under the new scope.
-      await queryClient.resetQueries()
+        // 2. Ask the SERVER what the scope now is; the provider commits it
+        //    atomically (no remount, no intervening unresolved state).
+        try {
+          await refreshExerciseScope()
+        } catch (error) {
+          // The switch landed but the new scope is unknown. Everything cached
+          // belongs to an exercise this session has left: drop it rather than
+          // leave it reachable. The provider has already failed closed and is
+          // rendering its own recovery notice in place of this whole tree
+          // (WR-007) — this error is for the machine, not for the human. The
+          // hub stays stopped (fail closed).
+          queryClient.removeQueries()
+          throw new StaffAssignmentError(
+            'Your active exercise was switched, but your session scope could not be re-resolved. '
+            + 'Reload the console to continue.',
+            { cause: error },
+          )
+        }
+
+        // 2b. The new scope is committed: reset the module stores, start the hub (#856).
+        commitScope(generation)
+
+        // 3. The new scope is on the context. Discard the prior exercise's data
+        //    and refetch the active queries under the new scope.
+        await queryClient.resetQueries()
+        return enrollment
+      })
     },
   })
 }
