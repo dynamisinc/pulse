@@ -607,12 +607,15 @@ public sealed partial class OrgStaffLoginService
     {
         var orgScope = Person.IsOrgAdmin(person.OrgRole);
 
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await AmbientTransaction.BeginUnlessAmbientAsync(_dbContext, cancellationToken);
         if (!await PersonSessionLock.TryLockForMintAsync(
                 _dbContext, person.Id, organizationId, verifiedPasswordHash, requireOrgAdmin: orgScope, cancellationToken))
         {
-            // The person changed after the sign-in read it (a new password, a disable, a lost org-admin grant).
-            await transaction.RollbackAsync(cancellationToken);
+            // The person changed after the sign-in read it (a new password, a disable, a lost org-admin grant). S-003:
+            // nothing the sign-in staged on the strength of the replaced state may land (an org choice's success audit,
+            // anything tracked) — only the refusal audit.
+            await transaction.RollbackIfOwnedAsync(cancellationToken);
+            _dbContext.ChangeTracker.Clear();
             AddAudit(organizationId, SignInAuditKind, RefusedOutcome, person.Id, "{\"reason\":\"changed\"}", now);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return OrgStaffLoginResult.Rejected();
@@ -628,7 +631,8 @@ public sealed partial class OrgStaffLoginService
             var orgSession = await _sessionIssuer.IssueAsync(
                 StaffSessionRequest(staffUser.Id, exerciseId: null, Person.OrgAdminRole),
                 cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitIfOwnedAsync(cancellationToken);
+            await _sessionIssuer.CutDeferredConnectionsAsync(orgSession, cancellationToken);
             return OrgStaffLoginResult.Authenticated(orgSession, isLead: false);
         }
 
@@ -639,7 +643,7 @@ public sealed partial class OrgStaffLoginService
             // The password was right but there is nothing to sign in to — not a credential failure, so no counter.
             AddAudit(organizationId, SignInAuditKind, RefusedOutcome, person.Id, "{\"reason\":\"no-grant\"}", now);
             await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitIfOwnedAsync(cancellationToken);
             return OrgStaffLoginResult.Rejected();
         }
 
@@ -661,7 +665,10 @@ public sealed partial class OrgStaffLoginService
         var issued = await _sessionIssuer.IssueAsync(
             StaffSessionRequest(staffUser.Id, enrollment.ExerciseId, enrollment.Role),
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitIfOwnedAsync(cancellationToken);
+
+        // M4: the issuer's one-world backstop revocations are committed only now, and the person lock is released.
+        await _sessionIssuer.CutDeferredConnectionsAsync(issued, cancellationToken);
         return OrgStaffLoginResult.Authenticated(issued, enrollment.IsLead);
     }
 

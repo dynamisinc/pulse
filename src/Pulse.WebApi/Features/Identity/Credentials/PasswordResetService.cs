@@ -3,7 +3,6 @@ namespace Pulse.WebApi.Features.Identity.Credentials;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -59,8 +58,6 @@ public sealed partial class PasswordResetService
     /// <summary>The audit outcome of a completed change.</summary>
     public const string SuccessOutcome = "success";
 
-    private const int DeadlockVictimErrorNumber = 1205;
-
     private static readonly PasswordHasher<Person> Hasher = new();
 
     private readonly PulseDbContext _dbContext;
@@ -99,6 +96,29 @@ public sealed partial class PasswordResetService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
     public async Task<PasswordResetResult> ResetAsync(PasswordResetRequest? request, CancellationToken cancellationToken = default)
+    {
+        // #858 review: the change locks two person rows (the issuer, then the person), so it can deadlock with a concurrent
+        // org-directory or enrollment change. SQL Server rolls the victim back whole — the token is still unclaimed — so the
+        // redemption is retried ONCE from the top rather than telling a legitimate holder their link is invalid. A second
+        // deadlock is the uniform invalid-token, as before.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await ResetOnceAsync(request, cancellationToken);
+            }
+            catch (Exception exception) when (SqlDeadlock.IsDeadlock(exception))
+            {
+                _dbContext.ChangeTracker.Clear();
+                if (attempt >= 2)
+                {
+                    return PasswordResetResult.Invalid(InvalidTokenError);
+                }
+            }
+        }
+    }
+
+    private async Task<PasswordResetResult> ResetOnceAsync(PasswordResetRequest? request, CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
 
@@ -159,18 +179,8 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(policyError);
         }
 
-        CredentialChange? change;
-        try
-        {
-            change = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
-        }
-        catch (Exception exception) when (IsDeadlock(exception))
-        {
-            // Adversarial review S3 (#665): two concurrent redemptions can deadlock; SQL Server rolls the victim back, so
-            // nothing changed — the same uniform answer as losing the claim.
-            _dbContext.ChangeTracker.Clear();
-            return PasswordResetResult.Invalid(InvalidTokenError);
-        }
+        // A deadlock here (adversarial review S3, #665) propagates to ResetAsync, which retries once (see there).
+        var change = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
 
         if (change is null)
         {
@@ -205,10 +215,6 @@ public sealed partial class PasswordResetService
             .InOrganization(organizationId)
             .AnyAsync(p => p.Id == personId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null, cancellationToken);
 
-    private static bool IsDeadlock(Exception exception) =>
-        exception is SqlException { Number: DeadlockVictimErrorNumber }
-        || exception.InnerException is SqlException { Number: DeadlockVictimErrorNumber };
-
     /// <summary>
     /// The single transaction of a credential change. Returns the revoked session ids and (for an invite) whether the
     /// person holds a grant, or <c>null</c> when the claim was lost (a concurrent redemption, or the token expired in
@@ -228,21 +234,22 @@ public sealed partial class PasswordResetService
         var newHash = Hasher.HashPassword(person, newPassword);
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
-            // #839: the person's row FIRST, serializing this change against a concurrent sign-in mint (PersonSessionLock):
-            // a sign-in that locked first has committed its session, which the sweep below revokes; one that locks after
-            // finds the new password hash and is refused. Taking it before the claim also makes two concurrent redemptions
-            // for the same person queue here instead of deadlocking on each other's tokens.
-            await PersonSessionLock.LockAsync(_dbContext, person.Id, token.OrganizationId, cancellationToken);
-
             // Sonnet M3 / S-001 (#842): the issuer's authority, re-checked UNDER A LOCK in this transaction — a locking no-op
             // over the issuer's row only while it is still an enabled org admin of the token's organization. A demote or
             // disable of the issuer that committed after the early check matches nothing (the uniform invalid-token); one
-            // that has not committed yet waits for this redemption.
+            // that has not committed yet waits for this redemption. Locked BEFORE the person, matching the org-directory
+            // change's order (the organization's admins and the caller before the target), so the two cannot deadlock.
             if (token.IssuedByPersonId is { } issuedBy && !await LockEnabledOrgAdminAsync(issuedBy, token.OrganizationId, cancellationToken))
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return null;
             }
+
+            // #839: the person's row, before the claim and the sweep, serializing this change against a concurrent sign-in
+            // mint (PersonSessionLock): a sign-in that locked first has committed its session, which the sweep below
+            // revokes; one that locks after finds the new password hash and is refused. Taking it before the claim also
+            // makes two concurrent redemptions for the same person queue here instead of deadlocking on each other's tokens.
+            await PersonSessionLock.LockAsync(_dbContext, person.Id, token.OrganizationId, cancellationToken);
 
             if (!await _tokens.TryClaimAsync(token.Id, token.OrganizationId, now, cancellationToken))
             {

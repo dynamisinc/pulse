@@ -13,16 +13,16 @@ using Xunit;
 
 /// <summary>
 /// #840 — a planner whose own authority is withdrawn while their request is in flight. Planner B is authorized, opens the
-/// change transaction, and — just before B's last-planner lock runs — planner A demotes or removes B and commits. B's
+/// change transaction, and — just before B's first lock runs — planner A demotes or removes B and commits. B's
 /// change must then be refused with 403 (B no longer holds the planner grant it was authorized on), and nothing B asked
 /// for may land. The interleaving is staged with a command hook, not timing.
 /// </summary>
-[Collection(MsSqlCollection.Name)]
+[Collection(MsSqlRcsiCollection.Name)]
 public sealed class EnrollmentStaleCallerTests
 {
     private readonly EnrollmentTestKit _kit;
 
-    public EnrollmentStaleCallerTests(MsSqlContainerFixture fixture) => _kit = new EnrollmentTestKit(fixture);
+    public EnrollmentStaleCallerTests(MsSqlRcsiFixture rcsi) => _kit = new EnrollmentTestKit(rcsi?.Sql ?? throw new ArgumentNullException(nameof(rcsi)));
 
     [RequiresDockerTheory]
     [InlineData("demoted", "revoke")]
@@ -39,10 +39,11 @@ public sealed class EnrollmentStaleCallerTests
         var (sessionA, _) = await _kit.SeedStaffSessionAsync(plannerA, exercise, "planner");
         var (sessionB, _) = await _kit.SeedStaffSessionAsync(plannerB, exercise, "planner");
 
-        // A's change of B lands inside B's transaction, just before B's guard statement (B's first enrollment UPDATE).
+        // A's change of B lands inside B's transaction, just before B's first lock (its person-row lock; the planner
+        // re-check under the enrollment lock follows it).
         EnrollmentOutcome? competing = null;
         var hook = new BeforeCommandHook(
-            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[Enrollments]", StringComparison.Ordinal),
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[People]", StringComparison.Ordinal),
             async () =>
             {
                 var (serviceA, contextA) = _kit.ServiceFor(sessionA, plannerA, org, exercise);
@@ -96,10 +97,11 @@ public sealed class EnrollmentStaleCallerTests
         var (sessionA, _) = await _kit.SeedStaffSessionAsync(plannerA, exercise, "planner");
         var (sessionB, _) = await _kit.SeedStaffSessionAsync(plannerB, exercise, "planner");
 
-        // A's change of B lands inside B's transaction, just before B's caller re-check (B's first enrollment UPDATE).
+        // A's change of B lands inside B's transaction, just before B's first lock (its person-row lock; the planner
+        // re-check under the enrollment lock follows it).
         EnrollmentOutcome? competing = null;
         var hook = new BeforeCommandHook(
-            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[Enrollments]", StringComparison.Ordinal),
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[People]", StringComparison.Ordinal),
             async () =>
             {
                 var (serviceA, contextA) = _kit.ServiceFor(sessionA, plannerA, org, exercise);
@@ -133,6 +135,79 @@ public sealed class EnrollmentStaleCallerTests
         (await read.TelemetryEvents.IgnoreQueryFilters().CountAsync(t => t.ExerciseId == exercise
                 && (t.EventType == EnrollmentService.GrantedEventType || t.EventType == EnrollmentService.LeadChangedEventType)))
             .Should().Be(0, "nothing B attempted is recorded as done");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("org-admin-demoted", "grant")]
+    [InlineData("org-admin-demoted", "change-role")]
+    [InlineData("org-admin-demoted", "revoke")]
+    [InlineData("org-admin-disabled", "grant")]
+    [InlineData("org-admin-disabled", "change-role")]
+    [InlineData("org-admin-disabled", "revoke")]
+    [InlineData("planner-disabled", "grant")]
+    [InlineData("planner-disabled", "set-lead")]
+    [InlineData("planner-disabled", "change-role")]
+    [InlineData("planner-disabled", "revoke")]
+    public async Task ACallerWhosePersonLosesAuthorityMidRequest_Is403_AndNothingLands(string loss, string action)
+    {
+        // #858 review: an org-scope caller's whole authority is the org-admin grant, and any caller's person must still be
+        // enabled. The loss commits inside the caller's transaction, just before its first person-row lock.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var orgScope = loss.StartsWith("org-admin", StringComparison.Ordinal);
+        var (caller, _) = orgScope
+            ? await _kit.SeedStaffAsync(org, exerciseId: null, orgRole: "orgAdmin")
+            : await _kit.SeedStaffAsync(org, exercise, "planner");
+        if (orgScope)
+        {
+            await _kit.SeedStaffAsync(org, exercise, "planner");
+        }
+
+        var (_, enrollmentC) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (candidate, _) = await _kit.SeedStaffAsync(org, exerciseId: null);
+        var (callerSession, _) = orgScope
+            ? await _kit.SeedStaffSessionAsync(caller, exerciseId: null, "orgAdmin")
+            : await _kit.SeedStaffSessionAsync(caller, exercise, "planner");
+
+        var hook = new BeforeCommandHook(
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[People]", StringComparison.Ordinal),
+            async () =>
+            {
+                await using var competing = _kit.ReadContext();
+                var person = await competing.People.SingleAsync(p => p.Id == caller);
+                if (loss == "org-admin-demoted")
+                {
+                    person.OrgRole = null;
+                }
+                else
+                {
+                    person.DisabledAt = DateTimeOffset.UtcNow;
+                }
+
+                await competing.SaveChangesAsync();
+            });
+
+        var (service, context) = _kit.ServiceFor(callerSession, caller, org, orgScope ? null : exercise, interceptor: hook);
+        await using (context)
+        {
+            var result = action switch
+            {
+                "grant" => await service.GrantAsync(exercise, candidate, "controller"),
+                "set-lead" => await service.SetLeadAsync(enrollmentC),
+                "change-role" => await service.ChangeRoleAsync(enrollmentC, "evaluator"),
+                _ => await service.RevokeAsync(enrollmentC),
+            };
+
+            hook.Fired.Should().BeTrue("the loss committed inside the caller's request");
+            result.Outcome.Should().Be(EnrollmentOutcome.Forbidden, "the caller was {0} before their {1} took its lock", loss, action);
+        }
+
+        await using var read = _kit.ReadContext();
+        var c = await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == enrollmentC);
+        c.DeletedAt.Should().BeNull();
+        c.Role.Should().Be("controller");
+        c.IsLead.Should().BeFalse();
+        (await read.Enrollments.IgnoreQueryFilters().Active().AnyAsync(e => e.PersonId == candidate)).Should().BeFalse();
     }
 
     [RequiresDockerFact]

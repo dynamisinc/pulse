@@ -19,14 +19,16 @@ using Xunit;
 /// (<c>invalid-token</c>), set no password, and leave the token unconsumed. A link whose issuer is still an enabled org
 /// admin, and a self-delivered link (no issuer), keep working.
 /// </summary>
-[Collection(MsSqlCollection.Name)]
+[Collection(MsSqlRcsiCollection.Name)]
 public sealed class PasswordResetIssuerAuthorityTests
 {
     private readonly MsSqlContainerFixture _fixture;
     private readonly CredentialTestWorld _world;
 
-    public PasswordResetIssuerAuthorityTests(MsSqlContainerFixture fixture)
+    public PasswordResetIssuerAuthorityTests(MsSqlRcsiFixture rcsi)
     {
+        ArgumentNullException.ThrowIfNull(rcsi);
+        var fixture = rcsi.Sql;
         _fixture = fixture;
         _world = new CredentialTestWorld(fixture);
     }
