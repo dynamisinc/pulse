@@ -168,13 +168,52 @@ curl -sS -X POST "$API/api/ops/organizations" \
 `inviteUrl` is returned **only while email is off**; once a mailer is configured it is `null` and the invite goes to the
 admin's address by email only (CR-001, accepted by Tom 2026-11-20) — **even if the send fails**: with a mailer
 configured, `emailed: false` means the org and admin exist (the name is now taken) but the invite was not confirmed as sent (it may not have
-gone out) and the link is not returned; there is no re-issue route yet (#847), so raise it with engineering. It creates the organization (slug from the
+gone out) and the link is not returned; re-issue it (below). It creates the organization (slug from the
 name, `-2`, `-3`… on a collision), its first org admin (with the staff facet) and a 7-day invite. **The `inviteUrl` is
 shown once** and is a bearer credential: send it to the admin over a private channel, never paste it in a ticket or
 chat log. The admin sets a password and is signed in to the (empty) organization. Until the org sign-in page ships
 (story 27 / #835, `/o/{slug}`) that automatic sign-in is their only UI way in while the organization has no exercise. `409 organization-exists` when the
-name is taken. **If the first admin's invite expires unused**, there is no ops re-issue route yet (#847), and the
-name is now taken, so re-running the call is a `409`: raise it with engineering.
+name is taken. Re-running the call for an organization that already exists is always that `409`; to replace an
+expired or undelivered first-admin invite, re-issue it.
+
+### Re-issuing the first admin's invite (`POST /api/ops/organizations/{slug}/admin-invite`, #847)
+
+Use this when the first admin's invite **expired unused** or was **never delivered** (with a mailer configured, the
+provisioning answered `emailed: false`). Same `X-Bootstrap-Secret` gate, rate limit and no-store as the provisioning
+call; needs `Authentication__FrontendBaseUrl` (else `503 invite-link-unavailable`). The organization is addressed by
+its **slug** (from the provisioning's 201), and `adminEmail` names its org admin.
+
+```bash
+curl -sS -X POST "$API/api/ops/organizations/lantern-county-oem/admin-invite" \
+  -H "X-Bootstrap-Secret: $BOOTSTRAP_SECRET" -H "Content-Type: application/json" \
+  -d '{"adminEmail":"admin@lantern.example"}'
+```
+
+`200 { slug, adminPersonId, inviteUrl, emailed }` (no organization id). It issues a new 7-day invite and **voids the
+earlier one**, so an old link stops working. The CR-001 rule is unchanged: `inviteUrl` is returned **only while email is
+off**; with a mailer configured it is `null` and the invite goes to the admin's address by email only (if `emailed` is
+`false`, the send was not confirmed: try again). Treat a returned `inviteUrl` exactly like the provisioning's: shown
+once, a bearer credential, private channel only.
+
+- **`404`** (bare, no body): a wrong or unconfigured secret, an unknown slug, or an email that is not an org admin of
+  that organization. These three are identical on the wire, so without the secret nobody can tell a real slug from a
+  made-up one. With a valid secret, the `409`s below do tell an existing admin apart from an unknown one; only a
+  secret holder can see that.
+- **`409 already-active`**: that admin is already active: they have set a Pulse password, or they sign in through the
+  Dynamis allowlist. They do not need an invite (they can sign in, or reset their own password), and the re-issue
+  never lets the secret holder set the password of a live account.
+- **`409 person-disabled`**: that admin is disabled. A link would not work.
+- **`400 invalid-admin-email`**: `adminEmail` is missing or not an email address.
+
+### Accepted risk while email is off: whoever holds an invite link can redeem it (#862)
+
+Until a mailer is configured, every invite link is handed to a person rather than emailed: the ops caller for the
+first admin (above), and the org admin for **Invite person** and the directory's **Invite** / **Resend invite** row
+actions (`POST /api/org/people/{id}/invite`). Whoever holds the link can set that person's password, including the
+admin or operator who made it. Tom accepted this on 2026-11-20 for the email-off period, and the planner guide tells
+org admins. Once `IPulseMailer.IsConfigured` is true, the ops routes and the by-id invite email the link to the
+person's own address only and return `inviteUrl: null` (CR-001). **Invite person** (`POST /api/org/people/invite`)
+still returns its link either way.
 
 ## Timeout auto-send (swamped mode): single instance only
 

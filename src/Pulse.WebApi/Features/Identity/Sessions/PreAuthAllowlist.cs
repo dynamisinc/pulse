@@ -38,7 +38,8 @@ using Microsoft.AspNetCore.Routing;
 ///   way, and is not a write path.</description></item>
 ///   <item><description><c>/health</c>, <c>/health/ready</c> — platform liveness/readiness probes, which
 ///   present no credential by construction.</description></item>
-///   <item><description>The three <c>/api/ops/*</c> endpoints — secret-gated by <c>X-Bootstrap-Secret</c>
+///   <item><description>The <c>/api/ops/*</c> endpoints (including #575b's <c>/api/ops/organizations</c> and #847's
+///   <c>/api/ops/organizations/{slug}/admin-invite</c>, the first-admin invite re-issue) — secret-gated by <c>X-Bootstrap-Secret</c>
 ///   (404 when unconfigured). That secret IS their credential, exactly as the refresh token is
 ///   <c>/api/auth/refresh</c>'s. They MUST be allowlisted rather than left to the fallback policy:
 ///   <c>AuthorizationMiddleware</c> runs BEFORE the handler's secret check, and bootstrap by definition runs
@@ -71,7 +72,7 @@ public static class PreAuthAllowlist
 
     /// <summary>
     /// The allowlist, as <c>"{METHOD} {routePattern}"</c> keys matching
-    /// <see cref="RoutePattern.RawText"/>. Exactly seventeen routes.
+    /// <see cref="RoutePattern.RawText"/>. Exactly eighteen routes.
     /// </summary>
     public static IReadOnlySet<string> Routes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -89,6 +90,7 @@ public static class PreAuthAllowlist
         $"{AnyMethod} /health/ready",
         "POST /api/ops/bootstrap-exercise",
         "POST /api/ops/organizations",
+        "POST /api/ops/organizations/{slug}/admin-invite",
         "POST /api/ops/seed-engine-content",
         "POST /api/ops/bind-participant-persona",
         "GET /api/build",

@@ -17,6 +17,18 @@ public sealed class InviteOrgPersonRequest
     public string? DisplayName { get; init; }
 }
 
+/// <summary>
+/// The body of <c>POST /api/org/people/{personId}/invite</c> (#849): invite an existing directory person by id, setting
+/// their email when none is on file. Nullable, so a missing field is a 400. No organization id: the tenant is the
+/// caller's own.
+/// </summary>
+public sealed class InviteExistingOrgPersonRequest
+{
+    /// <summary>The person's email (normalized server-side: trimmed, lower-case).</summary>
+    [JsonPropertyName("email")]
+    public string? Email { get; init; }
+}
+
 /// <summary>The invite's one-time answer: the person and the link to hand them.</summary>
 public sealed class OrgInviteDto
 {
@@ -24,9 +36,13 @@ public sealed class OrgInviteDto
     [JsonPropertyName("personId")]
     public required string PersonId { get; init; }
 
-    /// <summary>The single-use invite link (<c>{FrontendBaseUrl}/staff/invite#token=…</c>). Shown once; never log it.</summary>
+    /// <summary>
+    /// The single-use invite link (<c>{FrontendBaseUrl}/staff/invite#token=…</c>). Shown once; never log it. The email
+    /// invite always returns it. The by-id invite (#849) returns it ONLY while no mailer is configured (the CR-001 rule,
+    /// #862) and <c>null</c> once one is, when the link goes by email only.
+    /// </summary>
     [JsonPropertyName("inviteUrl")]
-    public required string InviteUrl { get; init; }
+    public required string? InviteUrl { get; init; }
 
     /// <summary>Whether the provider accepted the invite email (always <c>false</c> on a host without email).</summary>
     [JsonPropertyName("emailed")]
@@ -57,6 +73,9 @@ public enum OrgInviteOutcome
 
     /// <summary>The person cannot be (re-)invited — 409 with an error code.</summary>
     Conflict,
+
+    /// <summary>The by-id invite's person is missing or in another organization — the bare 404 (#849).</summary>
+    NotFound,
 
     /// <summary>No frontend base URL is configured, so no link can be built — 503.</summary>
     Unavailable,
@@ -103,6 +122,10 @@ public sealed class OrgInviteResult
     /// <param name="error">The error code.</param>
     /// <returns>The result.</returns>
     public static OrgInviteResult Conflict(string error) => new(OrgInviteOutcome.Conflict, null, error);
+
+    /// <summary>The bare 404.</summary>
+    /// <returns>The result.</returns>
+    public static OrgInviteResult NotFound() => new(OrgInviteOutcome.NotFound, null, null);
 
     /// <summary>A 503.</summary>
     /// <returns>The result.</returns>

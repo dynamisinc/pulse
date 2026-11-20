@@ -53,13 +53,18 @@ public sealed class CurrentStaffSessionAccessor : ICurrentStaffSessionAccessor
         var tokenHash = SessionTokens.Hash(rawToken);
         var now = DateTimeOffset.UtcNow;
 
-        var session = await _dbContext.Sessions
+        // #839: the person is read in the same statement as the session (no extra round-trip).
+        var row = await _dbContext.Sessions
             .AsNoTracking()
-            .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
+            .Where(s => s.TokenHash == tokenHash)
+            .WithHolderStanding(_dbContext)
+            .SingleOrDefaultAsync(cancellationToken);
 
-        // Fail closed on anything that is not a live staff session bound to a StaffUser.
-        if (session is null ||
+        // Fail closed on anything that is not a live staff session bound to a StaffUser, or whose person no longer
+        // permits it (disabled, demoted from org admin for an org-scope session, or password changed since issue).
+        if (row is not { Session: var session } ||
             !session.IsLive(now) ||
+            !SessionHolderQueries.HolderPermits(session, row.Holder) ||
             !string.Equals(session.Kind, StaffKind, StringComparison.Ordinal) ||
             session.StaffUserId is not { } staffUserId)
         {

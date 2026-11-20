@@ -16,6 +16,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query'
 import {
+  inviteExistingOrgPerson,
   inviteOrgPerson,
   issuePasswordResetLink,
   listOrgPeople,
@@ -23,6 +24,7 @@ import {
   type OrgPeopleError,
 } from '../services/orgPeopleService'
 import type {
+  OrgInviteExistingRequest,
   OrgInviteRequest,
   OrgInviteResult,
   OrgPeoplePage,
@@ -81,6 +83,23 @@ export function useInviteOrgPerson(): UseMutationResult<
   const queryClient = useQueryClient()
   return useMutation<OrgInviteResult, OrgPeopleError, OrgInviteRequest>({
     mutationFn: (request: OrgInviteRequest) => inviteOrgPerson(request),
+    gcTime: 0,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ORG_PEOPLE_QUERY_KEY }),
+  })
+}
+
+/**
+ * Invites an EXISTING person by id and sets their email (#849). Same cache rules as
+ * `useInviteOrgPerson`: refetch on settle, drop the link (`gcTime: 0`) once the dialog unmounts.
+ */
+export function useInviteExistingOrgPerson(): UseMutationResult<
+  OrgInviteResult,
+  OrgPeopleError,
+  OrgInviteExistingRequest
+> {
+  const queryClient = useQueryClient()
+  return useMutation<OrgInviteResult, OrgPeopleError, OrgInviteExistingRequest>({
+    mutationFn: (request: OrgInviteExistingRequest) => inviteExistingOrgPerson(request),
     gcTime: 0,
     onSettled: () => queryClient.invalidateQueries({ queryKey: ORG_PEOPLE_QUERY_KEY }),
   })

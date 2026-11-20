@@ -24,6 +24,10 @@ using Pulse.WebApi.Features.Realtime;
 ///   <item><description><c>POST /api/org/people/invite</c> — <c>{ "email", "displayName" }</c>: create (or reuse) the person
 ///   and issue a single-use invite link, returned once (#575b, <see cref="OrgInviteService"/>). <c>Cache-Control:
 ///   no-store</c>, including the filter's 401/403. Takes no id, so it is not on <see cref="PersonIdRoutes"/>.</description></item>
+///   <item><description><c>POST /api/org/people/{personId}/invite</c> — <c>{ "email" }</c>: invite an EXISTING person of the
+///   caller's organization by id, setting their email when none is on file (#849,
+///   <see cref="OrgInviteService.InvitePersonAsync"/>). No-store; on <see cref="PersonIdRoutes"/> (a foreign id is the bare
+///   404).</description></item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -45,9 +49,12 @@ public static class OrgPeopleEndpoints
     /// <summary>The org admin's staff invite (#575b).</summary>
     public const string InviteRoute = "/api/org/people/invite";
 
+    /// <summary>Invite an existing person of the caller's organization by id (#849).</summary>
+    public const string PersonInviteRoute = "/api/org/people/{personId:guid}/invite";
+
     /// <summary>The org-tier routes of this slice that take a PERSON id (the allow-list).</summary>
     public static IReadOnlySet<(string Method, string Route)> PersonIdRoutes { get; } =
-        new HashSet<(string Method, string Route)> { ("GET", PersonRoute), ("PATCH", PersonRoute) };
+        new HashSet<(string Method, string Route)> { ("GET", PersonRoute), ("PATCH", PersonRoute), ("POST", PersonInviteRoute) };
 
     /// <summary>Registers the directory service (Scoped, matching the <c>PulseDbContext</c> unit of work).</summary>
     /// <param name="services">The service collection.</param>
@@ -92,6 +99,11 @@ public static class OrgPeopleEndpoints
             .AddEndpointFilter<NoStoreEndpointFilter>()
             .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
+        // #849: the same no-store + org-admin gate as the email invite.
+        endpoints.MapPost(PersonInviteRoute, InvitePersonAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
+
         return endpoints;
     }
 
@@ -122,7 +134,22 @@ public static class OrgPeopleEndpoints
         CancellationToken cancellationToken)
     {
         var result = await service.InviteAsync(request, cancellationToken);
+        return ToInviteResult(result);
+    }
 
+    private static async Task<IResult> InvitePersonAsync(
+        Guid personId,
+        [FromBody] InviteExistingOrgPersonRequest? request,
+        [FromServices] OrgInviteService service,
+        CancellationToken cancellationToken) =>
+        ToInviteResult(await service.InvitePersonAsync(personId, request, cancellationToken));
+
+    /// <summary>
+    /// Maps an invite result to a status. <c>NotFound</c> (by-id invite only) is a BARE 404 with no body — the same for
+    /// another customer's person as for an id that never existed.
+    /// </summary>
+    private static IResult ToInviteResult(OrgInviteResult result)
+    {
         return result.Outcome switch
         {
             OrgInviteOutcome.Ok when result.Invite is { } invite => Results.Ok(invite),
@@ -130,6 +157,7 @@ public static class OrgPeopleEndpoints
             OrgInviteOutcome.Unauthenticated => Results.Unauthorized(),
             OrgInviteOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
             OrgInviteOutcome.Conflict => Results.Conflict(new OrgPeopleErrorDto { Error = result.Error ?? string.Empty }),
+            OrgInviteOutcome.NotFound => Results.NotFound(),
             OrgInviteOutcome.Unavailable => Results.Json(
                 new OrgPeopleErrorDto { Error = result.Error ?? OrgInviteService.LinkUnavailableError },
                 statusCode: StatusCodes.Status503ServiceUnavailable),

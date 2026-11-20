@@ -176,17 +176,25 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/21: +1 for CredentialTokenService.FindRedeemableAsync — redeeming an invite/reset link IS the
         // resolution of whose credential it is (by the SHA-256 of a 256-bit token, pre-auth); the person it names is then
         // read only .InOrganization(token.OrganizationId).
-        ["ResolutionRoot"] = 14,
+        // #847: +1 for OpsOrganizationService.ReissueAdminInviteAsync — the route slug → organization resolution (one row
+        // by its unique slug, behind the bootstrap secret), exactly the org sign-in's slug read; the admin it then reads is
+        // bounded .InOrganization(that organization), and the organization id never reaches the wire.
+        ["ResolutionRoot"] = 15,
 
         // exercise-lifecycle-admin: +1 for OrganizationResolutionMiddleware, the production writer of
         // IOrganizationContext. It reads the authenticated caller's OWN StaffUser row (by the id their
         // server-issued session carries on the principal) in order to DISCOVER their tenant — the one read
         // that cannot be tenant-bound without a chicken-and-egg deadlock, and the same provenance the two
         // StaffAssignmentService sites already claim.
-        ["OwnIdentity"] = 3,
+        // #839: +1 for SessionHolderQueries.WithHolderStanding — the person named by the server-issued session row
+        // itself (PersonId, or the shared-key StaffUserId), read in the same statement as the session so every
+        // authenticated request re-checks that person's disabled / org-admin / password-changed state.
+        ["OwnIdentity"] = 4,
 
         // identity-auth-roles/15: -1 — StaffAssignmentService's switch now reads the target exercise .InOrganization(...).
-        ["TenantChecked"] = 1,
+        // #858 review S-001: +1 for PersonSessionLock.TryLockForMintAsync — an existence probe for the minting id in
+        // ANOTHER organization (explicit OrganizationId comparison), whose only effect is to REFUSE the mint.
+        ["TenantChecked"] = 2,
 
         // exercise-lifecycle-admin (review finding WR-008): the tenant ROOT table joined the swept set, so
         // its one existing reader — BootstrapService.ResolveDefaultOrganizationAsync, a lookup by the FIXED
@@ -382,7 +390,9 @@ public sealed class OrganizationScopeSweepTests
         // joined to the caller's InOrganization-bounded exercises (1).
         // #575b: PasswordResetService.HasStaffGrantAsync — does the person whose invite was just redeemed hold an active
         // staff enrollment (own-only, inner-joined to exercises of the token's own organization) (1).
-        ["TenantChecked"] = 18,
+        // W-002 (#840): EnrollmentService.LockCallerPlannerAsync — the caller's OWN planner enrollment on the exercise just
+        // resolved inside their scope and organization, locked in the grant / set-lead transaction (1).
+        ["TenantChecked"] = 19,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

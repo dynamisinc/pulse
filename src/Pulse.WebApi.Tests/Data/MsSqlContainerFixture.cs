@@ -70,7 +70,23 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
         DotNet.Testcontainers.Configurations.TestcontainersSettings.ResourceReaperEnabled = false;
     }
 
+    private readonly bool _readCommittedSnapshot;
+
     private MsSqlContainer? _container;
+
+    /// <summary>The default fixture: the database's default (locking) READ COMMITTED isolation.</summary>
+    public MsSqlContainerFixture()
+        : this(readCommittedSnapshot: false)
+    {
+    }
+
+    /// <summary>
+    /// A fixture whose database runs with <c>READ_COMMITTED_SNAPSHOT ON</c> — the isolation Azure SQL Database uses — when
+    /// <paramref name="readCommittedSnapshot"/> is set (see <see cref="MsSqlRcsiFixture"/>). Internal so xUnit still sees
+    /// exactly one public constructor on the collection fixture.
+    /// </summary>
+    /// <param name="readCommittedSnapshot">Whether to turn read-committed snapshot on for the test database.</param>
+    internal MsSqlContainerFixture(bool readCommittedSnapshot) => _readCommittedSnapshot = readCommittedSnapshot;
 
     // Set only on the local-SQL path — the ephemeral database created for this run, and a master-scoped
     // connection string used to CREATE/DROP it.
@@ -99,6 +115,7 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
                 new SqlConnectionStringBuilder(localConnection) { InitialCatalog = "master" }.ConnectionString;
 
             await ExecuteNonQueryAsync(_localMasterConnectionString, $"CREATE DATABASE [{_localDatabaseName}];");
+            await EnableReadCommittedSnapshotAsync(_localMasterConnectionString, _localDatabaseName);
 
             ConnectionString =
                 new SqlConnectionStringBuilder(localConnection) { InitialCatalog = _localDatabaseName }.ConnectionString;
@@ -109,6 +126,16 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
                 .Build();
             await _container.StartAsync();
             ConnectionString = _container.GetConnectionString();
+
+            if (_readCommittedSnapshot)
+            {
+                // master cannot take READ_COMMITTED_SNAPSHOT, so the RCSI fixture migrates its own database instead.
+                var databaseName = $"PulseRcsi_{Guid.NewGuid():N}";
+                var master = new SqlConnectionStringBuilder(ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+                await ExecuteNonQueryAsync(master, $"CREATE DATABASE [{databaseName}];");
+                await EnableReadCommittedSnapshotAsync(master, databaseName);
+                ConnectionString = new SqlConnectionStringBuilder(ConnectionString) { InitialCatalog = databaseName }.ConnectionString;
+            }
         }
 
         await using var migrationContext = CreateContext();
@@ -192,6 +219,17 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
     public PulseDbContext CreateContextForOrganization(Guid organizationId) =>
         CreateContext(exerciseContext: null, new OrganizationContext { CurrentOrganizationId = organizationId });
 
+    /// <summary>Turns READ_COMMITTED_SNAPSHOT on for <paramref name="databaseName"/> when this fixture asks for it.</summary>
+    private async Task EnableReadCommittedSnapshotAsync(string masterConnectionString, string databaseName)
+    {
+        if (_readCommittedSnapshot)
+        {
+            await ExecuteNonQueryAsync(
+                masterConnectionString,
+                $"ALTER DATABASE [{databaseName}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;");
+        }
+    }
+
     /// <summary>Opens a connection and runs a single non-query statement (DDL for the ephemeral test DB).</summary>
     private static async Task ExecuteNonQueryAsync(string connectionString, string sql)
     {
@@ -208,4 +246,30 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
 public sealed class MsSqlCollection : ICollectionFixture<MsSqlContainerFixture>
 {
     public const string Name = "MsSql collection";
+}
+
+/// <summary>
+/// #858 review: a second real SQL Server target whose database runs with <c>READ_COMMITTED_SNAPSHOT ON</c>, the
+/// isolation Azure SQL Database uses in production. Under the default locking READ COMMITTED a reader blocks on a
+/// writer's row lock, so a race test can block at its first READ and pass for the wrong reason; under RCSI reads see the
+/// last committed version and only the LOCKS a test means to exercise can make it wait. The identity race suites run
+/// here. A separate fixture (its own database) rather than flipping the shared one, so no other suite's isolation changes.
+/// </summary>
+public sealed class MsSqlRcsiFixture : IAsyncLifetime
+{
+    /// <summary>The RCSI database, exposed as the ordinary fixture type the test kits take.</summary>
+    public MsSqlContainerFixture Sql { get; } = new(readCommittedSnapshot: true);
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Sql.InitializeAsync();
+
+    /// <inheritdoc />
+    public Task DisposeAsync() => Sql.DisposeAsync();
+}
+
+/// <summary>The collection of suites that run against <see cref="MsSqlRcsiFixture"/>.</summary>
+[CollectionDefinition(Name)]
+public sealed class MsSqlRcsiCollection : ICollectionFixture<MsSqlRcsiFixture>
+{
+    public const string Name = "MsSql RCSI collection";
 }

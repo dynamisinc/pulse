@@ -146,14 +146,30 @@ public sealed partial class SessionIssuer : ISessionIssuer
         _dbContext.Sessions.Add(session);
         var revoked = await RevokeOtherWorldSessionsAsync(session, now, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await CutRevokedConnectionsAsync(revoked, cancellationToken);
+
+        // #858 review M4: inside the CALLER's transaction (a serialized staff mint) nothing has committed yet — the
+        // revocations may still roll back, and the caller is holding the person lock — so the cut is deferred to the
+        // caller's post-commit CutDeferredConnectionsAsync. With no ambient transaction the save above committed.
+        var deferred = _dbContext.Database.CurrentTransaction is not null;
+        if (!deferred)
+        {
+            await CutRevokedConnectionsAsync(revoked, cancellationToken);
+        }
 
         return new SessionIssueResult
         {
             Session = session,
             SessionToken = sessionToken,
             RefreshToken = refreshToken,
+            DeferredConnectionCuts = deferred ? revoked : [],
         };
+    }
+
+    /// <inheritdoc />
+    public Task CutDeferredConnectionsAsync(SessionIssueResult issued, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(issued);
+        return CutRevokedConnectionsAsync(issued.DeferredConnectionCuts, cancellationToken);
     }
 
     /// <summary>

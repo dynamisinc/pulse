@@ -7,7 +7,8 @@ using Pulse.WebApi.Data;
 
 /// <summary>
 /// Default <see cref="ISessionAuthenticator"/> — hashes the presented token and looks the <c>Session</c> up by
-/// <c>TokenHash</c>, returning it only when it is live (non-revoked, unexpired). Registered as a singleton (it
+/// <c>TokenHash</c>, returning it only when it is live (non-revoked, unexpired) and its person still permits it
+/// (<see cref="SessionHolderQueries.HolderPermits"/>, #839). Registered as a singleton (it
 /// is stateless and holds only the scope factory), exactly like <c>HostExerciseResolver</c>.
 /// </summary>
 /// <remarks>
@@ -63,15 +64,23 @@ public sealed partial class SessionAuthenticator : ISessionAuthenticator
 
             var now = DateTimeOffset.UtcNow;
 
-            var session = await dbContext.Sessions
+            // #839: the session's person is read in the SAME statement, so the person-state re-check costs no extra
+            // round-trip on this every-request path.
+            var row = await dbContext.Sessions
                 .AsNoTracking()
-                .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
+                .Where(s => s.TokenHash == tokenHash)
+                .WithHolderStanding(dbContext)
+                .SingleOrDefaultAsync(cancellationToken);
 
-            if (session is null || !session.IsLive(now))
+            if (row is null || !row.Session.IsLive(now) || !SessionHolderQueries.HolderPermits(row.Session, row.Holder))
             {
-                // Unknown / revoked / expired → no live session (fail closed).
+                // Unknown / revoked / expired → no live session (fail closed). So is a session whose person has since been
+                // disabled, lost the org-admin grant an org-scope session needs, or changed their password (#839): the
+                // same anonymous outcome, so the request 401s exactly as a revoked session's does.
                 return null;
             }
+
+            var session = row.Session;
 
             return new AuthenticatedSession
             {

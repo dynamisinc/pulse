@@ -14,6 +14,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { OrgDirectoryPage } from './OrgDirectoryPage'
 import {
+  inviteExistingOrgPerson,
   inviteOrgPerson,
   issuePasswordResetLink,
   listOrgPeople,
@@ -33,6 +34,7 @@ vi.mock('../services/orgPeopleService', async importOriginal => ({
   updateOrgPerson: vi.fn(),
   issuePasswordResetLink: vi.fn(),
   inviteOrgPerson: vi.fn(),
+  inviteExistingOrgPerson: vi.fn(),
 }))
 
 const person = (over: Partial<OrgPerson>): OrgPerson => ({
@@ -43,6 +45,7 @@ const person = (over: Partial<OrgPerson>): OrgPerson => ({
   disabled: false,
   disabledAt: null,
   lockedOutUntil: null,
+  hasPassword: true,
   enrollments: [],
   ...over,
 })
@@ -310,6 +313,23 @@ describe('actions', () => {
     expect(screen.queryByTestId('person-action-self-note')).toBeNull()
   })
 
+  it('explains a 409 person-has-no-password on Make admin, in an alert with an icon (#848)', async () => {
+    vi.mocked(updateOrgPerson).mockRejectedValue(
+      new OrgPeopleError('x', { status: 409, code: 'person-has-no-password' }))
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Make org admin Pat Plain' }))
+    fireEvent.click(screen.getByTestId('person-action-confirm'))
+    const alert = await screen.findByTestId('person-action-error')
+    await waitFor(() => expect(alert.textContent).toContain('has not set a password yet'))
+    expect(alert.textContent).toContain('invite link')
+    expect(alert.textContent).toContain('Nothing was changed.')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.querySelector('svg')).not.toBeNull()
+    expect(screen.getByTestId('person-action-dialog')).toBeTruthy()
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('')
+  })
+
   it('maps a 404 to the person-gone message', async () => {
     vi.mocked(updateOrgPerson).mockRejectedValue(new OrgPeopleError('x', { status: 404 }))
     renderPage()
@@ -387,5 +407,145 @@ describe('invite person', () => {
     expect(screen.getByTestId('invite-error').getAttribute('role')).toBe('alert')
     expect(screen.queryByTestId('invite-link')).toBeNull()
     expect(screen.getByLabelText(/^Email/)).toBeTruthy()
+  })
+})
+
+describe('invite this person (#849)', () => {
+  const INVITE = 'https://app.example/staff/invite#token=legacy'
+  const LEGACY = person({
+    id: 'p-legacy',
+    displayName: 'Leo Legacy',
+    email: null,
+    hasPassword: false,
+    enrollments: [{ exerciseId: 'e1', exerciseName: 'Coastal Surge', role: 'controller', isLead: false }],
+  })
+  const INVITEE = person({
+    id: 'p-invitee', displayName: 'Ivy Invitee', email: 'ivy@example.org', hasPassword: false,
+  })
+  const LEGACY_DISABLED = person({
+    id: 'p-ld', displayName: 'Dee Disabled', email: null, hasPassword: false, disabled: true,
+  })
+  const LEGACY_ADMIN = person({
+    id: 'p-la', displayName: 'Al Admin', email: null, hasPassword: false, orgRole: 'orgAdmin',
+  })
+
+  beforeEach(() => {
+    vi.mocked(listOrgPeople).mockResolvedValue(
+      page([ADMIN, PLAIN, LEGACY, INVITEE, LEGACY_DISABLED, LEGACY_ADMIN]))
+  })
+
+  it('offers Invite only to a no-email, no-password row that is neither disabled nor an admin', async () => {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    expect(screen.getByRole('button', { name: 'Invite Leo Legacy' })).toBeTruthy()
+    // No email but a password (allowlist-free sign-in already works): no invite.
+    expect(screen.queryByRole('button', { name: /Invite.*Pat Plain/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Invite.*Ada Admin/ })).toBeNull()
+    // The server would refuse these (person-disabled / target-is-org-admin): no button (S-004).
+    expect(screen.queryByRole('button', { name: /Invite.*Dee Disabled/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Invite.*Al Admin/ })).toBeNull()
+    // An email on file but no password yet: Resend invite, not Invite.
+    expect(screen.queryByRole('button', { name: 'Invite Ivy Invitee' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Resend invite to Ivy Invitee' })).toBeTruthy()
+  })
+
+  it('asks the admin to double-check the address, which becomes the sign-in email', async () => {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    expect((await screen.findByTestId('invite-check-address')).textContent)
+      .toBe('Check the address carefully: it becomes Leo Legacy\'s sign-in email.')
+  })
+
+  it('resends to the stored email with no input, by id', async () => {
+    vi.mocked(inviteExistingOrgPerson).mockResolvedValue({
+      personId: 'p-invitee', inviteUrl: INVITE, emailed: false, created: false,
+    })
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Resend invite to Ivy Invitee' }))
+    const dialog = await screen.findByTestId('invite-person-dialog')
+    expect(within(dialog).getByRole('heading', { name: 'Resend invite to Ivy Invitee' })).toBeTruthy()
+    expect(within(dialog).queryByLabelText(/^Email/)).toBeNull()
+    expect(dialog.textContent).toContain('ivy@example.org')
+    fireEvent.click(within(dialog).getByTestId('invite-submit'))
+    expect((await screen.findByTestId('invite-link')).textContent).toBe(INVITE)
+    expect(inviteExistingOrgPerson).toHaveBeenCalledWith({ personId: 'p-invitee', email: 'ivy@example.org' })
+  })
+
+  it.each([
+    [true, 'The invite was emailed to leo@example.org.', 'Invite emailed to Leo Legacy.'],
+    [false, 'could not be sent', 'The invite email to Leo Legacy could not be sent.'],
+  ] as const)('with a mailer (no link returned, emailed=%s) shows no link panel and says so', async (emailed, text, announced) => {
+    vi.mocked(inviteExistingOrgPerson).mockResolvedValue({
+      personId: 'p-legacy', inviteUrl: null, emailed, created: false,
+    })
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    await screen.findByTestId('invite-person-dialog')
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'leo@example.org' } })
+    fireEvent.click(screen.getByTestId('invite-submit'))
+    await waitFor(() => expect(screen.getByTestId('invite-result').textContent).toContain(text))
+    expect(screen.queryByTestId('invite-link-panel')).toBeNull()
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe(announced)
+  })
+
+  it('asks for the email only, invites that person by id, shows the link once and refetches', async () => {
+    vi.mocked(inviteExistingOrgPerson).mockResolvedValue({
+      personId: 'p-legacy', inviteUrl: INVITE, emailed: false, created: false,
+    })
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    const callsBefore = vi.mocked(listOrgPeople).mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    const dialog = await screen.findByTestId('invite-person-dialog')
+    expect(within(dialog).getByRole('heading', { name: 'Invite Leo Legacy' })).toBeTruthy()
+    expect(within(dialog).queryByLabelText(/^Display name/)).toBeNull()
+    expect(dialog.textContent).toContain('keep their exercises')
+    fireEvent.change(within(dialog).getByLabelText(/^Email/), { target: { value: ' leo@example.org ' } })
+    fireEvent.click(within(dialog).getByTestId('invite-submit'))
+    expect((await screen.findByTestId('invite-link')).textContent).toBe(INVITE)
+    expect(inviteExistingOrgPerson).toHaveBeenCalledWith({ personId: 'p-legacy', email: 'leo@example.org' })
+    expect(inviteOrgPerson).not.toHaveBeenCalled()
+    expect(screen.getByTestId('invite-link-panel').textContent).toContain('give it to Leo Legacy')
+    expect(screen.getByTestId('invite-person-dialog').textContent).toContain('Their email is on file')
+    expect(screen.getByTestId('invite-status').textContent).toBe('Invite link created for Leo Legacy.')
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('Invite link created for Leo Legacy.')
+    await waitFor(() =>
+      expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(callsBefore))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByTestId('invite-person-dialog')).toBeNull())
+  })
+
+  it('validates the email before calling the server', async () => {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    await screen.findByTestId('invite-person-dialog')
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'nope' } })
+    fireEvent.click(screen.getByTestId('invite-submit'))
+    expect(screen.getByTestId('invite-error').textContent).toContain('valid email')
+    expect(inviteExistingOrgPerson).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [409, 'email-in-use', 'already has this email'],
+    [409, 'email-mismatch', 'different email on file'],
+    [409, 'already-active', 'already has a password'],
+    [404, undefined, 'no longer in your organization'],
+  ] as const)('maps %s %s to plain copy in an alert with an icon', async (status, code, text) => {
+    vi.mocked(inviteExistingOrgPerson).mockRejectedValue(new OrgPeopleError('x', { status, code }))
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    await screen.findByTestId('invite-person-dialog')
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'leo@example.org' } })
+    fireEvent.click(screen.getByTestId('invite-submit'))
+    const alert = screen.getByTestId('invite-error')
+    await waitFor(() => expect(alert.textContent).toContain(text))
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.querySelector('svg')).not.toBeNull()
+    expect(screen.queryByTestId('invite-link')).toBeNull()
   })
 })

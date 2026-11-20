@@ -7,7 +7,11 @@
  * opening `PersonActionDialog`. The caller's own row offers no Disable (and says "you"); the
  * server's `cannot-disable-self` 409 is still mapped in the dialog. "Reset link" is disabled on
  * org-admin and disabled rows with a VISIBLE text reason (the server would 409; the 409 mappings
- * stay for a stale row). A dialog's success sentence is passed up via `onActionSuccess`.
+ * stay for a stale row). "Invite" (#849) shows only on a row with no email and no password (a
+ * legacy allowlist staffer), and "Resend invite" (#862) on a row with an email but no password;
+ * neither on a disabled or org-admin row (`inviteActionFor`). Both open `InvitePersonDialog` for
+ * that person, so the invite reuses them instead of creating a duplicate. A dialog's success
+ * sentence is passed up via `onActionSuccess`.
  * STAFF world, COBRA, FontAwesome.
  */
 
@@ -16,6 +20,7 @@ import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faBan,
+  faEnvelope,
   faKey,
   faLock,
   faShieldHalved,
@@ -27,8 +32,9 @@ import {
 import type { IconDefinition } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton } from '@/theme/styledComponents'
 import type { OrgPerson } from '../types'
+import { InvitePersonDialog } from './InvitePersonDialog'
 import { PersonActionDialog } from './PersonActionDialog'
-import { resetUnavailableReason, type PersonActionKind } from './personActions'
+import { inviteActionFor, resetUnavailableReason, type PersonActionKind } from './personActions'
 
 const CELL_SX = {
   padding: '8px 12px',
@@ -76,6 +82,7 @@ export function OrgPeopleTable({
   renderExerciseLink = plainExerciseName,
 }: OrgPeopleTableProps) {
   const [open, setOpen] = useState<{ person: OrgPerson; kind: PersonActionKind } | null>(null)
+  const [inviting, setInviting] = useState<OrgPerson | null>(null)
   const reasonIdPrefix = useId()
 
   return (
@@ -100,6 +107,7 @@ export function OrgPeopleTable({
             const isSelf = currentPersonId !== null && p.id === currentPersonId
             const isAdmin = p.orgRole === 'orgAdmin'
             const resetReason = resetUnavailableReason(p)
+            const inviteAction = inviteActionFor(p)
             const resetReasonId = `${reasonIdPrefix}-reset-${p.id}`
             return (
               <tr key={p.id} data-testid={`org-person-${p.id}`}>
@@ -167,6 +175,18 @@ export function OrgPeopleTable({
                         {p.disabled ? 'Enable' : 'Disable'}
                       </CobraSecondaryButton>
                     )}
+                    {inviteAction !== null && (
+                      <CobraSecondaryButton
+                        type="button"
+                        size="small"
+                        sx={ACTION_SX}
+                        startIcon={<FontAwesomeIcon icon={faEnvelope} aria-hidden="true" />}
+                        aria-label={`${inviteAction === 'invite' ? 'Invite' : 'Resend invite to'} ${p.displayName}`}
+                        onClick={() => setInviting(p)}
+                      >
+                        {inviteAction === 'invite' ? 'Invite' : 'Resend invite'}
+                      </CobraSecondaryButton>
+                    )}
                     <CobraSecondaryButton
                       type="button"
                       size="small"
@@ -201,6 +221,13 @@ export function OrgPeopleTable({
           kind={open.kind}
           isSelf={currentPersonId !== null && open.person.id === currentPersonId}
           onClose={() => setOpen(null)}
+          onSuccess={onActionSuccess}
+        />
+      )}
+      {inviting !== null && (
+        <InvitePersonDialog
+          person={{ id: inviting.id, displayName: inviting.displayName, email: inviting.email }}
+          onClose={() => setInviting(null)}
           onSuccess={onActionSuccess}
         />
       )}

@@ -39,11 +39,19 @@ using Pulse.WebApi.Features.Realtime;
 /// <para>
 /// <b>Grant-revoke rule (§1.1).</b> Revoking the grant revokes the person's org-scope sessions; disabling revokes ALL of
 /// their sessions (any exercise and org scope) — both in the same transaction, access and refresh — and the matching
-/// live hub connections are cut after the commit.
+/// live hub connections are cut after the commit. Granting the grant, and enabling, ALSO revoke any still-live session in
+/// that same scope (W-001), so a session that somehow outlived the earlier revoke can never come back to life. The
+/// target's person row is locked before every sweep, serializing it against a concurrent sign-in (#839,
+/// <see cref="PersonSessionLock"/>).
 /// </para>
 /// <para>
 /// <b>Promotion voids credential links.</b> Granting the org-admin grant voids every outstanding credential token
 /// (invite and reset) of the person in the same transaction (#665 review W5).
+/// </para>
+/// <para>
+/// <b>The caller's own authority is re-checked under the lock (#840).</b> The caller is authorized before the write
+/// transaction opens; inside it, their own row is re-read with a locking no-op update that matches only an enabled org
+/// admin of the organization. An admin demoted or disabled while their own PATCH is in flight is refused with 403.
 /// </para>
 /// <para>
 /// <b>Audit.</b> Each change writes one <see cref="OrgAuditEvent"/> (no XC-004 <c>TelemetryEvent</c>: the change touches
@@ -70,6 +78,15 @@ public sealed partial class OrgPeopleService
 
     /// <summary>400: the PATCH body must carry exactly one of <c>isOrgAdmin</c> / <c>disabled</c>.</summary>
     public const string InvalidRequestError = "invalid-request";
+
+    /// <summary>
+    /// The 409 error code for an org-admin grant to a person who has no Pulse password yet (#848): the grant would void
+    /// their unused invite and a peer admin cannot be re-invited, so the grant waits until they have set a password.
+    /// </summary>
+    public const string PersonHasNoPasswordError = "person-has-no-password";
+
+    /// <summary>409: the change lost a deadlock twice to a concurrent change; nothing changed, retry.</summary>
+    public const string ConcurrentChangeError = "concurrent-change";
 
     /// <summary>400: <c>page</c> / <c>pageSize</c> out of range.</summary>
     public const string InvalidPagingError = "invalid-paging";
@@ -192,6 +209,27 @@ public sealed partial class OrgPeopleService
     /// <returns>The outcome the endpoint maps to a status.</returns>
     public async Task<OrgPeopleResult> UpdateAsync(Guid personId, UpdateOrgPersonRequest? request, CancellationToken cancellationToken = default)
     {
+        // Sonnet L6: the change locks several person rows, so two concurrent changes can deadlock. SQL Server rolls the
+        // victim back whole (nothing changed); it is retried ONCE from the top, then answered with a clean 409.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await UpdateOnceAsync(personId, request, cancellationToken);
+            }
+            catch (Exception exception) when (SqlDeadlock.IsDeadlock(exception))
+            {
+                _dbContext.ChangeTracker.Clear();
+                if (attempt >= 2)
+                {
+                    return OrgPeopleResult.Conflict(ConcurrentChangeError);
+                }
+            }
+        }
+    }
+
+    private async Task<OrgPeopleResult> UpdateOnceAsync(Guid personId, UpdateOrgPersonRequest? request, CancellationToken cancellationToken)
+    {
         var (caller, refusal) = await AuthorizeAsync(cancellationToken);
         if (refusal is not null)
         {
@@ -221,6 +259,26 @@ public sealed partial class OrgPeopleService
                     .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken)
                 : 0;
 
+            // #840: the caller was authorized before this transaction opened. Re-read their own row here, as a locking
+            // no-op update over it only while it is still an ENABLED org admin of this organization: a demotion or
+            // disable of the caller that committed meanwhile matches nothing and is refused with 403, and one that has
+            // not committed yet waits behind this transaction. Taken AFTER the last-admin lock, which already holds the
+            // caller's row when they are an enabled admin, so it adds no new lock order on that path.
+            var callerStillAdmin = await _dbContext.People
+                .InOrganization(tenant)
+                .Where(p => p.Id == caller.StaffUserId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken);
+            if (callerStillAdmin != 1)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgPeopleResult.Forbidden();
+            }
+
+            // #839: the target's person row is locked BEFORE its sessions are swept (and before it is read), serializing
+            // this change against a concurrent sign-in mint for the same person (see PersonSessionLock). Lock order: the
+            // enabled admin rows (above), the caller, then the target — sessions only after.
+            await PersonSessionLock.LockAsync(_dbContext, personId, tenant, cancellationToken);
+
             // The bare-404 pattern: another customer's person is indistinguishable from a missing one.
             var person = await _dbContext.People
                 .InOrganization(tenant)
@@ -239,6 +297,15 @@ public sealed partial class OrgPeopleService
             {
                 if (grant && !Person.IsOrgAdmin(person.OrgRole))
                 {
+                    // #848: the grant voids every outstanding link (W5, below), and a peer admin can never be re-invited,
+                    // so granting org admin to someone who has not set a Pulse password yet would strand them with a dead
+                    // invite. Refused until they have set one: invite first, then make them an admin.
+                    if (string.IsNullOrEmpty(person.PasswordHash))
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return OrgPeopleResult.Conflict(PersonHasNoPasswordError);
+                    }
+
                     person.OrgRole = Person.OrgAdminRole;
                     await EnsureStaffFacetAsync(person, now, cancellationToken);
 
@@ -247,8 +314,13 @@ public sealed partial class OrgPeopleService
                     // credential). Every outstanding token of both purposes is voided in this transaction.
                     var voided = await CredentialTokenService.StageCredentialChangeInvalidationAsync(
                         _dbContext, CredentialSubject.ForPerson(person.Id), tenant, now, cancellationToken);
+
+                    // W-001: an org-scope session that outlived an earlier revoke of the grant must not come back to life
+                    // with it. Any still-live org-scope session of the person is revoked; they sign in again.
+                    revokedSessionIds = await PersonSessionRevoker.StageRevokeAsync(
+                        _dbContext, person.Id, PersonSessionScope.OrgScopeOnly, now, cancellationToken);
                     auditKind = OrgRoleGrantedKind;
-                    payload = Payload(caller.Role, revoked: 0, tokensVoided: voided);
+                    payload = Payload(caller.Role, revokedSessionIds.Count, tokensVoided: voided);
                 }
                 else if (!grant && Person.IsOrgAdmin(person.OrgRole))
                 {
@@ -298,8 +370,13 @@ public sealed partial class OrgPeopleService
             else if (person.DisabledAt is not null)
             {
                 person.DisabledAt = null;
+
+                // W-001: a session that outlived the disable must not come back to life with the enable. Every still-live
+                // session of the person is revoked; they sign in again.
+                revokedSessionIds = await PersonSessionRevoker.StageRevokeAsync(
+                    _dbContext, person.Id, PersonSessionScope.All, now, cancellationToken);
                 auditKind = EnabledKind;
-                payload = Payload(caller.Role, revoked: 0);
+                payload = Payload(caller.Role, revokedSessionIds.Count);
             }
 
             if (auditKind is null)
@@ -411,6 +488,7 @@ public sealed partial class OrgPeopleService
             LockedOutUntil = row.LockedOutUntil is { } until && until > now
                 ? until.ToString("O", CultureInfo.InvariantCulture)
                 : null,
+            HasPassword = row.HasPassword,
             Enrollments = byPerson[row.Id]
                 .Select(e => new OrgPersonEnrollmentDto
                 {
@@ -462,17 +540,23 @@ public sealed partial class OrgPeopleService
         Message = "{Count} revoked session(s) could not have their live connections cut; the org-directory change has committed.")]
     private partial void LogConnectionCutFailed(int count, Exception exception);
 
-    /// <summary>The materialized person projection (no credential columns are ever selected).</summary>
+    /// <summary>
+    /// The materialized person projection. No credential column is ever selected: whether a password is set is computed
+    /// in SQL (a non-null, non-empty <c>PasswordHash</c>; an empty string is no password, #862 W-001), so the hash itself
+    /// never leaves the database.
+    /// </summary>
     private sealed record PersonRow(
         Guid Id,
         string DisplayName,
         string? Email,
         string? OrgRole,
         DateTimeOffset? DisabledAt,
-        DateTimeOffset? LockedOutUntil)
+        DateTimeOffset? LockedOutUntil,
+        bool HasPassword)
     {
         public static System.Linq.Expressions.Expression<Func<Person, PersonRow>> Projection { get; } =
-            p => new PersonRow(p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil);
+            p => new PersonRow(
+                p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil, p.PasswordHash != null && p.PasswordHash != "");
     }
 
     private sealed record EnrollmentRow(Guid PersonId, Guid ExerciseId, string ExerciseName, string Role, bool IsLead);
@@ -496,7 +580,7 @@ public enum OrgPeopleOutcome
     /// <summary>Missing or foreign-org person — the bare 404.</summary>
     NotFound,
 
-    /// <summary>409 with an error code (<c>last-org-admin</c>, <c>cannot-disable-self</c>).</summary>
+    /// <summary>409 with an error code (<c>last-org-admin</c>, <c>cannot-disable-self</c>, <c>person-has-no-password</c>).</summary>
     Conflict,
 }
 

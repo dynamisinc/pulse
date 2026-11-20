@@ -207,6 +207,7 @@ public sealed class RoleMatrixTests
         PreAuth("POST /api/ops/seed-engine-content");
         PreAuth("POST /api/ops/bind-participant-persona");
         PreAuth("POST /api/ops/organizations");       // #575b: secret-gated org provisioning + first-admin invite
+        PreAuth("POST /api/ops/organizations/{slug}/admin-invite"); // #847: secret-gated first-admin invite re-issue
 
         // ---- Self-service, staff world only (evaluators and org admins included). ----
         Probe("POST /api/staff/active-exercise", StaffWorld);
@@ -222,6 +223,7 @@ public sealed class RoleMatrixTests
         Probe("POST /api/org/people/{personId:guid}/password-reset", OrgAdminOnly); // identity-auth-roles/21 (§3.3 admin reset)
         Probe("PATCH /api/org/people/{personId:guid}", OrgAdminOnly); // identity-auth-roles/19 (org directory: grant / disable)
         Probe("POST /api/org/people/invite", OrgAdminOnly); // #575b staff invite ({} is a 400 invalid-email: writes nothing)
+        Probe("POST /api/org/people/{personId:guid}/invite", OrgAdminOnly); // #849 invite by id ({} is a 400 invalid-email: writes nothing)
 
         // ---- Configuration: planner only. Lead assignment: planner only. ----
         Probe("PUT /api/staff/exercise-settings", PlannerOnly);
