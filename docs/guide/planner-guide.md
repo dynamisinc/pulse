@@ -73,7 +73,12 @@ state](getting-started.md#exercise-states)), **Hostname** and **Created** date.
 Only an organization administrator sees the create form. Planners and controllers do not see it, because Pulse
 would refuse the request. Ask your organization administrator to create the exercise for you.
 
-1. Open **Exercise Management**.
+1. Sign in on the Staff sign-in page with your email and password (on your organization's address, or
+   select **Sign in with email instead** on an exercise's address). An organization administrator
+   lands on **Exercise Management** straight away, even before the organization has any exercises.
+   (See [Signing in to your organization](getting-started.md#signing-in-to-your-organization).)
+   If you are an org admin on a shared exercise address, the page opens on Username and Secret: choose
+   **Sign in with email instead**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
    This is an internal name: **players never see it**. What players see is the *participant-facing
    name*, which you set later in **Exercise Settings > Identity & schedule**.

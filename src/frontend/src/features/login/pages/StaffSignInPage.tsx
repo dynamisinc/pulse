@@ -17,6 +17,44 @@
  * `Stack`, `Typography`) come straight from `@mui/material`, matching
  * `ExerciseSwitcher.tsx`'s precedent.
  *
+ * ORG SIGN-IN (identity-auth-roles/27, #835): the form is email + password on the bare host and on
+ * `/o/:slug`; on an EXERCISE address (the host resolves an exercise context) the default is the
+ * exercise-bound username + secret form instead (staff there land in that exercise; org admins
+ * need the email form). Each form links to the other. While the host's context is pending a
+ * neutral "Loading sign-in" placeholder shows instead of a form (a hung request falls back to
+ * email after 3 s), so the first form shown is the right one and never swaps under focus or
+ * autofill. DEV NOTE: the mock-data seam resolves a mock exercise for EVERY host, so under mock
+ * data the bare host also defaults to the exercise-bound form (this is what the guide screenshots
+ * show); against the real API only an exercise host does.
+ *
+ * Focus is managed: the first field takes focus when a form appears, a refused sign-in focuses
+ * the password, an expired choice the email, a toggle the new form's first field; inputs go
+ * readOnly (not disabled) and buttons aria-disabled while submitting so focus never drops to
+ * <body>. Each form guards its one request with `useSubmitGuard`: a ref (two submits in one tick
+ * cannot both pass), link buttons do nothing mid-request, and a reply that arrives after the form
+ * unmounted is ignored (no `completeSignIn`, no navigate).
+ *
+ * The email form sends `POST /auth/staff/login {email, password}` (no `exerciseId`) via
+ * `staffOrgSignIn`, plus an `orgSlug` when the page was opened at an org address (`/o/:slug`;
+ * the slug is trimmed and lower-cased and must match `^[a-z0-9-]{1,63}$`, else a short "address
+ * isn't valid" note shows and no `orgSlug` is sent), so a bookmarked address skips the org choice.
+ * An org admin's reply is an org-scope session (`scope: 'org'`, `role: 'orgAdmin'`,
+ * `exerciseId: null`); it is stored like any staff session and `RoleAwareEntry` lands it on
+ * Exercise Management. A person in several orgs gets a `{ choose, choiceToken }` reply: the page
+ * switches to a "Choose an organization" step (focus moves to the heading, whose
+ * `aria-describedby` carries the note that the choice expires in 2 minutes) and posts
+ * `staffOrgChoose`. An expired or used token returns to the form with a plain message. The email
+ * field also takes an ALLOWLIST (break-glass) username, which the backend accepts on this route
+ * (so it is a text input, not `type="email"`). Credentials-type refusals (400, 401, 403, 429)
+ * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password. Any 5xx, a network
+ * failure and a malformed reply never use that message: each has its own retry message and KEEPS
+ * the password (see `handleSignInFailure`; the residual backend risk is tracked in #865).
+ * Nothing says
+ * whether an email or org exists. The password is cleared once a reply arrives; never logged.
+ *
+ * The exercise-bound username + secret form (described below) stays reachable behind "Use a
+ * username and secret instead" until it is retired; its 401/403 copy is unchanged.
+ *
  * ON SUCCESS the shared `completeSignIn` (`../completeSignIn.ts`) stores the pair in
  * the SESSION-scoped store (staff never opt in to `persist`), runs `resetClientSession()`
  * so a previous identity's cached data and composer state cannot show through
@@ -70,18 +108,57 @@
  * participant-visible timestamps.
  */
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { ThemeProvider } from '@mui/material/styles'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleNotch, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
-import { CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
+import {
+  CobraLinkButton,
+  CobraPrimaryButton,
+  CobraSecondaryButton,
+  CobraTextField,
+} from '@/theme/styledComponents'
 import { cobraTheme } from '@/theme/cobraTheme'
-import { resolveExerciseContext } from '@/core/exerciseContext'
+import { resolveExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { completeSignIn } from '../completeSignIn'
-import { staffSignIn, StaffSignInError } from '../services/staffSignInService'
+import {
+  isStaffOrgChoiceResponse,
+  staffOrgChoose,
+  staffOrgSignIn,
+  staffSignIn,
+  StaffSignInError,
+  type StaffOrgChoice,
+  type StaffOrgLoginResponse,
+} from '../services/staffSignInService'
+
+/** The ONE message for every refused org-shape sign-in (#835): never reveals what was wrong. */
+export const UNIFORM_FAILURE_MESSAGE =
+  "That email and password don't match, or your account is locked."
+
+/** Shown when the org choice is refused (expired after 2 minutes, already used, or mismatched). */
+const CHOICE_EXPIRED_MESSAGE = 'Your organization choice expired. Sign in again.'
+
+/** Any 5xx: the server or something in front of it failed; the person keeps what they typed. */
+const INFRASTRUCTURE_MESSAGE = "Pulse couldn't be reached just now. Try again."
+
+/** A malformed reply or unexpected error: never worded as a credentials failure. */
+const GENERIC_FAILURE_MESSAGE = 'Something went wrong. Try again.'
+
+/** A choice that failed for a reason that may pass (5xx, rate limit, network): keep the step. */
+const CHOICE_RETRY_MESSAGE = 'Could not complete sign-in. Try again, or use a different account.'
+
+/** Stops phones capitalising or "correcting" an email address or username as it is typed. */
+const TYPED_IDENTIFIER_ATTRIBUTES = {
+  autoCapitalize: 'none',
+  autoCorrect: 'off',
+  spellCheck: false,
+} as const
+
+/** Network failure: no response, so nothing about the account can be revealed. */
+const UNREACHABLE_MESSAGE = 'Could not reach the server. Check your connection and try again.'
 
 /** AC2 — shown when the host's exercise context cannot be resolved at submit time. */
 const UNRESOLVED_CONTEXT_MESSAGE =
@@ -105,8 +182,9 @@ function friendlySignInErrorMessage(error: StaffSignInError): string {
         ? `Sign-in could not be completed: ${error.serverMessage}`
         : 'Sign-in could not be completed.'
     default:
+      if (error.unreachable) return UNREACHABLE_MESSAGE
       return error.status === undefined
-        ? 'Could not reach the server. Check your connection and try again.'
+        ? GENERIC_FAILURE_MESSAGE
         : (error.serverMessage ?? 'Sign-in failed. Try again.')
   }
 }
@@ -128,30 +206,80 @@ function SignInAlert({ message }: { message: string }) {
   )
 }
 
+interface ExerciseBoundFormProps {
+  /** The host-resolved exercise context, owned by `StaffSignInForm` (it picks the default). */
+  readonly contextQuery: UseQueryResult<ExerciseScope>
+  readonly onUseEmail: () => void
+}
+
 /**
- * The sign-in form. Split from `StaffSignInPage` so the page owns only the
- * COBRA theme hand-off + page chrome, and this owns the field state.
+ * The guard every form uses around its one in-flight request.
+ *
+ *  - `begin()` returns a generation number, or `null` when a request is already in flight. It is
+ *    a REF, so two submits in the same tick (autofill plus Enter) cannot both pass.
+ *  - `isCurrent(g)` is false once the form has unmounted, so a late
+ *    reply is ignored: no `completeSignIn`, no navigate, no state update.
  */
-function StaffSignInForm() {
+function useSubmitGuard() {
+  const inFlight = useRef(false)
+  const generation = useRef(0)
+  useEffect(() => {
+    const ref = generation
+    return () => {
+      ref.current += 1
+    }
+  }, [])
+  return {
+    busy: () => inFlight.current,
+    begin: (): number | null => {
+      if (inFlight.current) return null
+      inFlight.current = true
+      return generation.current
+    },
+    isCurrent: (g: number) => g === generation.current,
+    end: (g: number) => {
+      if (g === generation.current) inFlight.current = false
+    },
+  }
+}
+
+/** Page-local disabled look for buttons that use `aria-disabled` (so focus is never lost). */
+const ARIA_DISABLED_SX = {
+  '&[aria-disabled="true"]': { opacity: 0.55, cursor: 'not-allowed' },
+} as const
+
+/**
+ * The exercise-bound sign-in form (username + secret). Inputs go `readOnly` (not `disabled`)
+ * while a request is in flight and buttons use `aria-disabled`, so focus never falls to
+ * `<body>` mid-submit. The first field takes focus when the form appears.
+ */
+function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-
-  // Non-blocking, host-resolved exercise scope (see module header). Never
-  // gates rendering — only gates SUBMISSION (AC2).
-  const contextQuery = useQuery({
-    queryKey: ['staff-login', 'exercise-context'],
-    queryFn: resolveExerciseContext,
-    retry: false,
-  })
+  const guard = useSubmitGuard()
 
   const [username, setUsername] = useState('')
   const [secret, setSecret] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const usernameRef = useRef<HTMLInputElement>(null)
+  const secretRef = useRef<HTMLInputElement>(null)
+  const lastField = useRef<'username' | 'secret'>('username')
+
+  useEffect(() => {
+    usernameRef.current?.focus()
+  }, [])
+
+  // The AC2 "not configured" error is stale the moment the context arrives.
+  useEffect(() => {
+    if (contextQuery.data) {
+      setErrorMessage(previous => (previous === UNRESOLVED_CONTEXT_MESSAGE ? null : previous))
+    }
+  }, [contextQuery.data])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (submitting) return
+    if (guard.busy()) return
 
     // AC2: block submission (and never POST) when the host's exercise
     // context is not a RESOLVED scope — loading, errored, and "no data yet"
@@ -161,12 +289,15 @@ function StaffSignInForm() {
       return
     }
 
+    const generation = guard.begin()
+    if (generation === null) return
     const exerciseId = contextQuery.data.exerciseId
     setSubmitting(true)
     setErrorMessage(null)
 
     staffSignIn({ username, secret, exerciseId })
       .then(envelope => {
+        if (!guard.isCurrent(generation)) return
         // Store the pair (session-scoped: staff never opt in to `persist`), forget the
         // previous identity's client state, and hand off - one shared step so staff and
         // participant sign-in cannot drift (Gate-2 W-2).
@@ -176,19 +307,28 @@ function StaffSignInForm() {
         )
       })
       .catch((error: unknown) => {
+        if (!guard.isCurrent(generation)) return
         const signInError =
           error instanceof StaffSignInError
             ? error
-            : new StaffSignInError('Sign-in failed unexpectedly.', { cause: error })
+            : new StaffSignInError('Sign-in failed unexpectedly.')
         setErrorMessage(friendlySignInErrorMessage(signInError))
         // AC4: ONLY a 401 clears the secret field. A 403 means the
         // credentials themselves were correct — clearing them would be
         // actively unhelpful (the fix is an assignment change, not a retry).
         if (signInError.status === 401) {
           setSecret('')
+          secretRef.current?.focus()
+        } else if (signInError.unreachable || (signInError.status ?? 0) >= 500) {
+          // Keep what was typed and put focus back where the person was.
+          ;(lastField.current === 'username' ? usernameRef : secretRef).current?.focus()
         }
       })
-      .finally(() => setSubmitting(false))
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
   }
 
   return (
@@ -205,7 +345,14 @@ function StaffSignInForm() {
         autoComplete="username"
         value={username}
         onChange={event => setUsername(event.target.value)}
-        disabled={submitting}
+        inputRef={usernameRef}
+        slotProps={{
+          htmlInput: {
+            readOnly: submitting,
+            onFocus: () => { lastField.current = 'username' },
+            ...TYPED_IDENTIFIER_ATTRIBUTES,
+          },
+        }}
         required
         fullWidth
       />
@@ -216,30 +363,447 @@ function StaffSignInForm() {
         autoComplete="current-password"
         value={secret}
         onChange={event => setSecret(event.target.value)}
-        disabled={submitting}
+        inputRef={secretRef}
+        slotProps={{
+          htmlInput: { readOnly: submitting, onFocus: () => { lastField.current = 'secret' } },
+        }}
         required
         fullWidth
       />
 
-      <CobraPrimaryButton type="submit" disabled={submitting} fullWidth>
+      <CobraPrimaryButton
+        type="submit"
+        aria-disabled={submitting}
+        fullWidth
+        sx={ARIA_DISABLED_SX}
+      >
         Sign in
       </CobraPrimaryButton>
 
-      {submitting ? (
-        <Stack
-          direction="row"
-          role="status"
-          aria-live="polite"
-          data-testid="staff-sign-in-submitting"
-          sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
-        >
-          <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
-          <Typography variant="body2">Signing in…</Typography>
-        </Stack>
-      ) : null}
+      {submitting ? <SubmittingStatus /> : null}
 
       {errorMessage ? <SignInAlert message={errorMessage} /> : null}
+
+      <CobraLinkButton
+        type="button"
+        onClick={() => {
+          if (!guard.busy()) onUseEmail()
+        }}
+        aria-disabled={submitting}
+        sx={ARIA_DISABLED_SX}
+      >
+        Sign in with email instead
+      </CobraLinkButton>
     </Box>
+  )
+}
+
+/** The in-flight announcement shared by both forms. */
+function SubmittingStatus() {
+  return (
+    <Stack
+      direction="row"
+      role="status"
+      aria-live="polite"
+      data-testid="staff-sign-in-submitting"
+      sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
+    >
+      <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+      <Typography variant="body2">Signing in…</Typography>
+    </Stack>
+  )
+}
+
+interface OrgSignInFormProps {
+  /** From the `/o/:slug` address, when it is a well-formed slug: sent as `orgSlug`. */
+  readonly orgSlug?: string
+  /** True when the address carried a `/o/` value that is not a well-formed slug. */
+  readonly invalidSlug: boolean
+  readonly onUseSecret: () => void
+}
+
+interface PendingChoice {
+  readonly choose: readonly StaffOrgChoice[]
+  readonly choiceToken: string
+}
+
+type FocusField = 'email' | 'password'
+
+/** Org-shape sign-in: email + password, then (for several orgs) the org choice. */
+function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const guard = useSubmitGuard()
+
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [choice, setChoice] = useState<PendingChoice | null>(null)
+  const [focusRequest, setFocusRequest] = useState<{ field: FocusField; n: number } | null>(null)
+  const emailRef = useRef<HTMLInputElement>(null)
+  const passwordRef = useRef<HTMLInputElement>(null)
+  const choiceHeading = useRef<HTMLHeadingElement>(null)
+  const lastField = useRef<FocusField>('email')
+
+  const requestFocus = (field: FocusField) =>
+    setFocusRequest(previous => ({ field, n: (previous?.n ?? 0) + 1 }))
+
+  useEffect(() => {
+    emailRef.current?.focus()
+  }, [])
+
+  // Runs after the render that (re)mounts the form, so it also works when the choice step closes.
+  useEffect(() => {
+    if (!focusRequest) return
+    ;(focusRequest.field === 'email' ? emailRef : passwordRef).current?.focus()
+  }, [focusRequest])
+
+  // Move focus to the choice heading when the step appears (keyboard + screen-reader users).
+  useEffect(() => {
+    if (choice) choiceHeading.current?.focus()
+  }, [choice])
+
+  /** Stores a session, or opens the choice step. Throws a 401-shaped error for an empty list. */
+  const finish = (result: StaffOrgLoginResponse) => {
+    setPassword('') // the response is in; the password is never needed again
+    if (isStaffOrgChoiceResponse(result)) {
+      if (result.choose.length === 0) {
+        throw new StaffSignInError('Empty organization choice.', { status: 401 })
+      }
+      setChoice({ choose: result.choose, choiceToken: result.choiceToken })
+      return
+    }
+    completeSignIn(
+      { token: result.token, refreshToken: result.refreshToken },
+      { persist: false, navigate, queryClient },
+    )
+  }
+
+  /**
+   * Copy for a failed sign-in. The policy, plainly:
+   *  - an HTTP 4xx refusal (400, 401, 403, 429, anything else below 500) is the ONE uniform
+   *    message and clears the password; 429 cannot be split out without hinting at a lock;
+   *  - ANY 5xx shows the infrastructure retry message and keeps the password;
+   *  - a malformed 2xx, a request-setup error and a missing response never use the credentials
+   *    message: generic or "could not reach", and the password is kept.
+   * Focus goes back to the field the person was last in, or to the password after a refusal.
+   *
+   * RESIDUAL RISK, in the backend (follow-up #865): a server fault AFTER the password matched
+   * (the save and session-issue steps in `OrgStaffLoginService.cs`, ~598-636) returns a 500
+   * while a wrong password returns a 401. The status is visible to any caller whatever this
+   * page says, so the page cannot close that; the routes must map unexpected faults to the same
+   * uniform 401.
+   */
+  const handleSignInFailure = (error: unknown) => {
+    let keepMessage: string | null = null
+    if (!(error instanceof StaffSignInError)) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.unreachable) keepMessage = UNREACHABLE_MESSAGE
+    else if (error.status === undefined) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.status >= 500) keepMessage = INFRASTRUCTURE_MESSAGE
+
+    if (keepMessage !== null) {
+      setErrorMessage(keepMessage)
+      ;(lastField.current === 'email' ? emailRef : passwordRef).current?.focus()
+      return
+    }
+    setErrorMessage(UNIFORM_FAILURE_MESSAGE)
+    setPassword('')
+    passwordRef.current?.focus()
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const generation = guard.begin()
+    if (generation === null) return
+    setSubmitting(true)
+    setErrorMessage(null)
+    staffOrgSignIn({ ...(orgSlug ? { orgSlug } : {}), email: email.trim(), password })
+      .then(result => {
+        if (guard.isCurrent(generation)) finish(result)
+      })
+      .catch((error: unknown) => {
+        if (guard.isCurrent(generation)) handleSignInFailure(error)
+      })
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
+  }
+
+  const backToForm = (message: string | null) => {
+    setChoice(null)
+    setErrorMessage(message)
+    requestFocus('email')
+  }
+
+  const handleChoose = (picked: StaffOrgChoice) => {
+    if (!choice) return
+    const generation = guard.begin()
+    if (generation === null) return
+    setSubmitting(true)
+    setErrorMessage(null)
+    staffOrgChoose({ choiceToken: choice.choiceToken, orgSlug: picked.slug })
+      .then(result => {
+        if (guard.isCurrent(generation)) finish(result)
+      })
+      .catch((error: unknown) => {
+        if (!guard.isCurrent(generation)) return
+        if (error instanceof StaffSignInError && (error.status === 401 || error.status === 400)) {
+          // An expired or used token is final: back to the form with a plain message.
+          backToForm(CHOICE_EXPIRED_MESSAGE)
+        } else if (error instanceof StaffSignInError && error.status === undefined &&
+          !error.unreachable) {
+          setErrorMessage(GENERIC_FAILURE_MESSAGE)
+        } else {
+          // 5xx, 429, network: the choice may still be valid, so keep the step and let them retry.
+          setErrorMessage(CHOICE_RETRY_MESSAGE)
+        }
+      })
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
+  }
+
+  if (choice) {
+    // No live region around the step: the heading takes focus and `aria-describedby` makes the
+    // expiry note part of what a screen reader announces with it.
+    return (
+      <Stack data-testid="staff-org-choice" sx={{ gap: 2, width: '100%', maxWidth: 360 }}>
+        <Box>
+          <Typography
+            variant="h6"
+            component="h2"
+            tabIndex={-1}
+            ref={choiceHeading}
+            aria-describedby="staff-org-choice-expiry"
+            sx={{ fontWeight: 700, outline: 'none' }}
+          >
+            Choose an organization
+          </Typography>
+          <Typography
+            id="staff-org-choice-expiry"
+            variant="body2"
+            sx={{ color: 'text.secondary' }}
+          >
+            Your sign-in matches {choice.choose.length} organizations. This choice expires in 2
+            minutes.
+          </Typography>
+        </Box>
+        <Stack
+          component="ul"
+          aria-label="Organizations"
+          sx={{ gap: 1, m: 0, p: 0, listStyle: 'none' }}
+        >
+          {choice.choose.map(org => (
+            <li key={org.slug}>
+              <CobraSecondaryButton
+                type="button"
+                fullWidth
+                aria-disabled={submitting}
+                onClick={() => handleChoose(org)}
+                sx={ARIA_DISABLED_SX}
+              >
+                {org.orgName}
+              </CobraSecondaryButton>
+            </li>
+          ))}
+        </Stack>
+        {submitting ? <SubmittingStatus /> : null}
+        {errorMessage ? <SignInAlert message={errorMessage} /> : null}
+        <CobraLinkButton
+          type="button"
+          onClick={() => {
+            if (!guard.busy()) backToForm(null)
+          }}
+          aria-disabled={submitting}
+          sx={ARIA_DISABLED_SX}
+        >
+          Use a different account
+        </CobraLinkButton>
+      </Stack>
+    )
+  }
+
+  return (
+    <Box
+      component="form"
+      onSubmit={handleSubmit}
+      aria-label="Staff sign-in"
+      data-testid="staff-sign-in-form"
+      sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', maxWidth: 360 }}
+    >
+      {orgSlug ? (
+        <Typography
+          id="staff-org-slug-note"
+          variant="body2"
+          data-testid="staff-org-slug"
+          sx={{ color: 'text.secondary' }}
+        >
+          Signing in to <strong>{orgSlug}</strong>
+        </Typography>
+      ) : null}
+      {invalidSlug ? (
+        <Typography
+          id="staff-org-slug-note"
+          variant="body2"
+          data-testid="staff-org-slug-invalid"
+          sx={{ color: 'text.secondary' }}
+        >
+          This sign-in address isn&apos;t valid. Sign in with your email.
+        </Typography>
+      ) : null}
+      <CobraTextField
+        label="Email"
+        name="email"
+        autoComplete="username"
+        value={email}
+        onChange={event => setEmail(event.target.value)}
+        inputRef={emailRef}
+        slotProps={{
+          htmlInput: {
+            readOnly: submitting,
+            'aria-describedby': orgSlug || invalidSlug ? 'staff-org-slug-note' : undefined,
+            onFocus: () => { lastField.current = 'email' },
+            ...TYPED_IDENTIFIER_ATTRIBUTES,
+          },
+        }}
+        required
+        fullWidth
+      />
+      <CobraTextField
+        label="Password"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+        value={password}
+        onChange={event => setPassword(event.target.value)}
+        inputRef={passwordRef}
+        slotProps={{
+          htmlInput: { readOnly: submitting, onFocus: () => { lastField.current = 'password' } },
+        }}
+        required
+        fullWidth
+      />
+
+      <CobraPrimaryButton
+        type="submit"
+        aria-disabled={submitting}
+        fullWidth
+        sx={ARIA_DISABLED_SX}
+      >
+        Sign in
+      </CobraPrimaryButton>
+
+      {submitting ? <SubmittingStatus /> : null}
+
+      {errorMessage ? <SignInAlert message={errorMessage} /> : null}
+
+      <CobraLinkButton
+        type="button"
+        onClick={() => {
+          if (!guard.busy()) onUseSecret()
+        }}
+        aria-disabled={submitting}
+        sx={ARIA_DISABLED_SX}
+      >
+        Use a username and secret instead
+      </CobraLinkButton>
+    </Box>
+  )
+}
+
+/** A `/o/:slug` value is trimmed and lower-cased, then shown and sent only if it looks like one. */
+const ORG_SLUG_PATTERN = /^[a-z0-9-]{1,63}$/
+
+/** How long the page waits for the host's exercise context before falling back to email. */
+const CONTEXT_WAIT_MS = 3000
+
+type FormMode = 'email' | 'secret'
+
+/** Form identity for an address: a whitespace-only slug must not collide with the bare host. */
+function slugKey(slug: string | undefined): string {
+  return slug === undefined ? 'bare' : `o:${slug.trim().toLowerCase()}`
+}
+
+/**
+ * Picks the form. Default: email on the bare host and on `/o/:slug`; the exercise-bound
+ * username + secret form when the host resolves an exercise (an exercise address). While the
+ * host's context is pending (and there is no `/o/` slug) a neutral placeholder shows instead of
+ * a form, so the first form shown is the right one and nothing swaps under focus or autofill. A
+ * hung request falls back to email after `CONTEXT_WAIT_MS`.
+ */
+function StaffSignInForm() {
+  const { slug } = useParams<{ slug?: string }>()
+  // Keyed on the normalised slug, so client-side navigation between `/staff/login` and
+  // `/o/:slug` re-derives the default and resets the form.
+  return <StaffSignInFormBody key={slugKey(slug)} slug={slug} />
+}
+
+function StaffSignInFormBody({ slug }: { readonly slug?: string }) {
+  const normalizedSlug = slug?.trim().toLowerCase()
+  const orgSlug =
+    normalizedSlug !== undefined && ORG_SLUG_PATTERN.test(normalizedSlug)
+      ? normalizedSlug
+      : undefined
+  const invalidSlug = slug !== undefined && orgSlug === undefined
+
+  // Non-blocking, host-resolved exercise scope (see module header).
+  const contextQuery = useQuery({
+    queryKey: ['staff-login', 'exercise-context'],
+    queryFn: resolveExerciseContext,
+    retry: false,
+  })
+
+  const [chosenMode, setChosenMode] = useState<FormMode | null>(null)
+  const [lockedDefault, setLockedDefault] = useState<FormMode | null>(null)
+  const [timedOut, setTimedOut] = useState(false)
+
+  const waiting = slug === undefined && contextQuery.isPending
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setTimeout(() => setTimedOut(true), CONTEXT_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [waiting])
+
+  const settled = !waiting || timedOut
+  const defaultMode: FormMode =
+    slug === undefined && contextQuery.data !== undefined ? 'secret' : 'email'
+  // Lock the default the moment the context settles, so a later reply cannot swap the form.
+  useEffect(() => {
+    if (settled && lockedDefault === null) setLockedDefault(defaultMode)
+  }, [settled, lockedDefault, defaultMode])
+
+  // Computed at render time so a settled host never paints a placeholder frame; the lock above
+  // then keeps it from changing.
+  const mode = chosenMode ?? lockedDefault ?? (settled ? defaultMode : null)
+  if (mode === null) {
+    return (
+      <Stack
+        direction="row"
+        role="status"
+        aria-live="polite"
+        data-testid="staff-sign-in-loading"
+        sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
+      >
+        <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+        <Typography variant="body2">Loading sign-in…</Typography>
+      </Stack>
+    )
+  }
+
+  return mode === 'email' ? (
+    <OrgSignInForm
+      key={slugKey(slug)}
+      orgSlug={orgSlug}
+      invalidSlug={invalidSlug}
+      onUseSecret={() => setChosenMode('secret')}
+    />
+  ) : (
+    <ExerciseBoundForm contextQuery={contextQuery} onUseEmail={() => setChosenMode('email')} />
   )
 }
 
@@ -262,7 +826,7 @@ export function StaffSignInPage() {
         }}
       >
         <Stack sx={{ gap: 3, alignItems: 'center', width: '100%', maxWidth: 360 }}>
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>
+          <Typography variant="h5" component="h1" sx={{ fontWeight: 700 }}>
             Staff sign-in
           </Typography>
           <StaffSignInForm />

@@ -599,7 +599,7 @@ describe('the refresh call carries a ~20 s timeout (that call only)', () => {
 })
 
 describe('excluded paths never trigger a refresh', () => {
-  it.each(['/auth/join', '/auth/word', '/auth/password/reset'])(
+  it.each(['/auth/join', '/auth/word', '/auth/password/reset', '/auth/staff/login/choose'])(
     'a 401 from %s is a rejected link/word, not an expired session',
     async path => {
       setTokens({ token: 'x', refreshToken: 'y' }, { persist: true })

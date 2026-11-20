@@ -39,6 +39,7 @@ import {
   LOGIN_PATH,
   STAFF_INVITE_PATH,
   STAFF_LOGIN_PATH,
+  STAFF_ORG_LOGIN_PATH,
   STAFF_RESET_PATH,
 } from './constants'
 
@@ -127,6 +128,7 @@ describe('createRoleAwareRoutes', () => {
     expect(routes.map(r => r.path)).toEqual([
       LOGIN_PATH,
       STAFF_LOGIN_PATH,
+      STAFF_ORG_LOGIN_PATH, // #835
       STAFF_RESET_PATH, // #576
       STAFF_INVITE_PATH, // #575b
       `${JOIN_PATH}/:token`,
@@ -162,11 +164,18 @@ describe('createRoleAwareRoutes', () => {
     expect(screen.queryByText(/your session could not be resolved/i)).not.toBeInTheDocument()
   })
 
-  it('serves the real StaffSignInPage at /staff/login', () => {
+  it('serves the real StaffSignInPage at /staff/login', async () => {
     renderAt(STAFF_LOGIN_PATH)
 
     expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
-    expect(screen.getByTestId('staff-sign-in-form')).toBeInTheDocument()
+    expect(await screen.findByTestId('staff-sign-in-form')).toBeInTheDocument()
+  })
+
+  it('serves the staff sign-in page at an org address (/o/{slug}) with the org pre-filled', () => {
+    renderAt('/o/harbor-county')
+
+    expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
+    expect(screen.getByTestId('staff-org-slug')).toHaveTextContent('harbor-county')
   })
 
   it('serves the invite page at /staff/invite', () => {

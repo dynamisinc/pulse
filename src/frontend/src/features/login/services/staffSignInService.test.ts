@@ -18,7 +18,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { api } from '@/core/services/api'
-import { StaffSignInError, staffOrgSignIn, staffSignIn } from './staffSignInService'
+import { StaffSignInError, staffOrgChoose, staffOrgSignIn, staffSignIn } from './staffSignInService'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn() },
@@ -187,5 +187,33 @@ describe('staffOrgSignIn', () => {
   it('fails closed on a malformed body', async () => {
     mockPost.mockResolvedValue({ data: {} })
     await expect(staffOrgSignIn(ORG)).rejects.toBeInstanceOf(StaffSignInError)
+  })
+})
+
+describe('staffOrgChoose', () => {
+  const REQUEST = { choiceToken: 'choice-1', orgSlug: 'acme' }
+
+  it('posts the choice to /auth/staff/login/choose and resolves the envelope', async () => {
+    mockPost.mockResolvedValue({ data: { token: 't', session: {} } })
+    await expect(staffOrgChoose(REQUEST)).resolves.toEqual({ token: 't', session: {} })
+    expect(mockPost).toHaveBeenCalledWith('/auth/staff/login/choose', REQUEST)
+  })
+
+  it('throws StaffSignInError with the status on 401 (expired or used choice)', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401, ''))
+    const caught = await staffOrgChoose(REQUEST).catch((error: unknown) => error)
+    expect(caught).toBeInstanceOf(StaffSignInError)
+    expect((caught as StaffSignInError).status).toBe(401)
+  })
+})
+
+describe('StaffSignInError cause', () => {
+  it('never keeps the request body (password or choice token) on the error', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401, ''))
+    const caught = await staffOrgSignIn({ email: 'a', password: 'hunter2-secret' }).catch(
+      (error: unknown) => error,
+    )
+    expect(JSON.stringify(Object.entries(caught as object))).not.toContain('hunter2-secret')
+    expect((caught as StaffSignInError).cause).toBeUndefined()
   })
 })

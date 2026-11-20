@@ -50,3 +50,9 @@ export const STAFF_RESET_PATH = '/staff/reset'
 
 /** Pre-auth invite landing for a copied invite link (`#token=...`; #575b). */
 export const STAFF_INVITE_PATH = '/staff/invite'
+
+/**
+ * Org address of the staff sign-in page (`/o/:slug`, identity-auth-roles/27, #835): pre-fills the
+ * organization so the sign-in sends `orgSlug` and a bookmarked address skips the org choice.
+ */
+export const STAFF_ORG_LOGIN_PATH = '/o/:slug'

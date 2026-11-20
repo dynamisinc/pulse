@@ -102,13 +102,28 @@ the zone named, because staff need real times for troubleshooting.
 
 ## Signing in as staff
 
-![The Staff sign-in page, with Username and Secret fields and a Sign in button.](img/staff-sign-in.png)
+![The Staff sign-in page. On an exercise's address it opens on Username and Secret; on an organization's address or the platform address it opens on Email and Password.](img/staff-sign-in.png)
 
-1. Open the exercise's web address followed by `/staff/login`. Your planner or Dynamis support gives
-   you the address. You can also follow **Sign in here** under "Staff or controller?" at the bottom
-   of the player sign-in page.
-2. Enter your **Username** and **Secret**.
-3. Select **Sign in**.
+1. Open the Staff sign-in page. Your planner or Dynamis support gives you the address. You can also
+   follow **Sign in here** under "Staff or controller?" at the bottom of the player sign-in page.
+2. What you see first depends on the address:
+   - On **an exercise's address** (`<exercise address>/staff/login`), the page opens on **Username**
+     and **Secret** for that exercise. If you sign in with an email and password instead, select
+     **Sign in with email instead**.
+   - On your **organization's address** (`<address>/o/<your organization>`) or on the platform's own
+     address, the page opens on **Email** and **Password**. If you were given a username and a secret
+     for one exercise, select **Use a username and secret instead**.
+3. Enter your details and select **Sign in**. (Accounts without an email, such as a shared break-glass
+   login, type their username in the **Email** field.) If your email belongs to you in more than one
+   organization, Pulse asks you to choose one first. See
+   [Signing in to your organization](#signing-in-to-your-organization).
+
+> **Org admins:** sign in with your email and password, on your organization's address or the
+> platform address. Signing in with a username and secret on an exercise's address gives you that
+> exercise only, not **Exercise Management** with the create form.
+>
+> If you are an org admin and the address you were given is a shared exercise address, the page opens on
+> Username and Secret. Select **Sign in with email instead** and sign in with your email and password.
 
 Pulse opens your home screen:
 
@@ -121,11 +136,12 @@ Pulse opens your home screen:
 
 ### Signing in to your organization
 
-Staff will soon sign in to their **organization** rather than to one exercise, with their email and
-password:
+Staff sign in to their **organization** rather than to one exercise, with their email and password, on
+the Staff sign-in page:
 
-- **With your organization's address** (`console.<platform address>/o/<your organization>`), Pulse
-  signs you straight in to that organization. Bookmark it.
+- **With your organization's address** (`<address>/o/<your organization>`), Pulse signs you straight
+  in to that organization. Bookmark it. (The shared `console.<platform address>` host is not live
+  yet; use the address your administrator gives you.)
 - **Without it**, you enter your email and password first. If the same email belongs to you in more than
   one organization, Pulse lists only the organizations where that password is correct, and you choose
   one. The choice lasts two minutes.
@@ -151,9 +167,6 @@ An org admin cannot get a reset link for another org admin.
 
 > **Not yet on a screen:** the admin's "Reset password" button arrives with the organization directory.
 > Until then, Dynamis support issues the link.
-
-> **Not yet on a screen:** the organization sign-in page. Until it arrives, sign in on the exercise's
-> address as described above.
 
 ### Moving between screens
 
