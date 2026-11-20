@@ -20,22 +20,35 @@
  * ORG SIGN-IN (identity-auth-roles/27, #835): the form is email + password on the bare host and on
  * `/o/:slug`; on an EXERCISE address (the host resolves an exercise context) the default is the
  * exercise-bound username + secret form instead (staff there land in that exercise; org admins
- * need the email form). Each form links to the other. Focus is managed: a refused sign-in
- * focuses the password, an expired choice the email, a form toggle the new form's first field;
- * inputs go readOnly (not disabled) while submitting so focus never drops to <body>.
- * The email form sends
- * `POST /auth/staff/login {email, password}` (no `exerciseId`) via `staffOrgSignIn`, plus an
- * `orgSlug` when the page was opened at an org address (`/o/:slug` with a well-formed slug), so a
- * bookmarked address skips the org choice. An org admin's reply is an org-scope session
- * (`scope: 'org'`, `role: 'orgAdmin'`, `exerciseId: null`); it is stored like any staff session
- * and `RoleAwareEntry` lands it on Exercise Management. A person in several orgs gets a
- * `{ choose, choiceToken }` reply: the page switches to a "Choose an organization" step (announced
- * in a live region, says the choice expires in 2 minutes) and posts `staffOrgChoose`. An expired
- * or used token returns to the form with a plain message. The email field also takes an ALLOWLIST
- * (break-glass) username, which the backend accepts on this route (so it is a text input, not
- * `type="email"`). EVERY refused sign-in in this mode shows the one message
- * `UNIFORM_FAILURE_MESSAGE`, whatever the status or cause: nothing says whether an email or org
- * exists. The password is cleared from state as soon as it has been sent; never logged.
+ * need the email form). Each form links to the other. While the host's context is pending a
+ * neutral "Loading sign-in" placeholder shows instead of a form (a hung request falls back to
+ * email after 3 s), so the first form shown is the right one and never swaps under focus or
+ * autofill. DEV NOTE: the mock-data seam resolves a mock exercise for EVERY host, so under mock
+ * data the bare host also defaults to the exercise-bound form (this is what the guide screenshots
+ * show); against the real API only an exercise host does.
+ *
+ * Focus is managed: the first field takes focus when a form appears, a refused sign-in focuses
+ * the password, an expired choice the email, a toggle the new form's first field; inputs go
+ * readOnly (not disabled) and buttons aria-disabled while submitting so focus never drops to
+ * <body>. Each form guards its one request with `useSubmitGuard`: a ref (two submits in one tick
+ * cannot both pass), link buttons do nothing mid-request, and a reply that arrives after the form
+ * unmounted is ignored (no `completeSignIn`, no navigate).
+ *
+ * The email form sends `POST /auth/staff/login {email, password}` (no `exerciseId`) via
+ * `staffOrgSignIn`, plus an `orgSlug` when the page was opened at an org address (`/o/:slug`;
+ * the slug is trimmed and lower-cased and must match `^[a-z0-9-]{1,63}$`, else a short "address
+ * isn't valid" note shows and no `orgSlug` is sent), so a bookmarked address skips the org choice.
+ * An org admin's reply is an org-scope session (`scope: 'org'`, `role: 'orgAdmin'`,
+ * `exerciseId: null`); it is stored like any staff session and `RoleAwareEntry` lands it on
+ * Exercise Management. A person in several orgs gets a `{ choose, choiceToken }` reply: the page
+ * switches to a "Choose an organization" step (focus moves to the heading, whose
+ * `aria-describedby` carries the note that the choice expires in 2 minutes) and posts
+ * `staffOrgChoose`. An expired or used token returns to the form with a plain message. The email
+ * field also takes an ALLOWLIST (break-glass) username, which the backend accepts on this route
+ * (so it is a text input, not `type="email"`). Credentials-type refusals (400, 401, 403, 429)
+ * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password; a 5xx, a network
+ * failure and a malformed reply have their own retry messages and KEEP the password. Nothing says
+ * whether an email or org exists. The password is cleared once a reply arrives; never logged.
  *
  * The exercise-bound username + secret form (described below) stays reachable behind "Use a
  * username and secret instead" until it is retired; its 401/403 copy is unchanged.
@@ -142,6 +155,9 @@ const TYPED_IDENTIFIER_ATTRIBUTES = {
 /** Network failure: no response, so nothing about the account can be revealed. */
 const UNREACHABLE_MESSAGE = 'Could not reach the server. Check your connection and try again.'
 
+/** A 5xx: the server is at fault, so the person keeps what they typed and retries. */
+const SERVER_ERROR_MESSAGE = 'Something went wrong on our side. Try again.'
+
 /** AC2 — shown when the host's exercise context cannot be resolved at submit time. */
 const UNRESOLVED_CONTEXT_MESSAGE =
   "This address isn't configured for staff sign-in — check the URL your planner gave you."
@@ -164,7 +180,7 @@ function friendlySignInErrorMessage(error: StaffSignInError): string {
         ? `Sign-in could not be completed: ${error.serverMessage}`
         : 'Sign-in could not be completed.'
     default:
-      if (error.unreachable) return 'Could not reach the server. Check your connection and try again.'
+      if (error.unreachable) return UNREACHABLE_MESSAGE
       return error.status === undefined
         ? GENERIC_FAILURE_MESSAGE
         : (error.serverMessage ?? 'Sign-in failed. Try again.')
@@ -192,18 +208,53 @@ interface ExerciseBoundFormProps {
   /** The host-resolved exercise context, owned by `StaffSignInForm` (it picks the default). */
   readonly contextQuery: UseQueryResult<ExerciseScope>
   readonly onUseEmail: () => void
-  /** True after the person toggled here: focus the first field so focus never stays on `<body>`. */
-  readonly focusOnMount: boolean
 }
 
 /**
- * The exercise-bound sign-in form (username + secret). Inputs go `readOnly` (not `disabled`)
- * while a request is in flight and the submit button uses `aria-disabled`, so focus never falls
- * to `<body>` mid-submit.
+ * The guard every form uses around its one in-flight request.
+ *
+ *  - `begin()` returns a generation number, or `null` when a request is already in flight. It is
+ *    a REF, so two submits in the same tick (autofill plus Enter) cannot both pass.
+ *  - `isCurrent(g)` is false once the form has unmounted or backed out (`cancel()`), so a late
+ *    reply is ignored: no `completeSignIn`, no navigate, no state update.
  */
-function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseBoundFormProps) {
+function useSubmitGuard() {
+  const inFlight = useRef(false)
+  const generation = useRef(0)
+  useEffect(() => {
+    const ref = generation
+    return () => {
+      ref.current += 1
+    }
+  }, [])
+  return {
+    busy: () => inFlight.current,
+    begin: (): number | null => {
+      if (inFlight.current) return null
+      inFlight.current = true
+      return generation.current
+    },
+    isCurrent: (g: number) => g === generation.current,
+    end: (g: number) => {
+      if (g === generation.current) inFlight.current = false
+    },
+  }
+}
+
+/** Page-local disabled look for buttons that use `aria-disabled` (so focus is never lost). */
+const ARIA_DISABLED_SX = {
+  '&[aria-disabled="true"]': { opacity: 0.55, cursor: 'not-allowed' },
+} as const
+
+/**
+ * The exercise-bound sign-in form (username + secret). Inputs go `readOnly` (not `disabled`)
+ * while a request is in flight and buttons use `aria-disabled`, so focus never falls to
+ * `<body>` mid-submit. The first field takes focus when the form appears.
+ */
+function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const guard = useSubmitGuard()
 
   const [username, setUsername] = useState('')
   const [secret, setSecret] = useState('')
@@ -213,12 +264,12 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
   const secretRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (focusOnMount) usernameRef.current?.focus()
-  }, [focusOnMount])
+    usernameRef.current?.focus()
+  }, [])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (submitting) return
+    if (guard.busy()) return
 
     // AC2: block submission (and never POST) when the host's exercise
     // context is not a RESOLVED scope — loading, errored, and "no data yet"
@@ -228,12 +279,15 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
       return
     }
 
+    const generation = guard.begin()
+    if (generation === null) return
     const exerciseId = contextQuery.data.exerciseId
     setSubmitting(true)
     setErrorMessage(null)
 
     staffSignIn({ username, secret, exerciseId })
       .then(envelope => {
+        if (!guard.isCurrent(generation)) return
         // Store the pair (session-scoped: staff never opt in to `persist`), forget the
         // previous identity's client state, and hand off - one shared step so staff and
         // participant sign-in cannot drift (Gate-2 W-2).
@@ -243,6 +297,7 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
         )
       })
       .catch((error: unknown) => {
+        if (!guard.isCurrent(generation)) return
         const signInError =
           error instanceof StaffSignInError
             ? error
@@ -256,7 +311,11 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
           secretRef.current?.focus()
         }
       })
-      .finally(() => setSubmitting(false))
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
   }
 
   return (
@@ -291,7 +350,12 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
         fullWidth
       />
 
-      <CobraPrimaryButton type="submit" aria-disabled={submitting} fullWidth>
+      <CobraPrimaryButton
+        type="submit"
+        aria-disabled={submitting}
+        fullWidth
+        sx={ARIA_DISABLED_SX}
+      >
         Sign in
       </CobraPrimaryButton>
 
@@ -299,7 +363,14 @@ function ExerciseBoundForm({ contextQuery, onUseEmail, focusOnMount }: ExerciseB
 
       {errorMessage ? <SignInAlert message={errorMessage} /> : null}
 
-      <CobraLinkButton type="button" onClick={onUseEmail} aria-disabled={submitting}>
+      <CobraLinkButton
+        type="button"
+        onClick={() => {
+          if (!guard.busy()) onUseEmail()
+        }}
+        aria-disabled={submitting}
+        sx={ARIA_DISABLED_SX}
+      >
         Sign in with email instead
       </CobraLinkButton>
     </Box>
@@ -325,11 +396,9 @@ function SubmittingStatus() {
 interface OrgSignInFormProps {
   /** From the `/o/:slug` address, when it is a well-formed slug: sent as `orgSlug`. */
   readonly orgSlug?: string
+  /** True when the address carried a `/o/` value that is not a well-formed slug. */
+  readonly invalidSlug: boolean
   readonly onUseSecret: () => void
-  /** Reports that the person typed, so the page will not swap this form for the default one. */
-  readonly onEdited: () => void
-  /** True after the person toggled here: focus the first field so focus never stays on `<body>`. */
-  readonly focusOnMount: boolean
 }
 
 interface PendingChoice {
@@ -340,9 +409,10 @@ interface PendingChoice {
 type FocusField = 'email' | 'password'
 
 /** Org-shape sign-in: email + password, then (for several orgs) the org choice. */
-function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSignInFormProps) {
+function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const guard = useSubmitGuard()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -353,13 +423,14 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
   const emailRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const choiceHeading = useRef<HTMLHeadingElement>(null)
+  const lastField = useRef<FocusField>('email')
 
   const requestFocus = (field: FocusField) =>
     setFocusRequest(previous => ({ field, n: (previous?.n ?? 0) + 1 }))
 
   useEffect(() => {
-    if (focusOnMount) emailRef.current?.focus()
-  }, [focusOnMount])
+    emailRef.current?.focus()
+  }, [])
 
   // Runs after the render that (re)mounts the form, so it also works when the choice step closes.
   useEffect(() => {
@@ -388,27 +459,47 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
     )
   }
 
-  /** Copy for a failed sign-in: credentials failures stay uniform; nothing else claims it. */
-  const signInFailureMessage = (error: unknown): string => {
-    if (!(error instanceof StaffSignInError)) return GENERIC_FAILURE_MESSAGE
-    if (error.unreachable) return UNREACHABLE_MESSAGE
-    if (error.status === undefined) return GENERIC_FAILURE_MESSAGE
-    return UNIFORM_FAILURE_MESSAGE
+  /**
+   * Copy for a failed sign-in. Credentials-type refusals (400, 401, 403, 429 and anything else
+   * the server answered) stay uniform and clear the password; 429 cannot be split out without
+   * hinting at a lock. A 5xx, a missing response and a malformed reply say so, and KEEP what was
+   * typed so the person can simply retry, with focus back where they were.
+   */
+  const handleSignInFailure = (error: unknown) => {
+    let keepMessage: string | null = null
+    if (!(error instanceof StaffSignInError)) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.unreachable) keepMessage = UNREACHABLE_MESSAGE
+    else if (error.status === undefined) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.status >= 500) keepMessage = SERVER_ERROR_MESSAGE
+
+    if (keepMessage !== null) {
+      setErrorMessage(keepMessage)
+      ;(lastField.current === 'email' ? emailRef : passwordRef).current?.focus()
+      return
+    }
+    setErrorMessage(UNIFORM_FAILURE_MESSAGE)
+    setPassword('')
+    passwordRef.current?.focus()
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (submitting) return
+    const generation = guard.begin()
+    if (generation === null) return
     setSubmitting(true)
     setErrorMessage(null)
     staffOrgSignIn({ ...(orgSlug ? { orgSlug } : {}), email: email.trim(), password })
-      .then(finish)
-      .catch((error: unknown) => {
-        setErrorMessage(signInFailureMessage(error))
-        setPassword('')
-        passwordRef.current?.focus()
+      .then(result => {
+        if (guard.isCurrent(generation)) finish(result)
       })
-      .finally(() => setSubmitting(false))
+      .catch((error: unknown) => {
+        if (guard.isCurrent(generation)) handleSignInFailure(error)
+      })
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
   }
 
   const backToForm = (message: string | null) => {
@@ -418,15 +509,18 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
   }
 
   const handleChoose = (picked: StaffOrgChoice) => {
-    if (submitting || !choice) return
+    if (!choice) return
+    const generation = guard.begin()
+    if (generation === null) return
     setSubmitting(true)
     setErrorMessage(null)
     staffOrgChoose({ choiceToken: choice.choiceToken, orgSlug: picked.slug })
-      .then(finish)
+      .then(result => {
+        if (guard.isCurrent(generation)) finish(result)
+      })
       .catch((error: unknown) => {
-        const refused =
-          error instanceof StaffSignInError && (error.status === 401 || error.status === 400)
-        if (refused) {
+        if (!guard.isCurrent(generation)) return
+        if (error instanceof StaffSignInError && (error.status === 401 || error.status === 400)) {
           // An expired or used token is final: back to the form with a plain message.
           backToForm(CHOICE_EXPIRED_MESSAGE)
         } else if (error instanceof StaffSignInError && error.status === undefined &&
@@ -437,13 +531,19 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
           setErrorMessage(CHOICE_RETRY_MESSAGE)
         }
       })
-      .finally(() => setSubmitting(false))
+      .finally(() => {
+        if (!guard.isCurrent(generation)) return
+        guard.end(generation)
+        setSubmitting(false)
+      })
   }
 
   if (choice) {
+    // No live region around the step: the heading takes focus and `aria-describedby` makes the
+    // expiry note part of what a screen reader announces with it.
     return (
       <Stack data-testid="staff-org-choice" sx={{ gap: 2, width: '100%', maxWidth: 360 }}>
-        <Box role="status" aria-live="polite">
+        <Box>
           <Typography
             variant="h6"
             component="h2"
@@ -475,6 +575,7 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
                 fullWidth
                 aria-disabled={submitting}
                 onClick={() => handleChoose(org)}
+                sx={ARIA_DISABLED_SX}
               >
                 {org.orgName}
               </CobraSecondaryButton>
@@ -483,7 +584,14 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
         </Stack>
         {submitting ? <SubmittingStatus /> : null}
         {errorMessage ? <SignInAlert message={errorMessage} /> : null}
-        <CobraLinkButton type="button" onClick={() => backToForm(null)} aria-disabled={submitting}>
+        <CobraLinkButton
+          type="button"
+          onClick={() => {
+            if (!guard.busy()) backToForm(null)
+          }}
+          aria-disabled={submitting}
+          sx={ARIA_DISABLED_SX}
+        >
           Use a different account
         </CobraLinkButton>
       </Stack>
@@ -503,17 +611,29 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
           Signing in to <strong>{orgSlug}</strong>
         </Typography>
       ) : null}
+      {invalidSlug ? (
+        <Typography
+          variant="body2"
+          data-testid="staff-org-slug-invalid"
+          sx={{ color: 'text.secondary' }}
+        >
+          This sign-in address isn&apos;t valid. Sign in with your email.
+        </Typography>
+      ) : null}
       <CobraTextField
         label="Email"
         name="email"
         autoComplete="username"
         value={email}
-        onChange={event => {
-          onEdited()
-          setEmail(event.target.value)
-        }}
+        onChange={event => setEmail(event.target.value)}
         inputRef={emailRef}
-        slotProps={{ htmlInput: { readOnly: submitting, ...TYPED_IDENTIFIER_ATTRIBUTES } }}
+        slotProps={{
+          htmlInput: {
+            readOnly: submitting,
+            onFocus: () => { lastField.current = 'email' },
+            ...TYPED_IDENTIFIER_ATTRIBUTES,
+          },
+        }}
         required
         fullWidth
       />
@@ -523,17 +643,21 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
         type="password"
         autoComplete="current-password"
         value={password}
-        onChange={event => {
-          onEdited()
-          setPassword(event.target.value)
-        }}
+        onChange={event => setPassword(event.target.value)}
         inputRef={passwordRef}
-        slotProps={{ htmlInput: { readOnly: submitting } }}
+        slotProps={{
+          htmlInput: { readOnly: submitting, onFocus: () => { lastField.current = 'password' } },
+        }}
         required
         fullWidth
       />
 
-      <CobraPrimaryButton type="submit" aria-disabled={submitting} fullWidth>
+      <CobraPrimaryButton
+        type="submit"
+        aria-disabled={submitting}
+        fullWidth
+        sx={ARIA_DISABLED_SX}
+      >
         Sign in
       </CobraPrimaryButton>
 
@@ -541,53 +665,95 @@ function OrgSignInForm({ orgSlug, onUseSecret, onEdited, focusOnMount }: OrgSign
 
       {errorMessage ? <SignInAlert message={errorMessage} /> : null}
 
-      <CobraLinkButton type="button" onClick={onUseSecret} aria-disabled={submitting}>
+      <CobraLinkButton
+        type="button"
+        onClick={() => {
+          if (!guard.busy()) onUseSecret()
+        }}
+        aria-disabled={submitting}
+        sx={ARIA_DISABLED_SX}
+      >
         Use a username and secret instead
       </CobraLinkButton>
     </Box>
   )
 }
 
-/** A `/o/:slug` value is shown and sent only when it looks like a slug. */
-const ORG_SLUG_PATTERN = /^[a-z0-9-]{1,64}$/
+/** A `/o/:slug` value is trimmed and lower-cased, then shown and sent only if it looks like one. */
+const ORG_SLUG_PATTERN = /^[a-z0-9-]{1,63}$/
+
+/** How long the page waits for the host's exercise context before falling back to email. */
+const CONTEXT_WAIT_MS = 3000
+
+type FormMode = 'email' | 'secret'
 
 /**
  * Picks the form. Default: email on the bare host and on `/o/:slug`; the exercise-bound
- * username + secret form when the host resolves an exercise (an exercise address), unless the
- * person has already typed in the email form or chose a form themselves.
+ * username + secret form when the host resolves an exercise (an exercise address). While the
+ * host's context is pending (and there is no `/o/` slug) a neutral placeholder shows instead of
+ * a form, so the first form shown is the right one and nothing swaps under focus or autofill. A
+ * hung request falls back to email after `CONTEXT_WAIT_MS`.
  */
 function StaffSignInForm() {
   const { slug } = useParams<{ slug?: string }>()
-  const orgSlug = slug !== undefined && ORG_SLUG_PATTERN.test(slug) ? slug : undefined
+  const normalizedSlug = slug?.trim().toLowerCase()
+  const orgSlug =
+    normalizedSlug !== undefined && ORG_SLUG_PATTERN.test(normalizedSlug)
+      ? normalizedSlug
+      : undefined
+  const invalidSlug = slug !== undefined && orgSlug === undefined
 
-  // Non-blocking, host-resolved exercise scope (see module header). Never gates rendering.
+  // Non-blocking, host-resolved exercise scope (see module header).
   const contextQuery = useQuery({
     queryKey: ['staff-login', 'exercise-context'],
     queryFn: resolveExerciseContext,
     retry: false,
   })
 
-  const [chosenMode, setChosenMode] = useState<'email' | 'secret' | null>(null)
-  const [emailEdited, setEmailEdited] = useState(false)
+  const [chosenMode, setChosenMode] = useState<FormMode | null>(null)
+  const [lockedDefault, setLockedDefault] = useState<FormMode | null>(null)
+  const [timedOut, setTimedOut] = useState(false)
 
-  const onExerciseAddress = slug === undefined && contextQuery.data !== undefined
-  const defaultMode = onExerciseAddress && !emailEdited ? 'secret' : 'email'
-  const mode = chosenMode ?? defaultMode
+  const waiting = slug === undefined && contextQuery.isPending
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setTimeout(() => setTimedOut(true), CONTEXT_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [waiting])
+
+  const settled = !waiting || timedOut
+  const defaultMode: FormMode =
+    slug === undefined && contextQuery.data !== undefined ? 'secret' : 'email'
+  // Lock the default the moment the context settles, so a later reply cannot swap the form.
+  useEffect(() => {
+    if (settled && lockedDefault === null) setLockedDefault(defaultMode)
+  }, [settled, lockedDefault, defaultMode])
+
+  const mode = chosenMode ?? lockedDefault
+  if (mode === null) {
+    return (
+      <Stack
+        direction="row"
+        role="status"
+        aria-live="polite"
+        data-testid="staff-sign-in-loading"
+        sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
+      >
+        <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+        <Typography variant="body2">Loading sign-in…</Typography>
+      </Stack>
+    )
+  }
 
   return mode === 'email' ? (
     <OrgSignInForm
-      key={slug ?? ''}
+      key={normalizedSlug ?? ''}
       orgSlug={orgSlug}
+      invalidSlug={invalidSlug}
       onUseSecret={() => setChosenMode('secret')}
-      onEdited={() => setEmailEdited(true)}
-      focusOnMount={chosenMode !== null}
     />
   ) : (
-    <ExerciseBoundForm
-      contextQuery={contextQuery}
-      onUseEmail={() => setChosenMode('email')}
-      focusOnMount={chosenMode !== null}
-    />
+    <ExerciseBoundForm contextQuery={contextQuery} onUseEmail={() => setChosenMode('email')} />
   )
 }
 

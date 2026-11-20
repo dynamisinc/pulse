@@ -164,11 +164,11 @@ describe('createRoleAwareRoutes', () => {
     expect(screen.queryByText(/your session could not be resolved/i)).not.toBeInTheDocument()
   })
 
-  it('serves the real StaffSignInPage at /staff/login', () => {
+  it('serves the real StaffSignInPage at /staff/login', async () => {
     renderAt(STAFF_LOGIN_PATH)
 
     expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
-    expect(screen.getByTestId('staff-sign-in-form')).toBeInTheDocument()
+    expect(await screen.findByTestId('staff-sign-in-form')).toBeInTheDocument()
   })
 
   it('serves the staff sign-in page at an org address (/o/{slug}) with the org pre-filled', () => {

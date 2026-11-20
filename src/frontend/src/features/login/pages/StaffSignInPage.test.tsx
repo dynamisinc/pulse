@@ -75,8 +75,20 @@ function renderPage() {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   }
   const result = render(<StaffSignInPage />, { wrapper: Wrapper })
-  // The page opens on email + password (#835); these stories cover the exercise-bound form.
-  fireEvent.click(screen.getByRole('button', { name: /use a username and secret instead/i }))
+  return result
+}
+
+/** Renders, waits out the loading placeholder, and lands on the exercise-bound form. */
+async function renderExerciseForm() {
+  const result = renderPage()
+  await waitFor(
+    () => expect(screen.queryByTestId('staff-sign-in-loading')).not.toBeInTheDocument(),
+    { timeout: 4500 },
+  )
+  // The page opens on email + password unless the host resolved an exercise (#835).
+  if (!screen.queryByLabelText(/username/i)) {
+    fireEvent.click(screen.getByRole('button', { name: /use a username and secret instead/i }))
+  }
   return result
 }
 
@@ -98,16 +110,16 @@ beforeEach(() => {
 })
 
 describe('StaffSignInPage — the exercise-bound form stays reachable (#835)', () => {
-  it('offers a way back to email sign-in', () => {
-    renderPage()
+  it('offers a way back to email sign-in', async () => {
+    await renderExerciseForm()
     fireEvent.click(screen.getByRole('button', { name: /sign in with email instead/i }))
     expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
   })
 })
 
 describe('StaffSignInPage — AC1: renders a COBRA-styled form with username + secret ONLY', () => {
-  it('renders a username field and a masked secret field, and no exercise field', () => {
-    renderPage()
+  it('renders a username field and a masked secret field, and no exercise field', async () => {
+    await renderExerciseForm()
 
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument()
     const secretField = screen.getByLabelText(/secret/i)
@@ -119,7 +131,7 @@ describe('StaffSignInPage — AC1: renders a COBRA-styled form with username + s
   it('is keyboard-operable: Enter submits the form', async () => {
     const user = userEvent.setup()
     mockPost.mockReturnValue(new Promise(() => {})) // never resolves — just prove it was called
-    renderPage()
+    await renderExerciseForm()
 
     await user.type(screen.getByLabelText(/username/i), 'planner1')
     await user.type(screen.getByLabelText(/secret/i), 'secret-1')
@@ -134,7 +146,7 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
     mockPost.mockResolvedValue({
       data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
     } as Awaited<ReturnType<typeof api.post>>)
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 
@@ -149,7 +161,7 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
     mockPost.mockResolvedValue({
       data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
     } as Awaited<ReturnType<typeof api.post>>)
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 
@@ -169,7 +181,7 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
       response: { status: 401, data: '' },
       message: 'Request failed',
     })
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'wrong-secret')
 
@@ -183,7 +195,7 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
     mockPost.mockResolvedValue({
       data: { token: 'tok-123', session: {} },
     } as Awaited<ReturnType<typeof api.post>>)
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 
@@ -200,7 +212,7 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
 describe('StaffSignInPage — AC2: an unresolved exercise context blocks submission', () => {
   it('shows the AC2 error and never POSTs when the exercise-context resolution FAILS', async () => {
     mockResolveExerciseContext.mockRejectedValue(new Error('host not configured'))
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'secret-1')
 
@@ -211,7 +223,7 @@ describe('StaffSignInPage — AC2: an unresolved exercise context blocks submiss
 
   it('shows the AC2 error and never POSTs when resolution is still PENDING at submit time', async () => {
     mockResolveExerciseContext.mockReturnValue(new Promise(() => {})) // never resolves
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'secret-1')
 
@@ -232,7 +244,7 @@ describe('StaffSignInPage — AC4: a 401 shows ONE generic message and clears ON
     // (not mocked) by using a real-ish rejection shape the service already
     // handles through axios.isAxiosError — see staffSignInService.test.ts for
     // the exact AxiosError construction; here we assert the PAGE's rendering.
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'wrong-secret')
 
@@ -250,7 +262,7 @@ describe('StaffSignInPage — AC5: a 403 shows a DISTINCT not-assigned message',
       response: { status: 403, data: '' },
       message: 'Request failed',
     })
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 
@@ -265,7 +277,7 @@ describe('StaffSignInPage — AC5: a 403 shows a DISTINCT not-assigned message',
 describe('StaffSignInPage — accessibility (NFR-001)', () => {
   it('the in-flight submit state is announced via aria-live="polite"', async () => {
     mockPost.mockReturnValue(new Promise(() => {})) // never resolves
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'secret-1')
 
@@ -280,7 +292,7 @@ describe('StaffSignInPage — staff tokens never reach localStorage (easy-login 
     mockPost.mockResolvedValue({
       data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
     } as Awaited<ReturnType<typeof api.post>>)
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 
@@ -297,7 +309,7 @@ describe('StaffSignInPage — staff tokens never reach localStorage (easy-login 
     mockPost.mockResolvedValue({
       data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
     } as Awaited<ReturnType<typeof api.post>>)
-    renderPage()
+    await renderExerciseForm()
 
     await fillAndSubmit('planner1', 'correct-secret')
 

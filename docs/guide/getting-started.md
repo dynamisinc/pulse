@@ -102,7 +102,7 @@ the zone named, because staff need real times for troubleshooting.
 
 ## Signing in as staff
 
-![The Staff sign-in page, with Email and Password fields and a Sign in button.](img/staff-sign-in.png)
+![The Staff sign-in page. On an exercise's address it opens on Username and Secret; on an organization's address or the platform address it opens on Email and Password.](img/staff-sign-in.png)
 
 1. Open the Staff sign-in page. Your planner or Dynamis support gives you the address. You can also
    follow **Sign in here** under "Staff or controller?" at the bottom of the player sign-in page.
