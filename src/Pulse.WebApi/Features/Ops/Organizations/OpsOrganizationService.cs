@@ -294,6 +294,6 @@ public sealed partial class OpsOrganizationService
     [LoggerMessage(
         EventId = 2,
         Level = LogLevel.Warning,
-        Message = "Credential email not accepted after the first-admin invite was issued (purpose {Purpose}, outcome {Outcome}); the link was NOT returned (a mailer is configured, so it goes by email only); re-issue is required (#847).")]
+        Message = "Credential email not confirmed as sent after the first-admin invite was issued (purpose {Purpose}, outcome {Outcome}); the link was NOT returned (a mailer is configured, so it goes by email only); re-issue is required (#847).")]
     private partial void LogMailerNotSent(string purpose, string outcome);
 }
