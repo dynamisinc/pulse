@@ -46,6 +46,11 @@ using Pulse.WebApi.Features.Realtime;
 /// (invite and reset) of the person in the same transaction (#665 review W5).
 /// </para>
 /// <para>
+/// <b>The caller's own authority is re-checked under the lock (#840).</b> The caller is authorized before the write
+/// transaction opens; inside it, their own row is re-read with a locking no-op update that matches only an enabled org
+/// admin of the organization. An admin demoted or disabled while their own PATCH is in flight is refused with 403.
+/// </para>
+/// <para>
 /// <b>Audit.</b> Each change writes one <see cref="OrgAuditEvent"/> (no XC-004 <c>TelemetryEvent</c>: the change touches
 /// no exercise) in the same unit of work, through <see cref="StaffChangeRecorder"/>'s org-level overload. A no-op (grant
 /// to an existing admin, enable of an enabled person, …) writes nothing.
@@ -220,6 +225,21 @@ public sealed partial class OrgPeopleService
                     .Where(p => p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
                     .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken)
                 : 0;
+
+            // #840: the caller was authorized before this transaction opened. Re-read their own row here, as a locking
+            // no-op update over it only while it is still an ENABLED org admin of this organization: a demotion or
+            // disable of the caller that committed meanwhile matches nothing and is refused with 403, and one that has
+            // not committed yet waits behind this transaction. Taken AFTER the last-admin lock, which already holds the
+            // caller's row when they are an enabled admin, so it adds no new lock order on that path.
+            var callerStillAdmin = await _dbContext.People
+                .InOrganization(tenant)
+                .Where(p => p.Id == caller.StaffUserId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken);
+            if (callerStillAdmin != 1)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgPeopleResult.Forbidden();
+            }
 
             // The bare-404 pattern: another customer's person is indistinguishable from a missing one.
             var person = await _dbContext.People
