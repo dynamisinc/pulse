@@ -4,6 +4,7 @@ using System;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
@@ -76,6 +77,62 @@ public sealed class EnrollmentStaleCallerTests
         (await read.TelemetryEvents.IgnoreQueryFilters().CountAsync(t => t.ExerciseId == exercise
                 && (t.EventType == EnrollmentService.RevokedEventType || t.EventType == EnrollmentService.RoleChangedEventType)))
             .Should().Be(1, "only A's change of B is recorded; nothing B attempted is");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("demoted", "grant")]
+    [InlineData("demoted", "set-lead")]
+    [InlineData("removed", "grant")]
+    [InlineData("removed", "set-lead")]
+    public async Task APlannerWhoLosesTheGrantMidRequest_CannotGrantOrSetTheLead(string loss, string action)
+    {
+        // W-002: the same stale-caller window on the two changes that sweep no session.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (plannerA, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (plannerB, enrollmentB) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, enrollmentC) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (candidate, _) = await _kit.SeedStaffAsync(org, exerciseId: null);
+        var (sessionA, _) = await _kit.SeedStaffSessionAsync(plannerA, exercise, "planner");
+        var (sessionB, _) = await _kit.SeedStaffSessionAsync(plannerB, exercise, "planner");
+
+        // A's change of B lands inside B's transaction, just before B's caller re-check (B's first enrollment UPDATE).
+        EnrollmentOutcome? competing = null;
+        var hook = new BeforeCommandHook(
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[Enrollments]", StringComparison.Ordinal),
+            async () =>
+            {
+                var (serviceA, contextA) = _kit.ServiceFor(sessionA, plannerA, org, exercise);
+                await using (contextA)
+                {
+                    competing = loss == "demoted"
+                        ? (await serviceA.ChangeRoleAsync(enrollmentB, "controller")).Outcome
+                        : (await serviceA.RevokeAsync(enrollmentB)).Outcome;
+                }
+            });
+
+        var (serviceB, contextB) = _kit.ServiceFor(sessionB, plannerB, org, exercise, interceptor: hook);
+        await using (contextB)
+        {
+            (await serviceB.ListStaffAsync(exercise)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+
+            var result = action == "grant"
+                ? await serviceB.GrantAsync(exercise, candidate, "planner")
+                : await serviceB.SetLeadAsync(enrollmentC);
+
+            hook.Fired.Should().BeTrue("A's change of B landed inside B's request");
+            competing.Should().Be(EnrollmentOutcome.Ok, "A's change of B committed first");
+            result.Outcome.Should().Be(EnrollmentOutcome.Forbidden, "B was {0} before B's {1} took its lock", loss, action);
+        }
+
+        await using var read = _kit.ReadContext();
+        (await read.Enrollments.IgnoreQueryFilters().Active().AnyAsync(e => e.ExerciseId == exercise && e.PersonId == candidate))
+            .Should().BeFalse("B's grant did not land");
+        (await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == enrollmentC)).IsLead
+            .Should().BeFalse("B's lead change did not land");
+        (await read.TelemetryEvents.IgnoreQueryFilters().CountAsync(t => t.ExerciseId == exercise
+                && (t.EventType == EnrollmentService.GrantedEventType || t.EventType == EnrollmentService.LeadChangedEventType)))
+            .Should().Be(0, "nothing B attempted is recorded as done");
     }
 
     [RequiresDockerFact]

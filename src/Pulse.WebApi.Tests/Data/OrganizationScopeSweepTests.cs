@@ -385,7 +385,9 @@ public sealed class OrganizationScopeSweepTests
         // joined to the caller's InOrganization-bounded exercises (1).
         // #575b: PasswordResetService.HasStaffGrantAsync — does the person whose invite was just redeemed hold an active
         // staff enrollment (own-only, inner-joined to exercises of the token's own organization) (1).
-        ["TenantChecked"] = 18,
+        // W-002 (#840): EnrollmentService.LockCallerPlannerAsync — the caller's OWN planner enrollment on the exercise just
+        // resolved inside their scope and organization, locked in the grant / set-lead transaction (1).
+        ["TenantChecked"] = 19,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,
