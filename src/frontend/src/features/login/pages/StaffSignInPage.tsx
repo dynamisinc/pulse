@@ -17,6 +17,23 @@
  * `Stack`, `Typography`) come straight from `@mui/material`, matching
  * `ExerciseSwitcher.tsx`'s precedent.
  *
+ * ORG SIGN-IN (identity-auth-roles/27, #835): the DEFAULT form is email + password. It sends
+ * `POST /auth/staff/login {email, password}` (no `exerciseId`) via `staffOrgSignIn`, plus an
+ * `orgSlug` when the page was opened at an org address (`/o/:slug`, `STAFF_ORG_LOGIN_PATH`), so a
+ * bookmarked address skips the org choice. An org admin's reply is an org-scope session
+ * (`scope: 'org'`, `role: 'orgAdmin'`, `exerciseId: null`); it is stored like any staff session
+ * and `RoleAwareEntry` lands it on Exercise Management. A person in several orgs gets a
+ * `{ choose, choiceToken }` reply: the page switches to a "Choose an organization" step (announced
+ * in a live region, says the choice expires in 2 minutes) and posts `staffOrgChoose`. An expired
+ * or used token returns to the form with a plain message. The email field also takes an ALLOWLIST
+ * (break-glass) username, which the backend accepts on this route (so it is a text input, not
+ * `type="email"`). EVERY refused sign-in in this mode shows the one message
+ * `UNIFORM_FAILURE_MESSAGE`, whatever the status or cause: nothing says whether an email or org
+ * exists. The password is cleared from state as soon as it has been sent; never logged.
+ *
+ * The exercise-bound username + secret form (described below) stays reachable behind "Use a
+ * username and secret instead" until it is retired; its 401/403 copy is unchanged.
+ *
  * ON SUCCESS the shared `completeSignIn` (`../completeSignIn.ts`) stores the pair in
  * the SESSION-scoped store (staff never opt in to `persist`), runs `resetClientSession()`
  * so a previous identity's cached data and composer state cannot show through
@@ -70,18 +87,41 @@
  * participant-visible timestamps.
  */
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { ThemeProvider } from '@mui/material/styles'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleNotch, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
-import { CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
+import {
+  CobraLinkButton,
+  CobraPrimaryButton,
+  CobraSecondaryButton,
+  CobraTextField,
+} from '@/theme/styledComponents'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { completeSignIn } from '../completeSignIn'
-import { staffSignIn, StaffSignInError } from '../services/staffSignInService'
+import {
+  isStaffOrgChoiceResponse,
+  staffOrgChoose,
+  staffOrgSignIn,
+  staffSignIn,
+  StaffSignInError,
+  type StaffOrgChoice,
+  type StaffOrgLoginResponse,
+} from '../services/staffSignInService'
+
+/** The ONE message for every refused org-shape sign-in (#835): never reveals what was wrong. */
+export const UNIFORM_FAILURE_MESSAGE =
+  "That email and password don't match, or your account is locked."
+
+/** Shown when the org choice is refused (expired after 2 minutes, already used, or mismatched). */
+const CHOICE_EXPIRED_MESSAGE = 'Your organization choice expired. Sign in again.'
+
+/** Network failure: no response, so nothing about the account can be revealed. */
+const UNREACHABLE_MESSAGE = 'Could not reach the server. Check your connection and try again.'
 
 /** AC2 — shown when the host's exercise context cannot be resolved at submit time. */
 const UNRESOLVED_CONTEXT_MESSAGE =
@@ -132,7 +172,7 @@ function SignInAlert({ message }: { message: string }) {
  * The sign-in form. Split from `StaffSignInPage` so the page owns only the
  * COBRA theme hand-off + page chrome, and this owns the field state.
  */
-function StaffSignInForm() {
+function ExerciseBoundForm({ onUseEmail }: { onUseEmail: () => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -239,7 +279,211 @@ function StaffSignInForm() {
       ) : null}
 
       {errorMessage ? <SignInAlert message={errorMessage} /> : null}
+
+      <CobraLinkButton type="button" onClick={onUseEmail} disabled={submitting}>
+        Sign in with email instead
+      </CobraLinkButton>
     </Box>
+  )
+}
+
+interface OrgSignInFormProps {
+  /** From the `/o/:slug` address, when there is one: sent as `orgSlug`. */
+  readonly orgSlug?: string
+  readonly onUseSecret: () => void
+}
+
+interface PendingChoice {
+  readonly choose: readonly StaffOrgChoice[]
+  readonly choiceToken: string
+}
+
+/** Org-shape sign-in: email + password, then (for several orgs) the org choice. */
+function OrgSignInForm({ orgSlug, onUseSecret }: OrgSignInFormProps) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [choice, setChoice] = useState<PendingChoice | null>(null)
+  const choiceHeading = useRef<HTMLHeadingElement>(null)
+
+  // Move focus to the choice heading when the step appears (keyboard + screen-reader users).
+  useEffect(() => {
+    if (choice) choiceHeading.current?.focus()
+  }, [choice])
+
+  const finish = (result: StaffOrgLoginResponse) => {
+    setPassword('') // sent once; never needed again
+    if (isStaffOrgChoiceResponse(result)) {
+      setChoice({ choose: result.choose, choiceToken: result.choiceToken })
+      return
+    }
+    completeSignIn(
+      { token: result.token, refreshToken: result.refreshToken },
+      { persist: false, navigate, queryClient },
+    )
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
+    setErrorMessage(null)
+    staffOrgSignIn({ ...(orgSlug ? { orgSlug } : {}), email: email.trim(), password })
+      .then(finish)
+      .catch((error: unknown) => {
+        // Every HTTP refusal is the same message; only "no response at all" differs.
+        setErrorMessage(
+          error instanceof StaffSignInError && error.status === undefined
+            ? UNREACHABLE_MESSAGE
+            : UNIFORM_FAILURE_MESSAGE,
+        )
+        setPassword('')
+      })
+      .finally(() => setSubmitting(false))
+  }
+
+  const handleChoose = (picked: StaffOrgChoice) => {
+    if (submitting || !choice) return
+    setSubmitting(true)
+    setErrorMessage(null)
+    staffOrgChoose({ choiceToken: choice.choiceToken, orgSlug: picked.slug })
+      .then(finish)
+      .catch((error: unknown) => {
+        // An expired or used token is final: back to the form with a plain message.
+        setChoice(null)
+        setErrorMessage(
+          error instanceof StaffSignInError && error.status === undefined
+            ? UNREACHABLE_MESSAGE
+            : CHOICE_EXPIRED_MESSAGE,
+        )
+      })
+      .finally(() => setSubmitting(false))
+  }
+
+  if (choice) {
+    return (
+      <Stack data-testid="staff-org-choice" sx={{ gap: 2, width: '100%', maxWidth: 360 }}>
+        <Box role="status" aria-live="polite">
+          <Typography
+            variant="h6"
+            component="h2"
+            tabIndex={-1}
+            ref={choiceHeading}
+            sx={{ fontWeight: 700, outline: 'none' }}
+          >
+            Choose an organization
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Your sign-in matches {choice.choose.length} organizations. This choice expires in 2
+            minutes.
+          </Typography>
+        </Box>
+        <Stack
+          component="ul"
+          aria-label="Organizations"
+          sx={{ gap: 1, m: 0, p: 0, listStyle: 'none' }}
+        >
+          {choice.choose.map(org => (
+            <li key={org.slug}>
+              <CobraSecondaryButton
+                type="button"
+                fullWidth
+                disabled={submitting}
+                onClick={() => handleChoose(org)}
+              >
+                {org.orgName}
+              </CobraSecondaryButton>
+            </li>
+          ))}
+        </Stack>
+        {submitting ? (
+          <Stack
+            direction="row"
+            role="status"
+            aria-live="polite"
+            sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
+          >
+            <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+            <Typography variant="body2">Signing in…</Typography>
+          </Stack>
+        ) : null}
+      </Stack>
+    )
+  }
+
+  return (
+    <Box
+      component="form"
+      onSubmit={handleSubmit}
+      aria-label="Staff sign-in"
+      data-testid="staff-sign-in-form"
+      sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', maxWidth: 360 }}
+    >
+      {orgSlug ? (
+        <Typography variant="body2" data-testid="staff-org-slug" sx={{ color: 'text.secondary' }}>
+          Signing in to <strong>{orgSlug}</strong>
+        </Typography>
+      ) : null}
+      <CobraTextField
+        label="Email"
+        name="email"
+        autoComplete="username"
+        value={email}
+        onChange={event => setEmail(event.target.value)}
+        disabled={submitting}
+        required
+        fullWidth
+      />
+      <CobraTextField
+        label="Password"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+        value={password}
+        onChange={event => setPassword(event.target.value)}
+        disabled={submitting}
+        required
+        fullWidth
+      />
+
+      <CobraPrimaryButton type="submit" disabled={submitting} fullWidth>
+        Sign in
+      </CobraPrimaryButton>
+
+      {submitting ? (
+        <Stack
+          direction="row"
+          role="status"
+          aria-live="polite"
+          data-testid="staff-sign-in-submitting"
+          sx={{ alignItems: 'center', gap: 1, color: 'text.secondary' }}
+        >
+          <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+          <Typography variant="body2">Signing in…</Typography>
+        </Stack>
+      ) : null}
+
+      {errorMessage ? <SignInAlert message={errorMessage} /> : null}
+
+      <CobraLinkButton type="button" onClick={onUseSecret} disabled={submitting}>
+        Use a username and secret instead
+      </CobraLinkButton>
+    </Box>
+  )
+}
+
+/** Picks the org-shape form (default) or the exercise-bound form. */
+function StaffSignInForm() {
+  const { slug } = useParams<{ slug?: string }>()
+  const [mode, setMode] = useState<'email' | 'secret'>('email')
+  return mode === 'email' ? (
+    <OrgSignInForm orgSlug={slug} onUseSecret={() => setMode('secret')} />
+  ) : (
+    <ExerciseBoundForm onUseEmail={() => setMode('email')} />
   )
 }
 

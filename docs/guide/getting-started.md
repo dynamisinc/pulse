@@ -102,13 +102,18 @@ the zone named, because staff need real times for troubleshooting.
 
 ## Signing in as staff
 
-![The Staff sign-in page, with Username and Secret fields and a Sign in button.](img/staff-sign-in.png)
+![The Staff sign-in page, with Email and Password fields and a Sign in button.](img/staff-sign-in.png)
 
 1. Open the exercise's web address followed by `/staff/login`. Your planner or Dynamis support gives
    you the address. You can also follow **Sign in here** under "Staff or controller?" at the bottom
    of the player sign-in page.
-2. Enter your **Username** and **Secret**.
-3. Select **Sign in**.
+2. Enter your **Email** and **Password**. (Accounts without an email, such as a shared break-glass
+   login, type their username in the **Email** field.)
+3. Select **Sign in**. If your email belongs to you in more than one organization, Pulse asks you to
+   choose one first. See [Signing in to your organization](#signing-in-to-your-organization).
+
+If you were given a username and a secret for one exercise instead, select **Use a username and secret
+instead** under the Sign in button and enter them there.
 
 Pulse opens your home screen:
 
@@ -121,11 +126,12 @@ Pulse opens your home screen:
 
 ### Signing in to your organization
 
-Staff will soon sign in to their **organization** rather than to one exercise, with their email and
-password:
+Staff sign in to their **organization** rather than to one exercise, with their email and password, on
+the Staff sign-in page:
 
-- **With your organization's address** (`console.<platform address>/o/<your organization>`), Pulse
-  signs you straight in to that organization. Bookmark it.
+- **With your organization's address** (`<address>/o/<your organization>`), Pulse signs you straight
+  in to that organization. Bookmark it. (The shared `console.<platform address>` host is not live
+  yet; use the address your administrator gives you.)
 - **Without it**, you enter your email and password first. If the same email belongs to you in more than
   one organization, Pulse lists only the organizations where that password is correct, and you choose
   one. The choice lasts two minutes.
@@ -151,9 +157,6 @@ An org admin cannot get a reset link for another org admin.
 
 > **Not yet on a screen:** the admin's "Reset password" button arrives with the organization directory.
 > Until then, Dynamis support issues the link.
-
-> **Not yet on a screen:** the organization sign-in page. Until it arrives, sign in on the exercise's
-> address as described above.
 
 ### Moving between screens
 

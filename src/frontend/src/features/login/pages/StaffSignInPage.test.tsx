@@ -23,7 +23,7 @@
  * is mocked to capture `useNavigate()` calls without a real router.
  */
 import type { ReactNode } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -52,6 +52,7 @@ vi.mock('@/core/auth', async importOriginal => {
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
+  useParams: () => ({}),
 }))
 
 const mockPost = vi.mocked(api.post)
@@ -73,14 +74,17 @@ function renderPage() {
   function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   }
-  return render(<StaffSignInPage />, { wrapper: Wrapper })
+  const result = render(<StaffSignInPage />, { wrapper: Wrapper })
+  // The page opens on email + password (#835); these stories cover the exercise-bound form.
+  fireEvent.click(screen.getByRole('button', { name: /use a username and secret instead/i }))
+  return result
 }
 
 async function fillAndSubmit(username: string, secret: string) {
   const user = userEvent.setup()
   await user.type(screen.getByLabelText(/username/i), username)
   await user.type(screen.getByLabelText(/secret/i), secret)
-  await user.click(screen.getByRole('button', { name: /sign in/i }))
+  await user.click(screen.getByRole('button', { name: /^sign in$/i }))
   return user
 }
 
@@ -91,6 +95,14 @@ beforeEach(() => {
   mockSetTokens.mockReset()
   mockResetClientSession.mockReset()
   mockResolveExerciseContext.mockResolvedValue(SCOPE)
+})
+
+describe('StaffSignInPage — the exercise-bound form stays reachable (#835)', () => {
+  it('offers a way back to email sign-in', () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /sign in with email instead/i }))
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+  })
 })
 
 describe('StaffSignInPage — AC1: renders a COBRA-styled form with username + secret ONLY', () => {

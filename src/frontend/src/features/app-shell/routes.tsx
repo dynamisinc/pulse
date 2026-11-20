@@ -94,6 +94,7 @@ import {
   LOGIN_PATH,
   STAFF_INVITE_PATH,
   STAFF_LOGIN_PATH,
+  STAFF_ORG_LOGIN_PATH,
   STAFF_RESET_PATH,
 } from './constants'
 
@@ -112,6 +113,7 @@ export function createRoleAwareRoutes(surfaces: RoleAwareEntryProps): RouteObjec
       path: STAFF_LOGIN_PATH,
       element: <StaffSignInPage />,
     },
+    { path: STAFF_ORG_LOGIN_PATH, element: <StaffSignInPage /> }, // #835 org address (/o/{slug})
     { path: STAFF_RESET_PATH, element: <StaffSetPasswordPage /> }, // #576 pre-auth set-password
     { path: STAFF_INVITE_PATH, element: <StaffInvitePage /> }, // #575b pre-auth invite
     // Personal-link sign-in (easy-login 08). Pre-auth like the two above. The bare

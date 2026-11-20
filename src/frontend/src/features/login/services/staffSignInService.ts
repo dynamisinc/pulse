@@ -45,6 +45,9 @@ import { api } from '@/core/services/api'
 /** The single endpoint this seam consumes, relative to the shared client's `/api` base URL. */
 const STAFF_LOGIN_ENDPOINT = '/auth/staff/login'
 
+/** The org-choice follow-up endpoint (story 15): `{ choiceToken, orgSlug }`. */
+const STAFF_CHOOSE_ENDPOINT = '/auth/staff/login/choose'
+
 /** The credentials this seam sends. `exerciseId` is HOST-resolved, never user-entered. */
 export interface StaffSignInCredentials {
   readonly username: string
@@ -66,7 +69,8 @@ export interface StaffLoginEnvelope {
 
 /**
  * Org-level staff sign-in body (story 15): `orgSlug` is optional (omitted = match across orgs).
- * Sent by `staffOrgSignIn` (the invite page's straight-to-sign-in).
+ * Sent by `staffOrgSignIn` (the staff sign-in page, and the invite page's straight-to-sign-in).
+ * `email` also carries an allowlist (break-glass) username, which the backend accepts there.
  */
 export interface StaffOrgSignInCredentials {
   readonly orgSlug?: string
@@ -214,9 +218,29 @@ export async function staffSignIn(
 export async function staffOrgSignIn(
   credentials: StaffOrgSignInCredentials,
 ): Promise<StaffOrgLoginResponse> {
+  return postOrgLogin(STAFF_LOGIN_ENDPOINT, credentials, 'staffOrgSignIn')
+}
+
+/**
+ * Completes a multi-org sign-in: `POST /auth/staff/login/choose { choiceToken, orgSlug }`. Resolves
+ * the success envelope (or, defensively, a choice list). Throws `StaffSignInError` on 401 (an
+ * expired, used or mismatched choice), 400 or network. The choice token is never logged.
+ */
+export async function staffOrgChoose(
+  request: StaffOrgChooseRequest,
+): Promise<StaffOrgLoginResponse> {
+  return postOrgLogin(STAFF_CHOOSE_ENDPOINT, request, 'staffOrgChoose')
+}
+
+/** Shared POST + response-shape check for the two org-level endpoints. */
+async function postOrgLogin(
+  endpoint: string,
+  body: StaffOrgSignInCredentials | StaffOrgChooseRequest,
+  caller: string,
+): Promise<StaffOrgLoginResponse> {
   let data: unknown
   try {
-    const response = await api.post<StaffOrgLoginResponse>(STAFF_LOGIN_ENDPOINT, credentials)
+    const response = await api.post<StaffOrgLoginResponse>(endpoint, body)
     data = response.data
   } catch (error) {
     throw toStaffSignInError(error, 'Could not reach the sign-in service.')
@@ -224,10 +248,10 @@ export async function staffOrgSignIn(
 
   if (isStaffLoginEnvelope(data)) return data
   if (typeof data === 'object' && data !== null) {
-    const body = data as Record<string, unknown>
-    if (Array.isArray(body.choose) && typeof body.choiceToken === 'string') {
+    const parsed = data as Record<string, unknown>
+    if (Array.isArray(parsed.choose) && typeof parsed.choiceToken === 'string') {
       return data as StaffOrgChoiceResponse
     }
   }
-  throw new StaffSignInError('staffOrgSignIn: response was empty or malformed.')
+  throw new StaffSignInError(`${caller}: response was empty or malformed.`)
 }

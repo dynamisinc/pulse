@@ -177,6 +177,8 @@ const SHOTS = [
 
   // ---------------------------------------------------------------- staff
   { name: 'staff-sign-in', role: 'participant', path: '/staff/login' },
+  // The organization address (#835): the same page with the org pre-filled (email + password).
+  { name: 'org-sign-in', role: 'participant', path: '/o/harbor-county' },
   { name: 'console-overview', role: 'controller', path: '/staff/console' },
   // Controller console on a tablet (mobile-tablet story 16): the large-landscape and tall-portrait
   // bands. Touch emulation comes from the viewport's `mobile` flag.

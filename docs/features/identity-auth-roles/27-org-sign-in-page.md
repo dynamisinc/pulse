@@ -1,6 +1,6 @@
 # Story: Org sign-in page (email + password, org choice, lands org admins on Exercise Management)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review (frontend page done; host-implied org and exercise switcher still open)
 **Requirements:** COR-077, COR-074, COR-076  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.2  ·  **Issue:** #835
 **Stack:** fullstack (frontend page + one backend change)  ·  **Review tier:** Tier-2 (authentication path)  ·  **Wave:** A1 follow-up, ahead of A2  ·  **Priority:** High (Jonathan, 2026-11-06)
 
@@ -22,40 +22,40 @@ an email-and-password sign-in on any host. The shared console address (`console.
 Staff world (COBRA).
 
 ## Acceptance Criteria
-- [ ] **Sign in by email.** On the staff sign-in page, a staff member can sign in with **email and password**.
+- [x] **Sign in by email.** On the staff sign-in page, a staff member can sign in with **email and password**.
       The page sends `POST /api/auth/staff/login {email, password}` (no `exerciseId`), and an `orgSlug` when
       one is known (see below).
-- [ ] **Org admins land on Exercise Management.** When the response is an org-scope session
+- [x] **Org admins land on Exercise Management.** When the response is an org-scope session
       (`scope: 'org'`, `role: 'orgAdmin'`, `exerciseId: null`), the session is stored like any staff session
       and the user lands on Exercise Management with the **Create exercise** form available. This holds even
       when the organization has no exercises.
-- [ ] **Everyone else lands on their exercise.** A non-org-admin gets their most recently used staff enrollment,
+- [x] **Everyone else lands on their exercise.** A non-org-admin gets their most recently used staff enrollment,
       as the backend already decides, and lands on that role's home screen.
-- [ ] **Choose an organization.** When the response is `200 {choose:[{slug, orgName}], choiceToken}`, the page
+- [x] **Choose an organization.** When the response is `200 {choose:[{slug, orgName}], choiceToken}`, the page
       lists the organizations and posts `POST /api/auth/staff/login/choose {choiceToken, orgSlug}` for the one
       picked. The page says the choice expires (2 minutes), and an expired or used token sends the user back to
       the sign-in form with a plain message.
-- [ ] **Org address.** `/o/{slug}` (on whichever host serves the staff console) pre-fills the org and sends
+- [x] **Org address.** `/o/{slug}` (on whichever host serves the staff console) pre-fills the org and sends
       `orgSlug`, so a bookmarked org address skips the choice.
 - [ ] **Exercise address implies the org.** Signing in on an exercise's address takes the org from that
       exercise (design §1.2: "When staff sign in on an exercise host, the org comes from that exercise, so it
       works like a slug"). Backend: when the org-shape request has no `orgSlug` and arrives on a host that
       resolves to an exercise, use that exercise's organization. *(Not implemented today; the slugless path
       matches across every org instead.)*
-- [ ] **Uniform failures.** Every refusal shows the same message ("That email and password don't match, or
+- [x] **Uniform failures.** Every refusal shows the same message ("That email and password don't match, or
       your account is locked."), whatever the cause. No message reveals whether an email or org exists.
-- [ ] **Existing sign-ins keep working.** Allowlist (break-glass) logins sign in through this page, with the
+- [x] **Existing sign-ins keep working.** Allowlist (break-glass) logins sign in through this page, with the
       allowlist username in the email field, as the backend already accepts. The old username + secret,
       exercise-bound path stays reachable until it is retired, or this page replaces it with no loss.
 - [ ] **Switching into an exercise.** From an org-scope session, the exercise switcher enters one of the
       person's own enrollments via `POST /api/staff/active-exercise`. Leaving returns them to org scope.
-- [ ] Two worlds (D0 §2): COBRA components (`@/theme/styledComponents`), desktop-first, FontAwesome only, MUI 9
+- [x] Two worlds (D0 §2): COBRA components (`@/theme/styledComponents`), desktop-first, FontAwesome only, MUI 9
       `sx`-only; never confusable with a participant view.
-- [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; errors and the org list announced via a live
+- [x] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; errors and the org list announced via a live
       region; nothing conveyed by color alone.
-- [ ] Security: auth routes stay `Cache-Control: no-store` (story 26). The password field uses
+- [x] Security: auth routes stay `Cache-Control: no-store` (story 26). The password field uses
       `autocomplete="current-password"`, and the email field `autocomplete="username"`.
-- [ ] User guide: `docs/guide/getting-started.md` "Signing in to your organization" is updated (remove "Not yet
+- [x] User guide: `docs/guide/getting-started.md` "Signing in to your organization" is updated (remove "Not yet
       on a screen"), as is `planner-guide.md` "Creating an exercise", plus the screenshot list in
       `tools/guide-screenshots`.
 
@@ -85,3 +85,11 @@ Staff world (COBRA).
   `/o/{slug}` pre-fill, uniform error, allowlist username accepted.
 - Backend: host-implied org (exercise host → its org; foreign or unknown host → unchanged slugless behaviour).
 - e2e (UAT smoke): an org admin signs in on the UAT address and creates an exercise.
+
+## Implementation Notes
+- `StaffSignInPage` opens on email + password (`staffOrgSignIn`), with `orgSlug` from the `/o/:slug` route.
+  The exercise-bound username + secret form stays behind "Use a username and secret instead".
+- Every HTTP refusal of the email form shows the one uniform message; only a missing response (network) differs.
+- Not done here: **Exercise address implies the org** (backend, `OrgStaffLoginService`) and **Switching into an
+  exercise** from an org-scope session (switcher work). The screenshot `staff-sign-in.png` needs re-capturing
+  and `org-sign-in.png` is a new capture entry in `tools/guide-screenshots/capture.mjs`.
