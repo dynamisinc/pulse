@@ -104,7 +104,10 @@ function isAlertsHistoryPage(body: unknown): body is AlertsHistoryPage {
  */
 const MOCK_ALERTS: readonly Alert[] = []
 
-/** The server's history order: newest scenario time first, ties by id ascending. */
+/**
+ * The server's history order: newest scenario time first, then id ascending. Ids compare as
+ * strings here; the server's Guid ordering differs, which only matters for tied mock times.
+ */
 function newestFirst(alerts: readonly Alert[]): readonly Alert[] {
   return [...alerts].sort((a, b) =>
     Date.parse(b.scenarioTime) - Date.parse(a.scenarioTime) ||
