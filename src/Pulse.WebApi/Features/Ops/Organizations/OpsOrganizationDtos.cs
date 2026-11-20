@@ -51,6 +51,45 @@ public sealed class CreatedOrganizationDto
     public override string ToString() => $"CreatedOrganizationDto {{ Slug = {Slug} }}";
 }
 
+/// <summary>
+/// The body of <c>POST /api/ops/organizations/{slug}/admin-invite</c> (#847). Nullable: a missing field is a 400. No
+/// organization id: the organization is addressed by the route's slug.
+/// </summary>
+public sealed class ReissueAdminInviteRequest
+{
+    /// <summary>The email of the organization's org admin whose invite is re-issued.</summary>
+    [JsonPropertyName("adminEmail")]
+    public string? AdminEmail { get; init; }
+}
+
+/// <summary>
+/// The re-issue's one-time answer (#847). Like <see cref="CreatedOrganizationDto"/> it carries no organization id.
+/// </summary>
+public sealed class ReissuedAdminInviteDto
+{
+    /// <summary>The organization's slug.</summary>
+    [JsonPropertyName("slug")]
+    public required string Slug { get; init; }
+
+    /// <summary>The org admin's person id.</summary>
+    [JsonPropertyName("adminPersonId")]
+    public required string AdminPersonId { get; init; }
+
+    /// <summary>
+    /// The new single-use invite link, returned ONLY while this host has no mailer (CR-001); <c>null</c> once a mailer is
+    /// configured, when the link goes by email only. Shown once; never log it.
+    /// </summary>
+    [JsonPropertyName("inviteUrl")]
+    public required string? InviteUrl { get; init; }
+
+    /// <summary>Whether the provider accepted the invite email (always <c>false</c> on a host without email).</summary>
+    [JsonPropertyName("emailed")]
+    public required bool Emailed { get; init; }
+
+    /// <inheritdoc />
+    public override string ToString() => $"ReissuedAdminInviteDto {{ Slug = {Slug} }}";
+}
+
 /// <summary>The error body of the ops organization route.</summary>
 public sealed class OpsOrganizationErrorDto
 {
@@ -76,17 +115,41 @@ public enum OpsOrganizationOutcome
 
     /// <summary>No frontend base URL is configured, so no link can be built — 503.</summary>
     Unavailable,
+
+    /// <summary>The first-admin invite was re-issued — 200 (#847).</summary>
+    Reissued,
+
+    /// <summary>Unknown slug, or no org admin of that organization with that email — the same bare 404 as Rejected (#847).</summary>
+    NotFound,
 }
 
 /// <summary>The result of an <see cref="OpsOrganizationService"/> call.</summary>
 public sealed class OpsOrganizationResult
 {
-    private OpsOrganizationResult(OpsOrganizationOutcome outcome, CreatedOrganizationDto? organization, string? error)
+    private OpsOrganizationResult(
+        OpsOrganizationOutcome outcome,
+        CreatedOrganizationDto? organization,
+        string? error,
+        ReissuedAdminInviteDto? adminInvite = null)
     {
         Outcome = outcome;
         Organization = organization;
         Error = error;
+        AdminInvite = adminInvite;
     }
+
+    /// <summary>The re-issued first-admin invite on <see cref="OpsOrganizationOutcome.Reissued"/> (#847).</summary>
+    public ReissuedAdminInviteDto? AdminInvite { get; }
+
+    /// <summary>A re-issued first-admin invite (#847).</summary>
+    /// <param name="adminInvite">The re-issued invite.</param>
+    /// <returns>The result.</returns>
+    public static OpsOrganizationResult Reissued(ReissuedAdminInviteDto adminInvite) =>
+        new(OpsOrganizationOutcome.Reissued, null, null, adminInvite);
+
+    /// <summary>The bare 404 for an unknown slug or admin (#847).</summary>
+    /// <returns>The result.</returns>
+    public static OpsOrganizationResult NotFound() => new(OpsOrganizationOutcome.NotFound, null, null);
 
     /// <summary>Which outcome occurred.</summary>
     public OpsOrganizationOutcome Outcome { get; }

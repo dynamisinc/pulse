@@ -70,6 +70,7 @@ public sealed class OrgScopeRouteSweepTests
         ["GET /api/org/people/{personId:guid}"] = "one person in the org directory (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
         ["PATCH /api/org/people/{personId:guid}"] = "org-admin grant/revoke and disable/enable (#574): OrgAdminOnly, tenant-bound (a foreign id is the bare 404)",
         ["POST /api/org/people/invite"] = "org-admin staff invite (#575b): OrgAdminOnly on an org-scope session; takes no id, creates or reuses the person only in the caller's own organization (InOrganization by email)",
+        ["POST /api/org/people/{personId:guid}/invite"] = "org-admin invite of an existing person by id (#849): OrgAdminOnly on an org-scope session, tenant-bound (a foreign id is the bare 404)",
         ["GET /api/org/exercises/{exerciseId:guid}/enrollments"] =
             "story 20 (#575a): an exercise's staff list; for an org admin the exercise is resolved InOrganization (a foreign id is the bare 404)",
         ["POST /api/org/exercises/{exerciseId:guid}/enrollments"] =

@@ -69,6 +69,12 @@ public sealed partial class OpsOrganizationService
     /// <summary>The 409 error code when an organization with that name already exists (or a concurrent create won).</summary>
     public const string OrganizationExistsError = "organization-exists";
 
+    /// <summary>
+    /// The prefix of a Pulse-local staff subject (<c>pulse|{personId:N}</c>), which every Pulse-created staff facet carries.
+    /// Any other subject is an IdP (Dynamis allowlist) identity (#862).
+    /// </summary>
+    public const string PulseLocalSubjectPrefix = "pulse|";
+
     /// <summary>The most characters an organization name may have (the <c>Organizations.Name</c> column bound).</summary>
     public const int MaxNameLength = 200;
 
@@ -235,6 +241,158 @@ public sealed partial class OpsOrganizationService
         {
             Name = name,
             Slug = slug,
+            AdminPersonId = adminId.ToString(),
+            InviteUrl = mailerConfigured ? null : inviteUrl,
+            Emailed = emailed,
+        });
+    }
+
+    /// <summary>
+    /// Re-issues the first-admin invite of an already-provisioned organization (#847):
+    /// <c>POST /api/ops/organizations/{slug}/admin-invite {adminEmail}</c>, gated by the bootstrap secret. Covers an invite
+    /// that EXPIRED unused and one that was never delivered (a mailer configured, the send failed). A null-issuer invite
+    /// for that organization's named org admin is staged, which voids the earlier one, and the CR-001 link rule of
+    /// <see cref="CreateAsync"/> applies unchanged: the link is returned ONLY while no mailer is configured.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Fail closed, disclose nothing.</b> A wrong or unconfigured secret, an unknown slug, and an email that is not an
+    /// org admin of THAT organization are all the same bare 404. The organization id never reaches the wire.
+    /// </para>
+    /// <para>
+    /// <b>Only a not-yet-credentialed admin.</b> An admin who already has a Pulse password, or who signs in through the
+    /// Dynamis allowlist (a staff facet whose subject is not <see cref="PulseLocalSubjectPrefix"/>), is refused
+    /// (<c>409 already-active</c>): an invite would let the ops caller, who holds the link while email is off, set the
+    /// password of an account already in use. A disabled admin is refused (<c>409 person-disabled</c>), a link they could
+    /// never redeem.
+    /// </para>
+    /// <para>
+    /// <b>Audit.</b> One <see cref="OrgInviteService.InviteIssuedKind"/> event in that organization (no actor: ops), in the
+    /// same unit of work as the token and the voiding. It never carries the token or the link.
+    /// </para>
+    /// </remarks>
+    /// <param name="slug">The organization's slug (the route value).</param>
+    /// <param name="request">The request body (may be <c>null</c>).</param>
+    /// <param name="presentedSecret">The <c>X-Bootstrap-Secret</c> header (never logged).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome the endpoint maps to a status.</returns>
+    public async Task<OpsOrganizationResult> ReissueAdminInviteAsync(
+        string? slug,
+        ReissueAdminInviteRequest? request,
+        string? presentedSecret,
+        CancellationToken cancellationToken = default)
+    {
+        if (!BootstrapSecretGate.IsAuthorized(_options.Secret, presentedSecret))
+        {
+            return OpsOrganizationResult.Rejected();
+        }
+
+        var email = OrgInviteService.NormalizeEmail(request?.AdminEmail);
+        if (email is null)
+        {
+            return OpsOrganizationResult.Invalid(InvalidAdminEmailError);
+        }
+
+        var trimmedSlug = slug?.Trim();
+        if (string.IsNullOrEmpty(trimmedSlug) || trimmedSlug.Length > Organization.MaxSlugLength)
+        {
+            return OpsOrganizationResult.NotFound();
+        }
+
+        if (!_urls.TryGetBase(out var baseUrl))
+        {
+            return OpsOrganizationResult.Unavailable();
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        Guid adminId;
+        string storedSlug;
+        IssuedCredentialToken issued;
+        await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
+        {
+            // org-scope-exempt(ResolutionRoot): this read IS the resolution — the route slug to its tenant, before any
+            // tenant is known (the org sign-in's slug read). One row by its unique slug; only its id and slug are used,
+            // and the id never leaves the server.
+            var organization = await _dbContext.Organizations
+                .AsNoTracking()
+                .Where(o => o.Slug == trimmedSlug)
+                .Select(o => new { o.Id, o.Slug })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (organization is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OpsOrganizationResult.NotFound();
+            }
+
+            // Serialize concurrent re-issues for this admin: a second one waits here and its void statement then sees the
+            // first one's committed token, so there is never more than one live invite. (By email: the id is not known
+            // yet. The same no-op SET PasswordHash = PasswordHash as PersonSessionLock.)
+            await _dbContext.People
+                .InOrganization(organization.Id)
+                .Where(p => p.Email == email && p.OrgRole == Person.OrgAdminRole)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
+
+            // Bounded by the slug's own organization: the same address in another customer is a different person.
+            var admin = await _dbContext.People
+                .AsNoTracking()
+                .InOrganization(organization.Id)
+                .Where(p => p.Email == email && p.OrgRole == Person.OrgAdminRole)
+                .Select(p => new { p.Id, p.DisabledAt, HasPassword = p.PasswordHash != null && p.PasswordHash != "" })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (admin is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OpsOrganizationResult.NotFound();
+            }
+
+            // #862 (Sonnet 2): an admin who signs in through the Dynamis allowlist is just as active as one with a Pulse
+            // password. Their staff facet carries an IdP subject; only Pulse-created facets carry the Pulse-local
+            // "pulse|" subject (this service, the org-admin grant, the enrollment grant). Redeeming an invite would give
+            // the allowlist admin a Pulse password set by whoever holds the link, so they are refused like any active one.
+            var signsInViaAllowlist = await _dbContext.StaffUsers
+                .AsNoTracking()
+                .InOrganization(organization.Id)
+                .AnyAsync(u => u.Id == admin.Id && !u.ExternalSubject.StartsWith(PulseLocalSubjectPrefix), cancellationToken);
+
+            var refusal = admin.DisabledAt is not null
+                ? OrgInviteService.PersonDisabledError
+                : admin.HasPassword || signsInViaAllowlist ? OrgInviteService.AlreadyActiveError : null;
+            if (refusal is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OpsOrganizationResult.Conflict(refusal);
+            }
+
+            // The null issuer (ops is not a Person), delivered to the admin's OWN stored address — the same rule the
+            // first invite was issued under. Voids the earlier invite of this admin.
+            issued = await _tokens.StageIssueAsync(
+                CredentialTokenPurposes.Invite,
+                CredentialSubject.ForPerson(admin.Id),
+                organization.Id,
+                issuedByPersonId: null,
+                now,
+                deliverToEmail: email,
+                cancellationToken: cancellationToken);
+
+            _dbContext.OrgAuditEvents.Add(Audit(
+                organization.Id, OrgInviteService.InviteIssuedKind, admin.Id, now, "{\"actorRole\":\"ops\",\"created\":false}"));
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            adminId = admin.Id;
+            storedSlug = organization.Slug;
+        }
+
+        var inviteUrl = OrgInviteService.BuildInviteUrl(baseUrl, issued.RawToken);
+
+        // CR-001, exactly as CreateAsync: the link goes to the ops caller ONLY while this host has no mailer.
+        var mailerConfigured = _mailer.IsConfigured;
+        var emailed = mailerConfigured && await TrySendAsync(email, inviteUrl, cancellationToken);
+
+        return OpsOrganizationResult.Reissued(new ReissuedAdminInviteDto
+        {
+            Slug = storedSlug,
             AdminPersonId = adminId.ToString(),
             InviteUrl = mailerConfigured ? null : inviteUrl,
             Emailed = emailed,

@@ -24,6 +24,8 @@ export interface OrgPerson {
   readonly disabledAt: string | null
   /** Non-null only while a lockout is active NOW. */
   readonly lockedOutUntil: string | null
+  /** Whether a Pulse password is set (a yes/no, never the hash; #848 / #849). */
+  readonly hasPassword: boolean
   readonly enrollments: readonly OrgPersonEnrollment[]
 }
 
@@ -51,10 +53,20 @@ export interface OrgInviteRequest {
   readonly displayName: string
 }
 
+/** POST /org/people/{id}/invite body (#849): invite an existing person, setting their email. */
+export interface OrgInviteExistingRequest {
+  readonly personId: string
+  readonly email: string
+}
+
 /** 200 body of the invite: `inviteUrl` is a single-use bearer link returned ONCE; never log it. */
 export interface OrgInviteResult {
   readonly personId: string
-  readonly inviteUrl: string
+  /**
+   * Always set by `POST /org/people/invite`. `POST /org/people/{id}/invite` returns `null` once a
+   * mailer is configured: the link then goes to the person's address by email only (CR-001, #862).
+   */
+  readonly inviteUrl: string | null
   readonly emailed: boolean
   /** False = an existing directory person without a password was re-invited (old link voided). */
   readonly created: boolean

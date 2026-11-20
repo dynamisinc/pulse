@@ -7,7 +7,8 @@
  *   GET   /api/org/people?search=&page=&pageSize=   -> { items, page, pageSize, total }
  *         400 { error: 'invalid-paging' | 'search-too-long' }
  *   PATCH /api/org/people/{id}  { isOrgAdmin } | { disabled }  -> OrgPerson
- *         400 invalid-request; 404 bare; 409 last-org-admin | cannot-disable-self
+ *         400 invalid-request; 404 bare; 409 last-org-admin | cannot-disable-self |
+ *         person-has-no-password (#848: a grant waits until the person has set a password)
  *   POST  /api/org/people/{id}/password-reset (#576)           -> { resetUrl }
  *         404 bare; 409 target-is-org-admin | person-disabled; 503 reset-link-unavailable
  *
@@ -15,6 +16,12 @@
  *     -> { personId, inviteUrl, emailed, created }
  *         400 invalid-email | invalid-display-name; 409 already-active | person-disabled |
  *         target-is-org-admin; 503 invite-link-unavailable
+ *
+ *   POST  /api/org/people/{id}/invite { email } (#849: invite an existing person, set their email)
+ *     -> { personId, inviteUrl, emailed, created: false }
+ *        (inviteUrl is null once a mailer is configured: email only, CR-001)
+ *         400 invalid-email; 404 bare; 409 email-in-use | email-mismatch | already-active |
+ *         person-disabled | target-is-org-admin; 503 invite-link-unavailable
  *
  * Every route is org-admin only; the tenant is the caller's own, resolved server-side (never sent).
  * The reset link is a one-time credential: it is returned to the caller, never logged, stored or
@@ -24,6 +31,7 @@
 import axios from 'axios'
 import { api } from '@/core/services/api'
 import type {
+  OrgInviteExistingRequest,
   OrgInviteRequest,
   OrgInviteResult,
   OrgPeoplePage,
@@ -109,23 +117,46 @@ export async function inviteOrgPerson(request: OrgInviteRequest): Promise<OrgInv
       email: request.email,
       displayName: request.displayName,
     })
-    const body: unknown = response.data
-    const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
-    if (
-      typeof data.personId !== 'string' ||
-      typeof data.inviteUrl !== 'string' ||
-      data.inviteUrl.length === 0
-    ) {
-      throw new OrgPeopleError('Inviting the person failed')
-    }
-    return {
-      personId: data.personId,
-      inviteUrl: data.inviteUrl,
-      emailed: data.emailed === true,
-      created: data.created === true,
-    }
+    return readInviteResult(response.data)
   } catch (error) {
     if (error instanceof OrgPeopleError) throw error
     throw toError(error, 'Inviting the person')
+  }
+}
+
+/**
+ * Invites an EXISTING person by id, setting their email when none is on file (#849). The person
+ * keeps their enrollments. The link is returned once, never logged.
+ */
+export async function inviteExistingOrgPerson(
+  request: OrgInviteExistingRequest,
+): Promise<OrgInviteResult> {
+  try {
+    const response = await api.post<OrgInviteResult>(`${personEndpoint(request.personId)}/invite`, {
+      email: request.email,
+    })
+    return readInviteResult(response.data, true)
+  } catch (error) {
+    if (error instanceof OrgPeopleError) throw error
+    throw toError(error, 'Inviting the person')
+  }
+}
+
+/**
+ * Validates an invite body. `allowNoLink`: the by-id route returns `inviteUrl: null` once a mailer
+ * is configured (email only, CR-001); the email invite always returns a link.
+ */
+function readInviteResult(body: unknown, allowNoLink = false): OrgInviteResult {
+  const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
+  const link = data.inviteUrl
+  const linkOk = typeof link === 'string' ? link.length > 0 : allowNoLink && link === null
+  if (typeof data.personId !== 'string' || !linkOk) {
+    throw new OrgPeopleError('Inviting the person failed')
+  }
+  return {
+    personId: data.personId,
+    inviteUrl: typeof link === 'string' ? link : null,
+    emailed: data.emailed === true,
+    created: data.created === true,
   }
 }

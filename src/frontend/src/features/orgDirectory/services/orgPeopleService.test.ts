@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError } from 'axios'
 import { api } from '@/core/services/api'
 import {
+  inviteExistingOrgPerson,
   inviteOrgPerson,
   issuePasswordResetLink,
   listOrgPeople,
@@ -49,6 +50,42 @@ describe('orgPeopleService', () => {
     expect(result).toEqual({
       personId: 'p9', inviteUrl: 'https://x/staff/invite#token=t', emailed: false, created: true,
     })
+  })
+
+  it('invites an existing person at the encoded id with the email only (#849)', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      data: { personId: 'a/b', inviteUrl: 'https://x/staff/invite#token=t', emailed: false, created: false },
+    })
+    const result = await inviteExistingOrgPerson({ personId: 'a/b', email: 'a@b.org' })
+    expect(api.post).toHaveBeenCalledWith('/org/people/a%2Fb/invite', { email: 'a@b.org' })
+    expect(result).toEqual({
+      personId: 'a/b', inviteUrl: 'https://x/staff/invite#token=t', emailed: false, created: false,
+    })
+  })
+
+  it('accepts inviteUrl null on the by-id route only (email-only once a mailer exists)', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: { personId: 'p', inviteUrl: null, emailed: true, created: false },
+    })
+    expect(await inviteExistingOrgPerson({ personId: 'p', email: 'a@b.org' })).toEqual({
+      personId: 'p', inviteUrl: null, emailed: true, created: false,
+    })
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: { personId: 'p', inviteUrl: null, emailed: true, created: true },
+    })
+    await expect(inviteOrgPerson({ email: 'a@b.org', displayName: 'Ann' })).rejects.toBeInstanceOf(OrgPeopleError)
+  })
+
+  it('carries status and code on a by-id invite failure and rejects a body without a link', async () => {
+    const error = new AxiosError('x')
+    error.response = { status: 409, data: { error: 'email-in-use' } } as never
+    vi.mocked(api.post).mockRejectedValueOnce(error)
+    const caught = await inviteExistingOrgPerson({ personId: 'p', email: 'a@b.org' }).catch((e: unknown) => e)
+    expect(caught).toBeInstanceOf(OrgPeopleError)
+    expect((caught as OrgPeopleError).status).toBe(409)
+    expect((caught as OrgPeopleError).code).toBe('email-in-use')
+    vi.mocked(api.post).mockResolvedValueOnce({ data: { personId: 'p' } })
+    await expect(inviteExistingOrgPerson({ personId: 'p', email: 'a@b.org' })).rejects.toBeInstanceOf(OrgPeopleError)
   })
 
   it('carries status and code on an invite failure and rejects a body without a link', async () => {

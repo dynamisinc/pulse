@@ -108,9 +108,10 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("POST", "/api/ops/seed-engine-content")]
     [InlineData("POST", "/api/ops/bind-participant-persona")]
     [InlineData("POST", "/api/ops/organizations")]
+    [InlineData("POST", "/api/ops/organizations/matrix-probe/admin-invite")]
     public async Task AllowlistedRoute_WithNoCredential_IsNeverRejectedByTheGate(string method, string route)
     {
-        // These sixteen (identity-auth-roles/15 added the org choice, identity-auth-roles/21 the password reset, #575b the ops org provisioning) must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
+        // These seventeen (identity-auth-roles/15 added the org choice, identity-auth-roles/21 the password reset, #575b the ops org provisioning, #847 the first-admin invite re-issue) must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
         // a missing body, 404 for an unconfigured ops secret, and 401 from /api/auth/refresh itself when no
         // refresh token is presented); the regression guarded here is narrower and exact: the GATE must not be
         // what answers. The RFC 6750 challenge header is the discriminator — only the gate writes it.
@@ -121,7 +122,7 @@ public sealed class DefaultDenySessionGateTests
         using var response = await client.SendAsync(request);
 
         response.Headers.WwwAuthenticate.Should().BeEmpty(
-            "{0} {1} is on the pre-auth allowlist and must remain reachable without a session — the four "
+            "{0} {1} is on the pre-auth allowlist and must remain reachable without a session — the five "
             + "/api/ops/* routes especially, since bootstrap runs against an empty database with no session to "
             + "present and its X-Bootstrap-Secret is checked INSIDE the handler, after the gate",
             method,

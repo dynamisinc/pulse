@@ -38,6 +38,8 @@ public sealed class OrgPeopleEndpointTests
         {
             [("GET", OrgPeopleEndpoints.PersonRoute)] = (client, id) => client.GetAsync(PersonUri(id)),
             [("PATCH", OrgPeopleEndpoints.PersonRoute)] = (client, id) => PatchAsync(client, id, "{\"disabled\":true}"),
+            [("POST", OrgPeopleEndpoints.PersonInviteRoute)] = (client, id) => client.PostAsJsonAsync(
+                new Uri($"/api/org/people/{id}/invite", UriKind.Relative), new { email = $"byid.{Guid.NewGuid():N}@example.com" }),
         };
 
     private static readonly Uri LoginUri = new("/api/auth/staff/login", UriKind.Relative);
@@ -95,9 +97,10 @@ public sealed class OrgPeopleEndpointTests
 
         var controllerRow = items.Single(i => i.GetProperty("id").GetString() == controller.ToString());
         controllerRow.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["id", "displayName", "email", "orgRole", "disabled", "disabledAt", "lockedOutUntil", "enrollments"],
+            ["id", "displayName", "email", "orgRole", "disabled", "disabledAt", "lockedOutUntil", "hasPassword", "enrollments"],
             "the wire shape is fixed, and carries no credential material");
         controllerRow.GetProperty("email").GetString().Should().Be(controllerEmail);
+        controllerRow.GetProperty("hasPassword").GetBoolean().Should().BeTrue("#848/#849: a yes/no for the seeded password, never the hash");
         controllerRow.GetProperty("orgRole").ValueKind.Should().Be(JsonValueKind.Null);
         controllerRow.GetProperty("disabled").GetBoolean().Should().BeFalse();
         var enrollment = controllerRow.GetProperty("enrollments").EnumerateArray().Should().ContainSingle(
@@ -178,10 +181,14 @@ public sealed class OrgPeopleEndpointTests
                 await missing.Content.ReadAsByteArrayAsync(), "{0}: 'exists elsewhere' must equal 'does not exist'", route);
             foreign.Content.Headers.ContentType?.ToString().Should().Be(missing.Content.Headers.ContentType?.ToString());
 
-            // Positive control: the caller's OWN person is not a 404, so the 404 above is the tenant bound.
+            // Positive control: the caller's OWN person is not a 404, so the 404 above is the tenant bound. (The by-id
+            // invite of a seeded person, who has a password and a different email, is a 409: found, then refused.)
             var (ownPerson, _) = await _world.SeedPersonAsync(org);
             using var own = await call(client, ownPerson);
-            own.StatusCode.Should().Be(HttpStatusCode.OK, "{0} on a person of the caller's own organization", route);
+            own.StatusCode.Should().Be(
+                route.Route == OrgPeopleEndpoints.PersonInviteRoute ? HttpStatusCode.Conflict : HttpStatusCode.OK,
+                "{0} on a person of the caller's own organization",
+                route);
         }
 
         await using var read = _world.ReadContext();
@@ -329,6 +336,45 @@ public sealed class OrgPeopleEndpointTests
             redeem.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a pre-promotion link cannot set the new admin's password");
             (await redeem.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"invalid-token\"}");
         }
+    }
+
+    [RequiresDockerFact]
+    public async Task Grant_ToAPersonWithNoPasswordYet_Is409PersonHasNoPassword_AndLeavesTheirInviteRedeemable()
+    {
+        // #848 (Tom, option a): granting org admin to an invitee who has not set a password would void their invite (W5)
+        // and leave no way to re-invite a peer admin. The grant is refused until they have a password; W5 is unchanged.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (_, adminToken) = await SeedAdminAsync(org);
+        var (invitee, email) = await SeedPersonWithoutPasswordAsync(org);
+        var invite = await _world.IssueAsync(CredentialTokenPurposes.Invite, invitee, org);
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        await AssertConflictAsync(await PatchAsync(client, invitee, "{\"isOrgAdmin\":true}"), OrgPeopleService.PersonHasNoPasswordError);
+
+        await using (var read = _world.ReadContext())
+        {
+            var person = await read.People.AsNoTracking().SingleAsync(p => p.Id == invitee);
+            person.OrgRole.Should().BeNull("the refused grant did not land");
+            (await read.StaffUsers.AsNoTracking().AnyAsync(u => u.Id == invitee)).Should().BeFalse("no staff facet was created");
+            (await read.CredentialTokens.AsNoTracking().SingleAsync(t => t.Id == invite.Token.Id)).UsedAt
+                .Should().BeNull("the invite is NOT voided by a refused grant");
+            (await read.OrgAuditEvents.IgnoreQueryFilters().AsNoTracking().CountAsync(a => a.SubjectPersonId == invitee))
+                .Should().Be(0, "a refused grant is not audited as done");
+        }
+
+        // The enforced order: they redeem the invite, and the grant then succeeds (and W5 still voids what is left).
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using (var redeem = await anonymous.PostAsJsonAsync(
+            new Uri("/api/auth/password/reset", UriKind.Relative),
+            new { token = invite.RawToken, newPassword = CredentialTestWorld.NewPassword }))
+        {
+            redeem.IsSuccessStatusCode.Should().BeTrue("the invite still works after the refused grant: {0}", redeem.StatusCode);
+        }
+
+        using var grant = await PatchAsync(client, invitee, "{\"isOrgAdmin\":true}");
+        grant.StatusCode.Should().Be(HttpStatusCode.OK, "{0} has set a password, so the grant is allowed", email);
+        (await grant.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("orgRole").GetString().Should().Be(Person.OrgAdminRole);
     }
 
     [RequiresDockerFact]
@@ -666,6 +712,17 @@ public sealed class OrgPeopleEndpointTests
         person.PasswordHash = new PasswordHasher<Person>().HashPassword(person, CredentialTestWorld.OldPassword);
         await using var seed = _world.ReadContext();
         seed.People.Add(person);
+        await seed.SaveChangesAsync();
+        return (id, email);
+    }
+
+    /// <summary>An invited directory person with an email but NO Pulse password yet and no staff facet (#848).</summary>
+    private async Task<(Guid Id, string Email)> SeedPersonWithoutPasswordAsync(Guid org)
+    {
+        var id = Guid.NewGuid();
+        var email = $"invitee.{id:N}@example.com";
+        await using var seed = _world.ReadContext();
+        seed.People.Add(new Person { Id = id, OrganizationId = org, DisplayName = "Invitee", Email = email, CreatedAt = DateTimeOffset.UtcNow });
         await seed.SaveChangesAsync();
         return (id, email);
     }

@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.Credentials;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.Providers;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The org admin's staff invite (identity-auth-roles/20 "Invite", #575b; ADMIN-IDENTITY-MODEL §1.1, §3.3, §7.5):
@@ -71,6 +72,15 @@ public sealed partial class OrgInviteService
 
     /// <summary>The 409 error code when a concurrent invite created the same person first (retry).</summary>
     public const string InviteConflictError = "invite-conflict";
+
+    /// <summary>
+    /// The 409 error code when the by-id invite's email is already held by ANOTHER person of the organization (the
+    /// <c>(OrganizationId, Email)</c> unique index, #849).
+    /// </summary>
+    public const string EmailInUseError = "email-in-use";
+
+    /// <summary>The 409 error code when the by-id invite's person already has a DIFFERENT email on file (#849).</summary>
+    public const string EmailMismatchError = "email-mismatch";
 
     /// <summary>The 503 error code when no frontend base URL is configured, so no link can be built.</summary>
     public const string LinkUnavailableError = "invite-link-unavailable";
@@ -285,6 +295,156 @@ public sealed partial class OrgInviteService
             InviteUrl = inviteUrl,
             Emailed = emailed,
             Created = created,
+        });
+    }
+
+    /// <summary>
+    /// Invites an EXISTING person of the caller's organization by id (#849): <c>POST /api/org/people/{personId}/invite
+    /// {email}</c>. For a person with no email on file (a legacy allowlist staffer backfilled from <c>StaffUser</c>) the
+    /// email is set in the SAME transaction as the invite, so the invite targets that person instead of creating a
+    /// duplicate. The person keeps their enrollments; they move off the allowlist when they redeem the invite.
+    /// </summary>
+    /// <remarks>
+    /// Isolation: the person is read <c>InOrganization(tenant)</c> by id, so another customer's person is the same bare
+    /// 404 as an id that never existed. The reuse rules (disabled, peer admin, already active) are the email invite's.
+    /// A person whose stored email DIFFERS from the requested one is refused (<see cref="EmailMismatchError"/>): this
+    /// action never changes an address already on file. An email held by another person of the organization is refused
+    /// by the <c>(OrganizationId, Email)</c> unique index (<see cref="EmailInUseError"/>), and nothing is written.
+    /// </remarks>
+    /// <param name="personId">The route's person id.</param>
+    /// <param name="request">The request body (may be <c>null</c>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome the endpoint maps to a status.</returns>
+    public async Task<OrgInviteResult> InvitePersonAsync(
+        Guid personId,
+        InviteExistingOrgPersonRequest? request,
+        CancellationToken cancellationToken = default)
+    {
+        var caller = await _staffCaller.ResolveAsync(cancellationToken);
+        if (caller is null)
+        {
+            return OrgInviteResult.Unauthenticated();
+        }
+
+        if (!ExerciseAdminRoles.IsOrgAdmin(caller.Role) || !caller.IsOrgScope)
+        {
+            return OrgInviteResult.Forbidden();
+        }
+
+        var email = NormalizeEmail(request?.Email);
+        if (email is null)
+        {
+            return OrgInviteResult.Invalid(InvalidEmailError);
+        }
+
+        if (!_urls.TryGetBase(out var baseUrl))
+        {
+            return OrgInviteResult.Unavailable();
+        }
+
+        var tenant = caller.OrganizationId;
+        var now = _timeProvider.GetUtcNow();
+
+        bool emailSet;
+        IssuedCredentialToken issued;
+        try
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            // #862 S-002 (the #840 rule): the caller was authorized before this transaction opened. Re-check, as a locking
+            // no-op update of their own row, that they are STILL an enabled org admin; a demotion or disable that
+            // committed meanwhile matches nothing and is a 403, and one still in flight waits behind this transaction.
+            // Lock order as OrgPeopleService (PersonSessionLock remarks): the caller first, then the target.
+            var callerStillAdmin = await _dbContext.People
+                .InOrganization(tenant)
+                .Where(p => p.Id == caller.StaffUserId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken);
+            if (callerStillAdmin != 1)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgInviteResult.Forbidden();
+            }
+
+            // Serialize concurrent invites of this person with the one person-row lock idiom (#862 S-001): a second invite
+            // waits here and its void statement then sees the first one's committed token. Zero rows for a foreign or
+            // missing id: nothing is locked, and the read below answers the bare 404.
+            await PersonSessionLock.LockAsync(_dbContext, personId, tenant, cancellationToken);
+
+            // The bare-404 pattern: another customer's person is indistinguishable from a missing one.
+            var person = await _dbContext.People
+                .InOrganization(tenant)
+                .FirstOrDefaultAsync(p => p.Id == personId, cancellationToken);
+            if (person is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgInviteResult.NotFound();
+            }
+
+            var refusal = RefuseReuse(person, caller.StaffUserId)
+                ?? (person.Email is { Length: > 0 } stored && !string.Equals(stored, email, StringComparison.OrdinalIgnoreCase)
+                    ? EmailMismatchError
+                    : null);
+            if (refusal is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgInviteResult.Conflict(refusal);
+            }
+
+            emailSet = string.IsNullOrEmpty(person.Email);
+            if (emailSet)
+            {
+                person.Email = email;
+            }
+
+            // Issued BY the calling admin, exactly as the email invite.
+            issued = await _tokens.StageIssueAsync(
+                CredentialTokenPurposes.Invite,
+                CredentialSubject.ForPerson(person.Id),
+                tenant,
+                issuedByPersonId: caller.StaffUserId,
+                now,
+                cancellationToken: cancellationToken);
+
+            _dbContext.OrgAuditEvents.Add(new OrgAuditEvent
+            {
+                Id = Guid.NewGuid(),
+                OrganizationId = tenant,
+                Kind = InviteIssuedKind,
+                Outcome = PasswordResetService.SuccessOutcome,
+                ActorPersonId = caller.StaffUserId,
+                SubjectPersonId = person.Id,
+                ExerciseId = null,
+                Payload = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{{\"actorRole\":\"{Person.OrgAdminRole}\",\"created\":false,\"emailSet\":{(emailSet ? "true" : "false")}}}"),
+                OccurredAt = now,
+            });
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
+        {
+            // The address belongs to another person of this organization (the (OrganizationId, Email) unique index). The
+            // transaction rolled back: no email was set, no token issued and nothing was audited.
+            _dbContext.ChangeTracker.Clear();
+            return OrgInviteResult.Conflict(EmailInUseError);
+        }
+
+        var inviteUrl = BuildInviteUrl(baseUrl, issued.RawToken);
+
+        // #862 (Tom, 2026-11-20), the CR-001 rule of the ops route: while this host has NO mailer the link is returned to
+        // the inviting admin for copy-link delivery. That admin could redeem it themselves and take the person's account;
+        // that risk is ACCEPTED and documented (planner guide, OPERATE.md). Once a mailer IS configured, the link goes to
+        // the address by email only and inviteUrl is null, even when the send fails (the admin re-invites).
+        var mailerConfigured = _mailer.IsConfigured;
+        var emailed = mailerConfigured && await TrySendAsync(email, inviteUrl, cancellationToken);
+        return OrgInviteResult.Ok(new OrgInviteDto
+        {
+            PersonId = personId.ToString(),
+            InviteUrl = mailerConfigured ? null : inviteUrl,
+            Emailed = emailed,
+            Created = false,
         });
     }
 

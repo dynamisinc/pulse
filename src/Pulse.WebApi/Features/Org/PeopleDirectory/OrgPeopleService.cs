@@ -79,6 +79,12 @@ public sealed partial class OrgPeopleService
     /// <summary>400: the PATCH body must carry exactly one of <c>isOrgAdmin</c> / <c>disabled</c>.</summary>
     public const string InvalidRequestError = "invalid-request";
 
+    /// <summary>
+    /// The 409 error code for an org-admin grant to a person who has no Pulse password yet (#848): the grant would void
+    /// their unused invite and a peer admin cannot be re-invited, so the grant waits until they have set a password.
+    /// </summary>
+    public const string PersonHasNoPasswordError = "person-has-no-password";
+
     /// <summary>409: the change lost a deadlock twice to a concurrent change; nothing changed, retry.</summary>
     public const string ConcurrentChangeError = "concurrent-change";
 
@@ -291,6 +297,15 @@ public sealed partial class OrgPeopleService
             {
                 if (grant && !Person.IsOrgAdmin(person.OrgRole))
                 {
+                    // #848: the grant voids every outstanding link (W5, below), and a peer admin can never be re-invited,
+                    // so granting org admin to someone who has not set a Pulse password yet would strand them with a dead
+                    // invite. Refused until they have set one: invite first, then make them an admin.
+                    if (string.IsNullOrEmpty(person.PasswordHash))
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return OrgPeopleResult.Conflict(PersonHasNoPasswordError);
+                    }
+
                     person.OrgRole = Person.OrgAdminRole;
                     await EnsureStaffFacetAsync(person, now, cancellationToken);
 
@@ -473,6 +488,7 @@ public sealed partial class OrgPeopleService
             LockedOutUntil = row.LockedOutUntil is { } until && until > now
                 ? until.ToString("O", CultureInfo.InvariantCulture)
                 : null,
+            HasPassword = row.HasPassword,
             Enrollments = byPerson[row.Id]
                 .Select(e => new OrgPersonEnrollmentDto
                 {
@@ -524,17 +540,23 @@ public sealed partial class OrgPeopleService
         Message = "{Count} revoked session(s) could not have their live connections cut; the org-directory change has committed.")]
     private partial void LogConnectionCutFailed(int count, Exception exception);
 
-    /// <summary>The materialized person projection (no credential columns are ever selected).</summary>
+    /// <summary>
+    /// The materialized person projection. No credential column is ever selected: whether a password is set is computed
+    /// in SQL (a non-null, non-empty <c>PasswordHash</c>; an empty string is no password, #862 W-001), so the hash itself
+    /// never leaves the database.
+    /// </summary>
     private sealed record PersonRow(
         Guid Id,
         string DisplayName,
         string? Email,
         string? OrgRole,
         DateTimeOffset? DisabledAt,
-        DateTimeOffset? LockedOutUntil)
+        DateTimeOffset? LockedOutUntil,
+        bool HasPassword)
     {
         public static System.Linq.Expressions.Expression<Func<Person, PersonRow>> Projection { get; } =
-            p => new PersonRow(p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil);
+            p => new PersonRow(
+                p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil, p.PasswordHash != null && p.PasswordHash != "");
     }
 
     private sealed record EnrollmentRow(Guid PersonId, Guid ExerciseId, string ExerciseName, string Role, bool IsLead);
@@ -558,7 +580,7 @@ public enum OrgPeopleOutcome
     /// <summary>Missing or foreign-org person — the bare 404.</summary>
     NotFound,
 
-    /// <summary>409 with an error code (<c>last-org-admin</c>, <c>cannot-disable-self</c>).</summary>
+    /// <summary>409 with an error code (<c>last-org-admin</c>, <c>cannot-disable-self</c>, <c>person-has-no-password</c>).</summary>
     Conflict,
 }
 
