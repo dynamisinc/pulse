@@ -203,7 +203,7 @@ public sealed class StaffAssignmentService
         // change exactly like a sign-in mint: the caller's person row is locked FIRST, then the enrollment is read under
         // it. A change that locked first has committed (its enrollment is gone or changed by the read below); one that
         // locks after waits for this commit and its sweep sees the re-bound session. See PersonSessionLock.
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await AmbientTransaction.BeginUnlessAmbientAsync(_dbContext, cancellationToken);
         await PersonSessionLock.LockAsync(_dbContext, current.StaffUserId, exercise.OrganizationId, cancellationToken);
 
         // Authorization: the caller must hold a STAFF enrollment in the target exercise (never one with an account,
@@ -245,6 +245,18 @@ public sealed class StaffAssignmentService
             return SetActiveExerciseResult.Unauthenticated();
         }
 
+        // S-002 (#858): re-checked UNDER the person lock. A sweep that committed while this request was in flight (a
+        // disable, a credential change) has revoked this session or disabled its person; re-binding it then would hand
+        // a dead session a fresh grant. Fail closed, as for any session that no longer authenticates.
+        var callerDisabled = await _dbContext.People
+            .AsNoTracking()
+            .InOrganization(exercise.OrganizationId)
+            .AnyAsync(p => p.Id == current.StaffUserId && p.DisabledAt != null, cancellationToken);
+        if (session.RevokedAt is not null || callerDisabled)
+        {
+            return SetActiveExerciseResult.Unauthenticated();
+        }
+
         var now = DateTimeOffset.UtcNow;
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
         var previousExerciseId = session.ExerciseId;
@@ -279,7 +291,7 @@ public sealed class StaffAssignmentService
         });
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitIfOwnedAsync(cancellationToken);
 
         // identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2, realtime scope): the switch MOVES the session's live hub
         // connections — out of the old exercise's groups now (no further old-exercise push reaches them), and closed so

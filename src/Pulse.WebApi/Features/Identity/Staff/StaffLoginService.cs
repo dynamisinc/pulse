@@ -162,8 +162,9 @@ public sealed class StaffLoginService
         // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person
         //    lockout and disable as the org sign-in. A locked-out or disabled person is refused with the
         //    uniform failure WITHOUT a real verification (the attempt's padding still spends its fixed PBKDF2
-        //    work, #602 M-5). Allowlist-only staff (no Pulse password) are not matched here, so their legacy
-        //    behaviour is unchanged.
+        //    work, #602 M-5). Allowlist-only staff (no Pulse password) are not matched here and get no lockout; but
+        //    since #839 a DISABLED allowlist-only staffer is refused too, by the mint's person lock below (it
+        //    requires DisabledAt IS NULL).
         var passwordPerson = await PulsePasswordIdentityProvider.FindPasswordPersonAsync(
             _dbContext, username, exercise.OrganizationId, cancellationToken);
         if (passwordPerson is not null && StaffSignInLockout.IsBlocked(passwordPerson, now))
@@ -199,12 +200,6 @@ public sealed class StaffLoginService
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             return StaffLoginResult.Rejected();
-        }
-
-        if (passwordPerson is not null)
-        {
-            // The Pulse password verified: clear the counter, as the org sign-in does (saved with whichever event follows).
-            await StaffSignInLockout.RecordSuccessAsync(_dbContext, passwordPerson, cancellationToken);
         }
 
         var identity = authentication.Identity;
@@ -273,18 +268,29 @@ public sealed class StaffLoginService
         // and only then reads the enrollment and inserts the session. A change that locked first has committed, so a
         // changed person is refused here and a removed enrollment is not found below; a change that locks after this
         // waits for the commit and its sweep sees this session. See PersonSessionLock.
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await AmbientTransaction.BeginUnlessAmbientAsync(_dbContext, cancellationToken);
         var verifiedPasswordHash = passwordPerson is not null && passwordPerson.Id == staffUser.Id ? passwordPerson.PasswordHash : null;
         if (!await PersonSessionLock.TryLockForMintAsync(
                 _dbContext, staffUser.Id, exercise.OrganizationId, verifiedPasswordHash, requireOrgAdmin: false, cancellationToken))
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // S-003: nothing staged on the strength of the replaced person (the display-name refresh, anything tracked)
+            // lands, and the lockout counter was never cleared for a password that has since been replaced — only the
+            // failure telemetry is written.
+            await transaction.RollbackIfOwnedAsync(cancellationToken);
+            _dbContext.ChangeTracker.Clear();
             _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
                 exerciseId, role: null, actingHumanId: null, outcome: FailureOutcomePayload,
                 now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: null));
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             return StaffLoginResult.Rejected();
+        }
+
+        if (passwordPerson is not null)
+        {
+            // The Pulse password verified AND is still the person's password (the lock above): clear the counter, as the
+            // org sign-in does. Saved with whichever event follows, in this transaction.
+            await StaffSignInLockout.RecordSuccessAsync(_dbContext, passwordPerson, cancellationToken);
         }
 
         // 6. Authorization: the staff user must hold a STAFF enrollment in the selected exercise (identity-auth-roles/16:
@@ -309,7 +315,7 @@ public sealed class StaffLoginService
                 exerciseId, role: null, actingHumanId: staffUser.Id.ToString(), outcome: FailureOutcomePayload,
                 now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: staffUser.Id));
             await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitIfOwnedAsync(cancellationToken);
 
             return StaffLoginResult.NotAssigned();
         }
@@ -344,7 +350,8 @@ public sealed class StaffLoginService
                 PersonId = staffUser.Id,
             },
             cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitIfOwnedAsync(cancellationToken);
+        await _sessionIssuer.CutDeferredConnectionsAsync(issued, cancellationToken);
 
         // isLead is read LIVE from the enrollment (never stored on the session) — here, the one just authorized.
         return StaffLoginResult.Authenticated(issued, assignment.IsLead);

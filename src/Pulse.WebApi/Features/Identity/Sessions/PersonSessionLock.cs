@@ -21,12 +21,20 @@ using Pulse.WebApi.Data.Entities;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Lock order (deadlock safety).</b> Every participant locks the person row(s) FIRST and the person's sessions after:
-/// the mint (person → its grant read, which takes no lock → the session insert), a credential change (person → issuer →
-/// its token → sessions), an org-directory change (the organization's enabled admin rows → the caller → the target →
-/// sessions; the mint holds at most one person row and never an admin row it did not already hold, so no cycle), and an
-/// enrollment change (person → the exercise's enrollment rows → sessions; the mint takes no enrollment lock). A mint
-/// holds ONE person row, so it can never be half of a person-row cycle.
+    /// <b>Lock order and deadlocks.</b> Every participant locks person rows FIRST and the person's sessions after:
+/// <list type="bullet">
+///   <item><description>the mint: ONE person row → its grant read (no lock) → the session insert;</description></item>
+///   <item><description>a credential change: the issuer → the person → its token → sessions;</description></item>
+///   <item><description>an org-directory change: the organization's enabled admin rows → the caller → the target →
+///   sessions;</description></item>
+///   <item><description>an enrollment change: the caller and the target in ONE statement → the exercise's enrollment
+///   rows → sessions.</description></item>
+/// </list>
+/// The MINT can never be part of a deadlock cycle: it holds exactly one person row and waits for nothing else that a
+/// change holds while waiting for it. Two CHANGE paths can still deadlock with each other — for example, an
+/// enrollment change and an org-directory change that each hold a person row the other wants. Every change path
+/// recovers: SQL Server rolls the victim back whole, and the service retries it once from the top (then answers a
+/// clean 409, or for a credential change the uniform invalid-token).
 /// </para>
 /// <para>
 /// <b>Tenant-bounded.</b> Every statement carries <c>InOrganization</c>: a person id from another organization matches
@@ -71,8 +79,9 @@ public static class PersonSessionLock
     /// <param name="requireOrgAdmin">Whether the session is org scope (needs the org-admin grant).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
-    /// <c>true</c> to mint (the row is locked, or there is no person row at all — a legacy staff facet with nothing a
-    /// change could sweep); <c>false</c> when the person changed since the sign-in read it (the uniform refusal).
+    /// <c>true</c> to mint (the row is locked, or there is no person row with this id in ANY organization — a legacy
+    /// staff facet with nothing a change could sweep); <c>false</c> when the person changed since the sign-in read it, or
+    /// the id names a person of another organization (the uniform refusal).
     /// </returns>
     public static async Task<bool> TryLockForMintAsync(
         PulseDbContext dbContext,
@@ -98,10 +107,25 @@ public static class PersonSessionLock
             return true;
         }
 
-        // Refused, unless there is no person row at all (nothing a change could sweep, so nothing to serialize with). An
-        // org-scope session always has a person, so it is never minted from this branch.
-        return !requireOrgAdmin && !await dbContext.People
-            .InOrganization(organizationId)
-            .AnyAsync(p => p.Id == personId, cancellationToken);
+        if (requireOrgAdmin)
+        {
+            // An org-scope session always has a person, so there is no legacy exception to make.
+            return false;
+        }
+
+        // A person row exists in the organization but no longer matches what was verified: refused.
+        if (await dbContext.People.InOrganization(organizationId).AnyAsync(p => p.Id == personId, cancellationToken))
+        {
+            return false;
+        }
+
+        // org-scope-exempt(TenantChecked): an existence probe (no row returned) for this id in ANOTHER organization;
+        // the explicit OrganizationId comparison is the point, and a match only ever REFUSES the mint.
+        var inAnotherOrganization = await dbContext.People
+            .AnyAsync(p => p.Id == personId && p.OrganizationId != organizationId, cancellationToken);
+
+        // Legacy staff (S-001): a staff facet with NO person row anywhere has nothing a change could sweep, so there is
+        // nothing to serialize with and the mint proceeds unlocked. A person row in another organization is refused.
+        return !inAnotherOrganization;
     }
 }

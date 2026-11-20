@@ -234,7 +234,13 @@ public sealed partial class EnrollmentService
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // W-002 (#840): the caller's own planner grant, re-checked and locked in this transaction.
+            // W-002 (#840): the caller's own person (still enabled) and planner grant, re-checked and locked in this
+            // transaction, person row first.
+            if (await LockCallerAndTargetPeopleAsync(caller, targetPersonId: null, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
+
             if (await LockCallerPlannerAsync(caller, exercise.Id, cancellationToken) is { } staleCaller)
             {
                 return staleCaller;
@@ -372,7 +378,12 @@ public sealed partial class EnrollmentService
 
         // W-002 (#840): the grant commits in one transaction that first re-checks (and locks) the caller's own planner
         // grant, so a planner demoted or removed while this request is in flight cannot still grant.
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await AmbientTransaction.BeginUnlessAmbientAsync(_dbContext, cancellationToken);
+        if (await LockCallerAndTargetPeopleAsync(caller, targetPersonId: null, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+        {
+            return stalePerson;
+        }
+
         if (await LockCallerPlannerAsync(caller, exercise.Id, cancellationToken) is { } staleCaller)
         {
             return staleCaller;
@@ -433,7 +444,7 @@ public sealed partial class EnrollmentService
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitIfOwnedAsync(cancellationToken);
         }
         catch (DbUpdateException exception) when (IsUniqueKeyViolation(exception))
         {
@@ -489,8 +500,13 @@ public sealed partial class EnrollmentService
         IReadOnlyList<Guid> revoked;
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
-            // #839: the target's person row first, serializing this sweep against a concurrent sign-in or exercise switch.
-            await LockTargetPersonAsync(enrollment, exercise, cancellationToken);
+            // #839 + #858 review: the caller's and the target's person rows first — the caller only while still enabled
+            // (and, at org scope, still an org admin), the target to serialize this sweep against a concurrent sign-in or
+            // exercise switch.
+            if (await LockCallerAndTargetPeopleAsync(caller, enrollment.PersonId, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
 
             // Story 20: lock the exercise's planner set (and the target), re-read the target, and refuse the last planner —
             // all inside the transaction the write commits in.
@@ -558,8 +574,13 @@ public sealed partial class EnrollmentService
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // #839: the target's person row first, serializing this sweep against a concurrent sign-in or exercise switch.
-            await LockTargetPersonAsync(enrollment, exercise, cancellationToken);
+            // #839 + #858 review: the caller's and the target's person rows first — the caller only while still enabled
+            // (and, at org scope, still an org admin), the target to serialize this sweep against a concurrent sign-in or
+            // exercise switch.
+            if (await LockCallerAndTargetPeopleAsync(caller, enrollment.PersonId, exercise.OrganizationId, cancellationToken) is { } stalePerson)
+            {
+                return stalePerson;
+            }
 
             // Story 20: the last-planner guard, counted under a lock in THIS transaction (see LockAndGuardLastPlannerAsync).
             if (await LockAndGuardLastPlannerAsync(caller, enrollment, newRole: null, cancellationToken) is { } refused)
@@ -828,14 +849,52 @@ public sealed partial class EnrollmentService
     }
 
     /// <summary>
-    /// #839: takes the target person's row lock (see <see cref="PersonSessionLock"/>) before anything else in
-    /// a change that sweeps their sessions on this exercise, so a concurrent sign-in or exercise switch either committed
-    /// first (and its session is swept below) or waits and then reads the changed enrollment.
+    /// Locks, in ONE statement, the caller's person row — only while the caller is still enabled and, for an org-scope
+    /// caller, still an org admin (#858 review: an org-scope caller's whole authority is that grant) — and the target's
+    /// person row (#839: serializing a session sweep against a concurrent sign-in or exercise switch; see
+    /// <see cref="PersonSessionLock"/>). One statement takes both rows in key order, so two changes that name the same
+    /// two people the other way round cannot deadlock on them.
     /// </summary>
-    private Task LockTargetPersonAsync(Enrollment enrollment, Exercise exercise, CancellationToken cancellationToken) =>
-        enrollment.PersonId is { } personId
-            ? PersonSessionLock.LockAsync(_dbContext, personId, exercise.OrganizationId, cancellationToken)
-            : Task.CompletedTask;
+    /// <param name="caller">The authorized caller.</param>
+    /// <param name="targetPersonId">The person whose sessions the change sweeps, or <c>null</c> when it sweeps none.</param>
+    /// <param name="organizationId">The exercise's organization (the caller's own, already bounded).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>null</c> to proceed; otherwise the 403 for a caller who no longer holds their authority.</returns>
+    private async Task<EnrollmentResult?> LockCallerAndTargetPeopleAsync(
+        StaffCaller caller,
+        Guid? targetPersonId,
+        Guid organizationId,
+        CancellationToken cancellationToken)
+    {
+        var callerId = caller.StaffUserId;
+        var orgScope = caller.IsOrgScope;
+
+        if (targetPersonId is not { } targetId || targetId == callerId)
+        {
+            var callerLocked = await _dbContext.People
+                .InOrganization(organizationId)
+                .Where(p => p.Id == callerId && p.DisabledAt == null && (!orgScope || p.OrgRole == Person.OrgAdminRole))
+                .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
+            return callerLocked == 1 ? null : EnrollmentResult.Forbidden();
+        }
+
+        var locked = await _dbContext.People
+            .InOrganization(organizationId)
+            .Where(p => p.Id == targetId
+                || (p.Id == callerId && p.DisabledAt == null && (!orgScope || p.OrgRole == Person.OrgAdminRole)))
+            .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
+        if (locked == 2)
+        {
+            return null;
+        }
+
+        // One row: it is the caller only when the target has no person row (nothing to sweep against); otherwise the
+        // caller did not match.
+        var targetExists = await _dbContext.People
+            .InOrganization(organizationId)
+            .AnyAsync(p => p.Id == targetId, cancellationToken);
+        return locked == 1 && !targetExists ? null : EnrollmentResult.Forbidden();
+    }
 
     /// <summary>
     /// W-002 (#840): for an exercise-scope caller, re-checks INSIDE the open transaction that they still hold an active
