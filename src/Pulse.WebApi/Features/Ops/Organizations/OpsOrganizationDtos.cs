@@ -18,13 +18,12 @@ public sealed class CreateOrganizationRequest
     public string? AdminDisplayName { get; init; }
 }
 
-/// <summary>The provisioning's one-time answer.</summary>
+/// <summary>
+/// The provisioning's one-time answer. It carries no organization id: the tenant id never reaches the wire (XC-002,
+/// <c>OrganizationIsNotWireVisibleTests</c>); the unique slug and name identify the new organization to the operator.
+/// </summary>
 public sealed class CreatedOrganizationDto
 {
-    /// <summary>The new organization's id.</summary>
-    [JsonPropertyName("organizationId")]
-    public required string OrganizationId { get; init; }
-
     /// <summary>The organization's name, as stored (trimmed).</summary>
     [JsonPropertyName("name")]
     public required string Name { get; init; }
@@ -37,16 +36,19 @@ public sealed class CreatedOrganizationDto
     [JsonPropertyName("adminPersonId")]
     public required string AdminPersonId { get; init; }
 
-    /// <summary>The single-use invite link for the first admin. Shown once; never log it.</summary>
+    /// <summary>
+    /// The single-use invite link for the first admin, returned ONLY while this host has no mailer (the CR-001 exception,
+    /// Tom 2026-11-20); <c>null</c> once a mailer is configured, when the link goes by email only. Shown once; never log it.
+    /// </summary>
     [JsonPropertyName("inviteUrl")]
-    public required string InviteUrl { get; init; }
+    public required string? InviteUrl { get; init; }
 
     /// <summary>Whether the provider accepted the invite email (always <c>false</c> on a host without email).</summary>
     [JsonPropertyName("emailed")]
     public required bool Emailed { get; init; }
 
     /// <inheritdoc />
-    public override string ToString() => $"CreatedOrganizationDto {{ OrganizationId = {OrganizationId}, Slug = {Slug} }}";
+    public override string ToString() => $"CreatedOrganizationDto {{ Slug = {Slug} }}";
 }
 
 /// <summary>The error body of the ops organization route.</summary>

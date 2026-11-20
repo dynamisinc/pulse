@@ -93,10 +93,11 @@ public sealed class CredentialTokenService
     /// <remarks>
     /// <b>The null-issuer rule (orchestrator decision, #665).</b> A token with no issuer may only be created by a path that
     /// delivers it to the person THEMSELVES: the first-admin invite to the invited address (#575b) and forgot-password to the
-    /// account's own address (later). Never to a third party — with ONE recorded exception (#575b, pending the orchestrator's
-    /// sign-off): while email is off, <c>POST /api/ops/organizations</c> also returns the first admin's invite link to the
-    /// bootstrap-secret holder (the platform operator) for copy-link delivery; the subject is a brand-new admin with no prior
-    /// credential, of a tenant that same call created (see <c>OpsOrganizationService</c>). <see cref="PasswordResetService"/> trusts a null issuer at
+    /// account's own address (later). Never to a third party — with ONE recorded exception (#575b CR-001, accepted by Tom on
+    /// 2026-11-20): while the host has NO mailer, <c>POST /api/ops/organizations</c> also returns the first admin's invite link
+    /// to the bootstrap-secret holder (the platform operator) for copy-link delivery; once a mailer is configured it goes by
+    /// email only. The subject is a brand-new admin with no prior credential, of a tenant that same call created (see
+    /// <c>OpsOrganizationService</c>). <see cref="PasswordResetService"/> trusts a null issuer at
     /// redemption (its W5 peer-admin check skips it), so this is where that trust is earned: #575b and forgot-password MUST
     /// pass <paramref name="deliverToEmail"/>. A violation throws <see cref="InvalidOperationException"/> rather than
     /// returning a refusal: the delivery target is chosen by server code, never by a request, so a mismatch is a programming

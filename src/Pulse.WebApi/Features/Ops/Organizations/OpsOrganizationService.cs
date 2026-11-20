@@ -38,11 +38,13 @@ using Pulse.WebApi.Features.Org.PeopleDirectory;
 /// (<see cref="PasswordResetService"/>); W5 guards against a PEER admin holding a link, and the ops caller is no peer.
 /// </para>
 /// <para>
-/// <b>Accepted trust, stated plainly.</b> While email is off, the same link is ALSO returned in the 201 to the ops caller,
-/// so whoever holds the bootstrap secret can set the first admin's password of each NEW organization. That is the §7.6
-/// design — the secret holder is the Dynamis operator provisioning the tenant, who could equally create the org with an
-/// address they control — and it reaches only a tenant this very call created (an existing organization's people are
-/// never touched here). Once ACS email is configured, a follow-up can stop returning the link.
+/// <b>The CR-001 exception (accepted by Tom, 2026-11-20).</b> While this host has NO mailer
+/// (<see cref="IPulseMailer.IsConfigured"/> false — every environment today), the link is returned in the 201 to the ops
+/// caller for copy-link delivery, so whoever holds the bootstrap secret can set the first admin's password of each NEW
+/// organization. That is the §7.6 design: the secret holder is the Dynamis operator provisioning the tenant, who could
+/// equally create the org with an address they control, and it reaches only a tenant this very call created. Once a
+/// mailer IS configured, the link goes to the admin's own address by email only and the 201's <c>inviteUrl</c> is
+/// <c>null</c>.
 /// </para>
 /// <para>
 /// <b>Audit.</b> Two <see cref="OrgAuditEvent"/>s in the new organization, in the same unit of work:
@@ -222,15 +224,19 @@ public sealed partial class OpsOrganizationService
         }
 
         var inviteUrl = OrgInviteService.BuildInviteUrl(baseUrl, issued.RawToken);
-        var emailed = await TrySendAsync(email, inviteUrl, cancellationToken);
+
+        // CR-001 (Tom, 2026-11-20): the link is handed to the ops caller ONLY while this host has no mailer. Once a mailer is
+        // configured the link goes to the admin's own address by email only, and the 201 carries none — even if that send
+        // fails (the operator then needs a re-issue, never a copy of the link).
+        var mailerConfigured = _mailer.IsConfigured;
+        var emailed = mailerConfigured && await TrySendAsync(email, inviteUrl, cancellationToken);
 
         return OpsOrganizationResult.Created(new CreatedOrganizationDto
         {
-            OrganizationId = organizationId.ToString(),
             Name = name,
             Slug = slug,
             AdminPersonId = adminId.ToString(),
-            InviteUrl = inviteUrl,
+            InviteUrl = mailerConfigured ? null : inviteUrl,
             Emailed = emailed,
         });
     }

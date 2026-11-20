@@ -122,7 +122,8 @@ public sealed partial class PasswordResetService
         // issued it themselves. A token with no issuer is not a peer's link: CredentialTokenService.StageIssueAsync only
         // creates one for SELF-DELIVERY to the subject's own email (the null-issuer rule), so it is not a peer's link. The one
         // recorded exception is #575b's platform-provisioned first-admin invite, which the ops caller (the bootstrap-secret
-        // holder, not a peer admin) also receives for copy-link delivery while email is off — see OpsOrganizationService.
+        // holder, not a peer admin) also receives for copy-link delivery only while the host has no mailer (CR-001, accepted
+        // by Tom 2026-11-20) — see OpsOrganizationService.
         if (Person.IsOrgAdmin(person.OrgRole) && token.IssuedByPersonId is { } issuer && issuer != person.Id)
         {
             return PasswordResetResult.Invalid(InvalidTokenError);

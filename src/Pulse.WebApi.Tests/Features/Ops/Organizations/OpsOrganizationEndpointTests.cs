@@ -10,8 +10,11 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Credentials;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.Organizations;
 using Pulse.WebApi.Features.Org.PeopleDirectory;
@@ -92,7 +95,7 @@ public sealed class OpsOrganizationEndpointTests
         response.Headers.CacheControl?.NoStore.Should().BeTrue("the body carries a single-use credential link");
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["organizationId", "name", "slug", "adminPersonId", "inviteUrl", "emailed"]);
+            ["name", "slug", "adminPersonId", "inviteUrl", "emailed"]);
         body.GetProperty("name").GetString().Should().Be(name);
         body.GetProperty("slug").GetString().Should().Be($"lantern-county-{unique}");
         body.GetProperty("emailed").GetBoolean().Should().BeFalse();
@@ -100,12 +103,12 @@ public sealed class OpsOrganizationEndpointTests
         inviteUrl.Should().StartWith($"{CredentialTestWorld.FrontendBaseUrl}{OrgInviteService.StaffInvitePath}#token=");
         var rawToken = OrgInviteEndpointTests.TokenOf(inviteUrl);
 
-        var org = Guid.Parse(body.GetProperty("organizationId").GetString()!);
         var admin = Guid.Parse(body.GetProperty("adminPersonId").GetString()!);
 
         await using (var read = _world.ReadContext())
         {
-            (await read.Organizations.AsNoTracking().SingleAsync(o => o.Id == org)).Slug.Should().Be($"lantern-county-{unique}");
+            body.TryGetProperty("organizationId", out _).Should().BeFalse("the tenant id never reaches the wire (XC-002)");
+            var org = (await read.Organizations.AsNoTracking().SingleAsync(o => o.Slug == $"lantern-county-{unique}")).Id;
 
             var person = await read.People.AsNoTracking().SingleAsync(p => p.Id == admin);
             person.OrganizationId.Should().Be(org);
@@ -194,6 +197,37 @@ public sealed class OpsOrganizationEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task WithAMailerConfigured_TheLinkGoesByEmailOnly_AndThe201CarriesNoLink()
+    {
+        // CR-001 (Tom, 2026-11-20): the ops caller receives the first admin's link ONLY while the host has no mailer.
+        var mailer = new RecordingMailer();
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var email = $"mailed.{unique}@example.com";
+
+        await using var factory = new CredentialProbeFactory(
+            _fixture.ConnectionString!,
+            configureServices: services =>
+            {
+                services.RemoveAll<IPulseMailer>();
+                services.AddSingleton<IPulseMailer>(mailer);
+            },
+            settings: SecretSettings);
+        using var client = CredentialTestWorld.CreateClient(factory);
+        using var response = await PostAsync(client, new { name = $"Mailed Org {unique}", adminEmail = email }, Secret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("inviteUrl").ValueKind.Should().Be(JsonValueKind.Null, "a configured mailer means email only");
+        body.GetProperty("emailed").GetBoolean().Should().BeTrue();
+
+        var sent = mailer.Sent.Should().ContainSingle().Which;
+        sent.Purpose.Should().Be(CredentialTokenPurposes.Invite);
+        sent.RecipientAddress.Should().Be(email, "the admin's OWN address — the null-issuer rule");
+        sent.Link.Should().StartWith($"{CredentialTestWorld.FrontendBaseUrl}{OrgInviteService.StaffInvitePath}#token=");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(OrgInviteEndpointTests.TokenOf(sent.Link));
+    }
+
+    [RequiresDockerFact]
     public async Task ABadBody_Is400_WithTheFieldsCode_AndNoFrontendBaseUrl_Is503()
     {
         await using (var factory = new CredentialProbeFactory(_fixture.ConnectionString!, settings: SecretSettings))
@@ -233,5 +267,18 @@ public sealed class OpsOrganizationEndpointTests
         }
 
         return client.SendAsync(request);
+    }
+
+    private sealed class RecordingMailer : IPulseMailer
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<CredentialMail> Sent { get; } = new();
+
+        public bool IsConfigured => true;
+
+        public Task<LinkMailSendOutcome> SendCredentialLinkAsync(CredentialMail mail, System.Threading.CancellationToken cancellationToken)
+        {
+            Sent.Enqueue(mail);
+            return Task.FromResult(LinkMailSendOutcome.Sent);
+        }
     }
 }
