@@ -321,6 +321,11 @@ test.describe('alert bar: emergency + pause overlay interplay (Tom, 10/16)', () 
       window.scrollTo(0, 600)
     })
     const band = await boxOf(page.getByTestId('pulse-alert-bar'))
+    // Let feed videos settle (metadata loaded, or swapped for the unplayable fallback) so a
+    // late media error cannot change the page text between the two snapshots.
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="video-player"]')]
+      .every(player => player.querySelector('[data-testid="video-unplayable"]') !== null ||
+        (player.querySelector('video')?.readyState ?? 0) >= 1))
     const before = await page.evaluate(() => document.body.innerText)
     const points = [0.05, 0.5, 0.95].map(frac => ({
       x: band.x + band.width * (0.1 + frac * 0.8),

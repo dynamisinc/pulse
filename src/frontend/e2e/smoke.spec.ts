@@ -22,11 +22,12 @@ test('boots on the mock participant session and shows the feed', async ({ page }
 test('a participant cannot load /staff/console content', async ({ page }) => {
   await signInAs(page, 'participant')
   await page.goto('/staff/console')
+  // An unknown participant path renders the in-shell, fiction-safe not-found (no redirect).
+  // Wait for it first, so the negative check below runs against a rendered page.
+  await expect(page.getByRole('region', { name: 'Page not found' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Channel navigation' })).toBeVisible()
   // Staff console chrome and the controller launcher never render for a participant.
   await expect(page.getByText(/run sheet|inject|controller console/i)).toHaveCount(0)
-  await expect(page.getByRole('navigation', { name: 'Channel navigation' })).toBeVisible()
-  // An unknown participant path renders the in-shell, fiction-safe not-found (no redirect).
-  await expect(page.getByRole('region', { name: 'Page not found' })).toBeVisible()
 })
 
 test('the controller role seam reaches the staff console', async ({ page }) => {
