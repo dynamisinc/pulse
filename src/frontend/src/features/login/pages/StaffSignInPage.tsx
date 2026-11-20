@@ -46,9 +46,9 @@
  * `staffOrgChoose`. An expired or used token returns to the form with a plain message. The email
  * field also takes an ALLOWLIST (break-glass) username, which the backend accepts on this route
  * (so it is a text input, not `type="email"`). Credentials-type refusals (400, 401, 403, 429)
- * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password, and so does a 5xx (a
- * login 5xx can only follow a matching password, so a distinct message would be an oracle). A
- * network failure and a malformed reply have their own retry messages and KEEP the password.
+ * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password. Any 5xx, a network
+ * failure and a malformed reply never use that message: each has its own retry message and KEEPS
+ * the password (see `handleSignInFailure`; the residual backend risk is tracked in #865).
  * Nothing says
  * whether an email or org exists. The password is cleared once a reply arrives; never logged.
  *
@@ -141,7 +141,7 @@ export const UNIFORM_FAILURE_MESSAGE =
 /** Shown when the org choice is refused (expired after 2 minutes, already used, or mismatched). */
 const CHOICE_EXPIRED_MESSAGE = 'Your organization choice expired. Sign in again.'
 
-/** 502/503/504 or a 5xx without the app's body: infrastructure, never a credentials verdict. */
+/** Any 5xx: the server or something in front of it failed; the person keeps what they typed. */
 const INFRASTRUCTURE_MESSAGE = "Pulse couldn't be reached just now. Try again."
 
 /** A malformed reply or unexpected error: never worded as a credentials failure. */
@@ -481,22 +481,26 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
   }
 
   /**
-   * Copy for a failed sign-in. Credentials-type refusals (400, 401, 403, 429 and anything else
-   * the server answered) stay uniform and clear the password; 429 cannot be split out without
-   * hinting at a lock. A 500 that carries the app's own ProblemDetails body is uniform too: the
-   * backend can only fail that way after the password matched (`OrgStaffLoginService.cs`, the
-   * save and session-issue steps around lines 598-636), so a distinct message could tell an
-   * attacker the password was right. A malformed 2xx is uniform for the same reason (a 2xx only
-   * follows a match). Gateway failures (502/503/504, or a 5xx without the app's body), a missing
-   * response and an unexpected error never say anything about the credentials: they say so, and
-   * KEEP what was typed so the person can retry, with focus back where they were.
+   * Copy for a failed sign-in. The policy, plainly:
+   *  - an HTTP 4xx refusal (400, 401, 403, 429, anything else below 500) is the ONE uniform
+   *    message and clears the password; 429 cannot be split out without hinting at a lock;
+   *  - ANY 5xx shows the infrastructure retry message and keeps the password;
+   *  - a malformed 2xx, a request-setup error and a missing response never use the credentials
+   *    message: generic or "could not reach", and the password is kept.
+   * Focus goes back to the field the person was last in, or to the password after a refusal.
+   *
+   * RESIDUAL RISK, in the backend (follow-up #865): a server fault AFTER the password matched
+   * (the save and session-issue steps in `OrgStaffLoginService.cs`, ~598-636) returns a 500
+   * while a wrong password returns a 401. The status is visible to any caller whatever this
+   * page says, so the page cannot close that; the routes must map unexpected faults to the same
+   * uniform 401.
    */
   const handleSignInFailure = (error: unknown) => {
     let keepMessage: string | null = null
     if (!(error instanceof StaffSignInError)) keepMessage = GENERIC_FAILURE_MESSAGE
     else if (error.unreachable) keepMessage = UNREACHABLE_MESSAGE
-    else if (error.status !== undefined && error.status >= 500 &&
-      !(error.status === 500 && error.problemDetails)) keepMessage = INFRASTRUCTURE_MESSAGE
+    else if (error.status === undefined) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.status >= 500) keepMessage = INFRASTRUCTURE_MESSAGE
 
     if (keepMessage !== null) {
       setErrorMessage(keepMessage)

@@ -122,8 +122,6 @@ export interface StaffSignInErrorInit {
   readonly serverMessage?: string
   /** True when the request got no answer (network failure or timeout), not a bad body. */
   readonly unreachable?: boolean
-  /** True when the error body is the app's own ProblemDetails (not a gateway or proxy page). */
-  readonly problemDetails?: boolean
   readonly cause?: unknown
 }
 
@@ -131,7 +129,6 @@ export class StaffSignInError extends Error {
   readonly status?: number
   readonly serverMessage?: string
   readonly unreachable: boolean
-  readonly problemDetails: boolean
 
   constructor(message: string, init: StaffSignInErrorInit = {}) {
     super(message)
@@ -139,7 +136,6 @@ export class StaffSignInError extends Error {
     this.status = init.status
     this.serverMessage = init.serverMessage
     this.unreachable = init.unreachable ?? false
-    this.problemDetails = init.problemDetails ?? false
     if (init.cause !== undefined) {
       this.cause = init.cause
     }
@@ -155,13 +151,6 @@ function isStaffLoginEnvelope(value: unknown): value is StaffLoginEnvelope {
     'session' in body &&
     (body.refreshToken === undefined || typeof body.refreshToken === 'string')
   )
-}
-
-/** RFC 9457 ProblemDetails as the app emits it: a numeric `status` and a string `title`. */
-function isProblemDetails(data: unknown): boolean {
-  if (typeof data !== 'object' || data === null) return false
-  const body = data as Record<string, unknown>
-  return typeof body.status === 'number' && typeof body.title === 'string'
 }
 
 /** Pulls a human-readable reason off a server error body (string or object). */
@@ -194,7 +183,6 @@ function toStaffSignInError(error: unknown, fallbackMessage: string): StaffSignI
       status: error.response?.status,
       serverMessage: extractServerMessage(error.response?.data),
       unreachable: error.response === undefined,
-      problemDetails: isProblemDetails(error.response?.data),
     })
   }
   if (error instanceof Error) {

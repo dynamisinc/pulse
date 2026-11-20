@@ -402,14 +402,6 @@ describe('StaffSignInPage — focus', () => {
 })
 
 describe('StaffSignInPage — messages, slug and choice edge cases', () => {
-  it('treats a malformed 200 as uniform (a 2xx only follows a matching password)', async () => {
-    mockPost.mockResolvedValue({ data: {} } as PostResult)
-    renderPage()
-    await signIn('pat@example.org', 'pw-correct-horse')
-    expect(await screen.findByRole('alert')).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
-    expect(screen.getByLabelText(/^password/i)).toHaveValue('')
-  })
-
   it('does not show the credentials message when completing the sign-in throws', async () => {
     mockPost.mockResolvedValue({ data: ORG_SESSION } as PostResult)
     mockSetTokens.mockImplementation(() => { throw new Error('storage full') })
@@ -477,46 +469,29 @@ describe('StaffSignInPage — messages, slug and choice edge cases', () => {
 })
 
 describe('StaffSignInPage — failures that keep what was typed', () => {
-  it.each([502, 503, 504])(
-    'shows a retry message for a gateway %i and keeps the password',
+  it.each([500, 501, 502, 503, 504])(
+    'shows the infrastructure message for a %i and keeps the password',
     async status => {
       mockPost.mockRejectedValue(refusal(status))
       renderPage()
       await signIn('pat@example.org', 'pw-correct-horse')
       const alert = await screen.findByRole('alert')
-      expect(alert).toHaveTextContent(/couldn't be reached just now/i)
-      expect(alert).not.toHaveTextContent(/match/i)
+      expect(alert).toHaveTextContent("Pulse couldn't be reached just now. Try again.")
+      expect(alert).not.toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
       const password = screen.getByLabelText(/^password/i)
       expect(password).toHaveValue('pw-correct-horse')
       expect(password).toHaveFocus()
     },
   )
 
-  it('treats a 5xx without the app body as infrastructure and keeps the password', async () => {
-    mockPost.mockRejectedValue({
-      isAxiosError: true,
-      response: { status: 500, data: '<html>Internal Server Error</html>' },
-      message: 'Request failed',
-    })
+  it('shows the generic message and keeps the password for a malformed 200', async () => {
+    mockPost.mockResolvedValue({ data: {} } as PostResult)
     renderPage()
     await signIn('pat@example.org', 'pw-correct-horse')
     const alert = await screen.findByRole('alert')
-    expect(alert).not.toHaveTextContent(/match/i)
+    expect(alert).toHaveTextContent('Something went wrong. Try again.')
+    expect(alert).not.toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
     expect(screen.getByLabelText(/^password/i)).toHaveValue('pw-correct-horse')
-  })
-
-  it('treats a 500 carrying the app ProblemDetails as uniform and clears the password', async () => {
-    mockPost.mockRejectedValue({
-      isAxiosError: true,
-      response: { status: 500, data: { title: 'An error occurred', status: 500 } },
-      message: 'Request failed',
-    })
-    renderPage()
-    await signIn('pat@example.org', 'pw-correct-horse')
-    expect(await screen.findByRole('alert')).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
-    const password = screen.getByLabelText(/^password/i)
-    expect(password).toHaveValue('')
-    expect(password).toHaveFocus()
   })
 
   it('keeps the password and the email focus for an unreachable server', async () => {
@@ -533,7 +508,6 @@ describe('StaffSignInPage — failures that keep what was typed', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByLabelText(/^email/i)).toHaveFocus())
   })
-
 })
 
 describe('StaffSignInPage — one request at a time', () => {
@@ -710,10 +684,16 @@ describe('StaffSignInPage — the first commit is already the right form', () =>
     expect(renderAndSeeLoadingPlaceholder()).toBe(true)
   })
 
-  it('does not treat a whitespace-only slug as the bare host', () => {
-    mockParams = { slug: '   ' }
-    vi.mocked(resolveExerciseContext).mockReturnValue(new Promise(() => {}))
-    renderPage()
+  it('does not carry the bare-host form over to a whitespace-only slug', async () => {
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    const view = renderPage()
+    const username = await screen.findByLabelText(/username/i)
+    await userEvent.setup().type(username, 'jpace')
+
+    mockParams = { slug: '   ' } // /o/%20%20%20 after client-side navigation from /staff/login
+    view.rerender(<StaffSignInPage />)
     expect(screen.getByTestId('staff-org-slug-invalid')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('')
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument()
   })
 })
