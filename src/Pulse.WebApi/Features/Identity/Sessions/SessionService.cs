@@ -196,10 +196,9 @@ public sealed class SessionService
             .Where(s => s.RefreshTokenHash == refreshHash)
             .WithHolderStanding(_dbContext)
             .SingleOrDefaultAsync(cancellationToken);
-        var session = row?.Session;
 
         var now = _timeProvider.GetUtcNow();
-        if (session is null ||
+        if (row is not { Session: var session } ||
             session.RevokedAt is not null ||
             session.RefreshExpiresAt is null ||
             session.RefreshExpiresAt.Value <= now)
@@ -208,7 +207,7 @@ public sealed class SessionService
             return RefreshResult.Invalid();
         }
 
-        if (!SessionHolderQueries.HolderPermits(session, row!.Holder))
+        if (!SessionHolderQueries.HolderPermits(session, row.Holder))
         {
             // #839, fail closed: the person has since been disabled, lost the org-admin grant an org-scope session needs,
             // or changed their password after this session was issued. Checked BEFORE IssuedAt is renewed below, so a
