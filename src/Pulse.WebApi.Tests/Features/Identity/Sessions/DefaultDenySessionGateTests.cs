@@ -414,8 +414,16 @@ public sealed class DefaultDenySessionGateTests
     /// token resolves to <c>null</c> (fail closed), exactly as the real authenticator does for an unknown,
     /// expired or revoked token.
     /// </summary>
+    /// <remarks>
+    /// The SAME token always resolves to the SAME session (one stable <see cref="AuthenticatedSession.SessionId"/>),
+    /// as the real authenticator does: a token names one session row. A fresh id per call made the negotiate and the
+    /// long-poll requests of one hub connection look like two different users, which ASP.NET Core's connection
+    /// dispatcher refuses with 403 ("The name of the user changed") on the 10.0 servicing runtime CI now runs.
+    /// </remarks>
     private sealed class SingleTokenSessionAuthenticator : ISessionAuthenticator
     {
+        private static readonly Guid StableSessionId = Guid.Parse("bbbbbbbb-0000-4000-8000-00000000000b");
+
         private readonly string _acceptedToken;
         private readonly Guid _exerciseId;
 
@@ -430,7 +438,7 @@ public sealed class DefaultDenySessionGateTests
                 string.Equals(rawToken, _acceptedToken, StringComparison.Ordinal)
                     ? new AuthenticatedSession
                     {
-                        SessionId = Guid.NewGuid(),
+                        SessionId = StableSessionId,
                         ExerciseId = _exerciseId,
                         Kind = "participant",
                         PrincipalId = "gate-probe-principal",
