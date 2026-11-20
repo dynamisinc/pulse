@@ -141,6 +141,9 @@ export const UNIFORM_FAILURE_MESSAGE =
 /** Shown when the org choice is refused (expired after 2 minutes, already used, or mismatched). */
 const CHOICE_EXPIRED_MESSAGE = 'Your organization choice expired. Sign in again.'
 
+/** 502/503/504 or a 5xx without the app's body: infrastructure, never a credentials verdict. */
+const INFRASTRUCTURE_MESSAGE = "Pulse couldn't be reached just now. Try again."
+
 /** A malformed reply or unexpected error: never worded as a credentials failure. */
 const GENERIC_FAILURE_MESSAGE = 'Something went wrong. Try again.'
 
@@ -480,16 +483,20 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
   /**
    * Copy for a failed sign-in. Credentials-type refusals (400, 401, 403, 429 and anything else
    * the server answered) stay uniform and clear the password; 429 cannot be split out without
-   * hinting at a lock. A 5xx is uniform too: the only 5xx a login can raise come after the password
-   * matched (session issue / save), so a distinct 5xx message would be an oracle. A missing
-   * response and a malformed reply say so, and KEEP what was
-   * typed so the person can simply retry, with focus back where they were.
+   * hinting at a lock. A 500 that carries the app's own ProblemDetails body is uniform too: the
+   * backend can only fail that way after the password matched (`OrgStaffLoginService.cs`, the
+   * save and session-issue steps around lines 598-636), so a distinct message could tell an
+   * attacker the password was right. A malformed 2xx is uniform for the same reason (a 2xx only
+   * follows a match). Gateway failures (502/503/504, or a 5xx without the app's body), a missing
+   * response and an unexpected error never say anything about the credentials: they say so, and
+   * KEEP what was typed so the person can retry, with focus back where they were.
    */
   const handleSignInFailure = (error: unknown) => {
     let keepMessage: string | null = null
     if (!(error instanceof StaffSignInError)) keepMessage = GENERIC_FAILURE_MESSAGE
     else if (error.unreachable) keepMessage = UNREACHABLE_MESSAGE
-    else if (error.status === undefined) keepMessage = GENERIC_FAILURE_MESSAGE
+    else if (error.status !== undefined && error.status >= 500 &&
+      !(error.status === 500 && error.problemDetails)) keepMessage = INFRASTRUCTURE_MESSAGE
 
     if (keepMessage !== null) {
       setErrorMessage(keepMessage)
@@ -713,6 +720,11 @@ const CONTEXT_WAIT_MS = 3000
 
 type FormMode = 'email' | 'secret'
 
+/** Form identity for an address: a whitespace-only slug must not collide with the bare host. */
+function slugKey(slug: string | undefined): string {
+  return slug === undefined ? 'bare' : `o:${slug.trim().toLowerCase()}`
+}
+
 /**
  * Picks the form. Default: email on the bare host and on `/o/:slug`; the exercise-bound
  * username + secret form when the host resolves an exercise (an exercise address). While the
@@ -724,7 +736,7 @@ function StaffSignInForm() {
   const { slug } = useParams<{ slug?: string }>()
   // Keyed on the normalised slug, so client-side navigation between `/staff/login` and
   // `/o/:slug` re-derives the default and resets the form.
-  return <StaffSignInFormBody key={slug?.trim().toLowerCase() ?? ''} slug={slug} />
+  return <StaffSignInFormBody key={slugKey(slug)} slug={slug} />
 }
 
 function StaffSignInFormBody({ slug }: { readonly slug?: string }) {
@@ -781,7 +793,7 @@ function StaffSignInFormBody({ slug }: { readonly slug?: string }) {
 
   return mode === 'email' ? (
     <OrgSignInForm
-      key={normalizedSlug ?? ''}
+      key={slugKey(slug)}
       orgSlug={orgSlug}
       invalidSlug={invalidSlug}
       onUseSecret={() => setChosenMode('secret')}

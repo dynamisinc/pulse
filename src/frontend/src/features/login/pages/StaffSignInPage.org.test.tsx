@@ -62,8 +62,8 @@ function refusal(status: number) {
   return { isAxiosError: true, response: { status, data: '' }, message: 'Request failed' }
 }
 
-function renderPage() {
-  const queryClient = new QueryClient({
+function renderPage(seeded?: QueryClient) {
+  const queryClient = seeded ?? new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   function Wrapper({ children }: { children: ReactNode }) {
@@ -256,7 +256,6 @@ describe('StaffSignInPage — which form is the default', () => {
 
   it('defaults to email on /o/:slug even where an exercise resolves', async () => {
     mockParams = { slug: 'acme' }
-    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
     let resolveScope: (scope: typeof EXERCISE_SCOPE) => void = () => {}
     vi.mocked(resolveExerciseContext).mockReturnValue(
       new Promise(resolve => { resolveScope = resolve }),
@@ -403,13 +402,12 @@ describe('StaffSignInPage — focus', () => {
 })
 
 describe('StaffSignInPage — messages, slug and choice edge cases', () => {
-  it('shows a generic message, not the credentials one, for a malformed 200', async () => {
+  it('treats a malformed 200 as uniform (a 2xx only follows a matching password)', async () => {
     mockPost.mockResolvedValue({ data: {} } as PostResult)
     renderPage()
     await signIn('pat@example.org', 'pw-correct-horse')
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/something went wrong/i)
-    expect(alert).not.toHaveTextContent(/match/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
+    expect(screen.getByLabelText(/^password/i)).toHaveValue('')
   })
 
   it('does not show the credentials message when completing the sign-in throws', async () => {
@@ -435,7 +433,7 @@ describe('StaffSignInPage — messages, slug and choice edge cases', () => {
     renderPage()
     const user = await signIn('pat@example.org', 'pw-correct-horse')
     await user.click(await screen.findByRole('button', { name: 'Acme County' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/use a different account/i)
     expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
   })
 
@@ -479,12 +477,43 @@ describe('StaffSignInPage — messages, slug and choice edge cases', () => {
 })
 
 describe('StaffSignInPage — failures that keep what was typed', () => {
-  it('treats a 5xx as uniform (a login 5xx only follows a matching password)', async () => {
-    mockPost.mockRejectedValue(refusal(503))
+  it.each([502, 503, 504])(
+    'shows a retry message for a gateway %i and keeps the password',
+    async status => {
+      mockPost.mockRejectedValue(refusal(status))
+      renderPage()
+      await signIn('pat@example.org', 'pw-correct-horse')
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent(/couldn't be reached just now/i)
+      expect(alert).not.toHaveTextContent(/match/i)
+      const password = screen.getByLabelText(/^password/i)
+      expect(password).toHaveValue('pw-correct-horse')
+      expect(password).toHaveFocus()
+    },
+  )
+
+  it('treats a 5xx without the app body as infrastructure and keeps the password', async () => {
+    mockPost.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 500, data: '<html>Internal Server Error</html>' },
+      message: 'Request failed',
+    })
     renderPage()
     await signIn('pat@example.org', 'pw-correct-horse')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
+    expect(alert).not.toHaveTextContent(/match/i)
+    expect(screen.getByLabelText(/^password/i)).toHaveValue('pw-correct-horse')
+  })
+
+  it('treats a 500 carrying the app ProblemDetails as uniform and clears the password', async () => {
+    mockPost.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 500, data: { title: 'An error occurred', status: 500 } },
+      message: 'Request failed',
+    })
+    renderPage()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    expect(await screen.findByRole('alert')).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
     const password = screen.getByLabelText(/^password/i)
     expect(password).toHaveValue('')
     expect(password).toHaveFocus()
@@ -505,13 +534,6 @@ describe('StaffSignInPage — failures that keep what was typed', () => {
     await waitFor(() => expect(screen.getByLabelText(/^email/i)).toHaveFocus())
   })
 
-  it('keeps the password for a malformed reply', async () => {
-    mockPost.mockResolvedValue({ data: {} } as PostResult)
-    renderPage()
-    await signIn('pat@example.org', 'pw-correct-horse')
-    await screen.findByRole('alert')
-    expect(screen.getByLabelText(/^password/i)).toHaveValue('pw-correct-horse')
-  })
 })
 
 describe('StaffSignInPage — one request at a time', () => {
@@ -589,7 +611,7 @@ describe('StaffSignInPage — choice failures that keep the step', () => {
     renderPage()
     const user = await signIn('pat@example.org', 'pw-correct-horse')
     await user.click(await screen.findByRole('button', { name: 'Acme County' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/use a different account/i)
     expect(screen.getByRole('heading', { name: /choose an organization/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
   })
@@ -601,7 +623,7 @@ describe('StaffSignInPage — choice failures that keep the step', () => {
     renderPage()
     const user = await signIn('pat@example.org', 'pw-correct-horse')
     await user.click(await screen.findByRole('button', { name: 'Acme County' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/use a different account/i)
     expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
   })
 })
@@ -647,5 +669,51 @@ describe('StaffSignInPage — the org note is tied to the email field', () => {
     mockParams = { slug: 'Not A Slug!' }
     renderPage()
     expect(screen.getByLabelText(/^email/i)).toHaveAccessibleDescription(/isn't valid/i)
+  })
+})
+
+describe('StaffSignInPage — the first commit is already the right form', () => {
+  /** Records every node added to the document during `render`, including the first commit. */
+  function renderAndSeeLoadingPlaceholder(seeded?: QueryClient): boolean {
+    const observer = new MutationObserver(() => {})
+    observer.observe(document.body, { childList: true, subtree: true })
+    renderPage(seeded)
+    const added = observer.takeRecords().flatMap(record => Array.from(record.addedNodes))
+    observer.disconnect()
+    return added.some(
+      node =>
+        node instanceof Element &&
+        (node.matches('[data-testid="staff-sign-in-loading"]') ||
+          node.querySelector('[data-testid="staff-sign-in-loading"]') !== null),
+    )
+  }
+
+  it('never mounts the placeholder on /o/:slug', () => {
+    mockParams = { slug: 'acme' }
+    vi.mocked(resolveExerciseContext).mockReturnValue(new Promise(() => {}))
+    expect(renderAndSeeLoadingPlaceholder()).toBe(false)
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+  })
+
+  it('never mounts the placeholder when the context is already cached', () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    client.setQueryData(['staff-login', 'exercise-context'], EXERCISE_SCOPE)
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    expect(renderAndSeeLoadingPlaceholder(client)).toBe(false)
+    expect(screen.getByLabelText(/username/i)).toBeInTheDocument()
+  })
+
+  it('does mount the placeholder while a bare host is still pending (the probe works)', () => {
+    vi.mocked(resolveExerciseContext).mockReturnValue(new Promise(() => {}))
+    expect(renderAndSeeLoadingPlaceholder()).toBe(true)
+  })
+
+  it('does not treat a whitespace-only slug as the bare host', () => {
+    mockParams = { slug: '   ' }
+    vi.mocked(resolveExerciseContext).mockReturnValue(new Promise(() => {}))
+    renderPage()
+    expect(screen.getByTestId('staff-org-slug-invalid')).toBeInTheDocument()
   })
 })
