@@ -166,7 +166,9 @@ curl -sS -X POST "$API/api/ops/organizations" \
 
 `201 { name, slug, adminPersonId, inviteUrl, emailed }` (no organization id: the tenant id never reaches the wire).
 `inviteUrl` is returned **only while email is off**; once a mailer is configured it is `null` and the invite goes to the
-admin's address by email only (CR-001, accepted by Tom 2026-11-20). It creates the organization (slug from the
+admin's address by email only (CR-001, accepted by Tom 2026-11-20) — **even if the send fails**: with a mailer
+configured, `emailed: false` means the org and admin exist (the name is now taken) but the invite did not go out and
+the link is not returned; there is no re-issue route yet (#847), so raise it with engineering. It creates the organization (slug from the
 name, `-2`, `-3`… on a collision), its first org admin (with the staff facet) and a 7-day invite. **The `inviteUrl` is
 shown once** and is a bearer credential: send it to the admin over a private channel, never paste it in a ticket or
 chat log. The admin sets a password and is signed in to the (empty) organization. Until the org sign-in page ships

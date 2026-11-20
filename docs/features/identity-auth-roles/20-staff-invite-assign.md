@@ -161,7 +161,7 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
 - `OrgInviteEndpointTests.Redeem_OfARevokedOnlyEnrollment_IsAwaitingAssignment_BecauseEveryEnrollmentReadIsActiveOnly`
 - `OrgInviteEndpointTests.Redeem_OfAnInviteIssuedInTheSameInstantAsTheLastPasswordChange_IsNotStale` and
   `CredentialCompositionRootWiringTests.IsStaleFor_TheTie_IsFresh_SoATokenIssuedInTheSameUnitOfWorkAsAPasswordChangeSurvivesIt`
-- `OpsOrganizationEndpointTests.*` (Org admin platform provisioning: secret gate, create, first-admin sign-in at the slug, slug suffix + 409, 400/503)
+- `OpsOrganizationEndpointTests.*` (Org admin platform provisioning: secret gate, create, first-admin sign-in at the slug, slug suffix + 409, 400/503, CR-001 email-only with a configured mailer: sent and failed)
 - `RoleMatrixTests` rows `POST /api/org/people/invite` (OrgAdminOnly) and `POST /api/ops/organizations` (PreAuth);
   `OrgScopeRouteSweepTests.OrgScopeRoutes` entry for the invite route; `DefaultDenySessionGateTests` allowlist row
 - Frontend: `features/orgDirectory` invite dialog, `features/staffPasswordReset` `/staff/invite` + awaiting-assignment tests

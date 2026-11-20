@@ -19,8 +19,8 @@ using Pulse.WebApi.Features.Org.PeopleDirectory;
 /// bootstrap secret. In ONE transaction it creates the <see cref="Organization"/> with a collision-safe slug
 /// (<see cref="OrganizationSlugAllocator"/>, #602 L-5), its first org-admin <see cref="Person"/> (<c>OrgRole =
 /// orgAdmin</c>, no password) WITH the shared-key <see cref="StaffUser"/> facet (the org sign-in mints only for a person
-/// with a facet), and a 7-day single-use <c>invite</c> token. The invite link is returned ONCE to the ops caller (the
-/// copy-link flow — email is off until ACS is deployed) and handed to <see cref="IPulseMailer"/> for the admin's address.
+/// with a facet), and a 7-day single-use <c>invite</c> token. While no mailer is configured the invite link is returned
+/// ONCE to the ops caller (copy-link); once one is, it is emailed to the admin's address only (CR-001, below).
 /// Once the admin sets a password they sign in to the empty organization (an org-scope session needs no exercise).
 /// </summary>
 /// <remarks>
@@ -269,6 +269,11 @@ public sealed partial class OpsOrganizationService
             var outcome = await _mailer.SendCredentialLinkAsync(
                 new CredentialMail { Purpose = CredentialTokenPurposes.Invite, RecipientAddress = email, Link = inviteUrl },
                 cancellationToken);
+            if (outcome != LinkMailSendOutcome.Sent)
+            {
+                LogMailerNotSent(CredentialTokenPurposes.Invite, outcome.ToString());
+            }
+
             return outcome == LinkMailSendOutcome.Sent;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -282,6 +287,13 @@ public sealed partial class OpsOrganizationService
     [LoggerMessage(
         EventId = 1,
         Level = LogLevel.Warning,
-        Message = "Credential email failed after the first-admin invite was issued (purpose {Purpose}, {ExceptionType}); the link was returned to the ops caller.")]
+        Message = "Credential email failed after the first-admin invite was issued (purpose {Purpose}, {ExceptionType}); the link was NOT returned (a mailer is configured, so it goes by email only); re-issue is required (#847).")]
     private partial void LogMailerFailed(string purpose, string exceptionType);
+
+    // The provider OUTCOME only (the IPulseMailer contract reports a provider failure this way, without throwing).
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Credential email not accepted after the first-admin invite was issued (purpose {Purpose}, outcome {Outcome}); the link was NOT returned (a mailer is configured, so it goes by email only); re-issue is required (#847).")]
+    private partial void LogMailerNotSent(string purpose, string outcome);
 }

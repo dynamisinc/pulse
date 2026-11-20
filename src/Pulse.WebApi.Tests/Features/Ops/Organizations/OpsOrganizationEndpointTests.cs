@@ -228,6 +228,32 @@ public sealed class OpsOrganizationEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task WithAMailerConfiguredThatFails_The201StillCarriesNoLink_AndNothingLeaksToTheLog()
+    {
+        // CR-001: email only once a mailer is configured — a failed send never falls back to returning the link.
+        var unique = Guid.NewGuid().ToString("N")[..12];
+
+        await using var factory = new CredentialProbeFactory(
+            _fixture.ConnectionString!,
+            configureServices: services =>
+            {
+                services.RemoveAll<IPulseMailer>();
+                services.AddSingleton<IPulseMailer, ThrowingMailer>();
+            },
+            settings: SecretSettings);
+        using var client = CredentialTestWorld.CreateClient(factory);
+        using var response = await PostAsync(client, new { name = $"Failed Mail Org {unique}", adminEmail = $"fail.{unique}@example.com" }, Secret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the org is committed; only the delivery failed");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("inviteUrl").ValueKind.Should().Be(JsonValueKind.Null, "never a copy-link fallback once a mailer exists");
+        body.GetProperty("emailed").GetBoolean().Should().BeFalse();
+
+        factory.Logs.Messages.Should().Contain(m => m.Contains("NOT returned", StringComparison.Ordinal));
+        factory.Logs.Messages.Should().NotContain(m => m.Contains("#token=", StringComparison.Ordinal), "no link reaches a log");
+    }
+
+    [RequiresDockerFact]
     public async Task ABadBody_Is400_WithTheFieldsCode_AndNoFrontendBaseUrl_Is503()
     {
         await using (var factory = new CredentialProbeFactory(_fixture.ConnectionString!, settings: SecretSettings))
@@ -267,6 +293,14 @@ public sealed class OpsOrganizationEndpointTests
         }
 
         return client.SendAsync(request);
+    }
+
+    private sealed class ThrowingMailer : IPulseMailer
+    {
+        public bool IsConfigured => true;
+
+        public Task<LinkMailSendOutcome> SendCredentialLinkAsync(CredentialMail mail, System.Threading.CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("provider down");
     }
 
     private sealed class RecordingMailer : IPulseMailer
