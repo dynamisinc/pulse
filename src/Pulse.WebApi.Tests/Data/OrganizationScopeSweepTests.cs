@@ -176,7 +176,10 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/21: +1 for CredentialTokenService.FindRedeemableAsync — redeeming an invite/reset link IS the
         // resolution of whose credential it is (by the SHA-256 of a 256-bit token, pre-auth); the person it names is then
         // read only .InOrganization(token.OrganizationId).
-        ["ResolutionRoot"] = 14,
+        // #847: +1 for OpsOrganizationService.ReissueAdminInviteAsync — the route slug → organization resolution (one row
+        // by its unique slug, behind the bootstrap secret), exactly the org sign-in's slug read; the admin it then reads is
+        // bounded .InOrganization(that organization), and the organization id never reaches the wire.
+        ["ResolutionRoot"] = 15,
 
         // exercise-lifecycle-admin: +1 for OrganizationResolutionMiddleware, the production writer of
         // IOrganizationContext. It reads the authenticated caller's OWN StaffUser row (by the id their

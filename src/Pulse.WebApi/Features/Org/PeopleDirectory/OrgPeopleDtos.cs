@@ -63,6 +63,13 @@ public sealed class OrgPersonDto
     [JsonPropertyName("lockedOutUntil")]
     public required string? LockedOutUntil { get; init; }
 
+    /// <summary>
+    /// Whether the person has set a Pulse password (#848 / #849). A yes/no only — never the hash. The directory offers
+    /// "Invite" for a person with no email and no password, and the org-admin grant is refused without one.
+    /// </summary>
+    [JsonPropertyName("hasPassword")]
+    public required bool HasPassword { get; init; }
+
     /// <summary>The person's live (not revoked) enrollments in the organization's exercises.</summary>
     [JsonPropertyName("enrollments")]
     public required IReadOnlyList<OrgPersonEnrollmentDto> Enrollments { get; init; }

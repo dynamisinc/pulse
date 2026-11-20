@@ -27,13 +27,23 @@ using Pulse.WebApi.Features.Ops.Bootstrap;
 /// the body is VALIDATED — but, as for <c>/api/ops/bootstrap-exercise</c>, a body the framework cannot bind at all, such as
 /// malformed JSON or a wrong content type, is the framework's 400/415 before the handler runs); <c>400 {"error":…}</c>; <c>409 {"error":"organization-exists"}</c>;
 /// <c>503 {"error":"invite-link-unavailable"}</c> without a frontend base URL.
+/// <para>
+/// <b><c>POST /api/ops/organizations/{slug}/admin-invite {adminEmail}</c> — PRE-AUTH</b> (#847), the same gate, limiter
+/// and no-store: re-issues the named org admin's invite (an expired or undelivered one), voiding the earlier one.
+/// <c>200</c> <see cref="ReissuedAdminInviteDto"/> (<c>inviteUrl</c> only while no mailer is configured, CR-001); the bare
+/// <c>404</c> for a wrong secret, an unknown slug or an email that is not an org admin of that organization;
+/// <c>400 invalid-admin-email</c>; <c>409 already-active | person-disabled</c>; <c>503 invite-link-unavailable</c>.
+/// </para>
 /// </remarks>
 public static class OpsOrganizationEndpoints
 {
     /// <summary>The provisioning route.</summary>
     public const string Route = "/api/ops/organizations";
 
-    /// <summary>The route's own per-IP rate-limit policy (10 a minute — a rare ops action).</summary>
+    /// <summary>The first-admin invite re-issue route (#847); the organization is addressed by its slug.</summary>
+    public const string AdminInviteRoute = "/api/ops/organizations/{slug}/admin-invite";
+
+    /// <summary>The routes' own per-IP rate-limit policy (10 a minute, shared by both — a rare ops action).</summary>
     public const string RateLimitPolicy = "ops-organizations";
 
     /// <summary>Registers the provisioning service.</summary>
@@ -86,7 +96,37 @@ public static class OpsOrganizationEndpoints
             .RequireRateLimiting(RateLimitPolicy)
             .AllowAnonymousPreAuth();
 
+        // #847: the same secret gate, limiter, no-store and pre-auth allowlisting as the provisioning route.
+        endpoints.MapPost(AdminInviteRoute, ReissueAdminInviteAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
+            .RequireRateLimiting(RateLimitPolicy)
+            .AllowAnonymousPreAuth();
+
         return endpoints;
+    }
+
+    private static async Task<IResult> ReissueAdminInviteAsync(
+        string slug,
+        [FromBody] ReissueAdminInviteRequest? request,
+        [FromHeader(Name = BootstrapEndpoints.BootstrapSecretHeaderName)] string? bootstrapSecret,
+        [FromServices] OpsOrganizationService service,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.ReissueAdminInviteAsync(slug, request, bootstrapSecret, cancellationToken);
+
+        return result.Outcome switch
+        {
+            OpsOrganizationOutcome.Reissued when result.AdminInvite is { } invite => Results.Ok(invite),
+            OpsOrganizationOutcome.Invalid => Results.BadRequest(new OpsOrganizationErrorDto { Error = result.Error ?? string.Empty }),
+
+            // One bare 404 for a wrong secret, an unknown slug and an unknown admin: nothing is disclosed either way.
+            OpsOrganizationOutcome.Rejected or OpsOrganizationOutcome.NotFound => Results.NotFound(),
+            OpsOrganizationOutcome.Conflict => Results.Conflict(new OpsOrganizationErrorDto { Error = result.Error ?? string.Empty }),
+            OpsOrganizationOutcome.Unavailable => Results.Json(
+                new OpsOrganizationErrorDto { Error = result.Error ?? string.Empty },
+                statusCode: StatusCodes.Status503ServiceUnavailable),
+            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+        };
     }
 
     private static async Task<IResult> CreateAsync(

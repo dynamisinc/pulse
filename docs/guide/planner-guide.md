@@ -121,7 +121,8 @@ can open it.
   **Locked out**. It also lists their exercises with their role; a star and "(lead)" marks a lead
   controller.
 - **Make admin / Remove admin**, **Disable / Enable** and **Reset link** each ask you to confirm first.
-  Removing the last enabled admin, or disabling yourself, is refused with a message.
+  Removing the last enabled admin, or disabling yourself, is refused with a message. So is making
+  someone an admin before they have set a password (see below).
 - **Reset link** shows a one-time link once, with a Copy button. Give it to the person directly. You
   cannot make a link for another org admin.
 
@@ -141,10 +142,27 @@ Inviting the same email again, before the person has set a password, makes a new
 link stops working. Someone who already has a password needs a **Reset link** instead. You cannot
 invite a disabled person or another org admin.
 
-> **Adding another org admin:** invite them first and select **Make admin** only after they have set
-> their password. Making someone an admin cancels any link they have not used yet, and you cannot send a
-> link to another org admin. If you made them an admin too early, select **Remove admin**, invite them
-> again, and make them an admin once they have set their password.
+> **Adding another org admin:** invite them first and select **Make admin** after they have set their
+> password. Until they have, Pulse refuses **Make admin** with "This person has not set a password yet"
+> and changes nothing, so their invite link keeps working. Once they have opened the link and chosen a
+> password, select **Make admin** again.
+
+### Inviting someone already in the directory
+
+Some people are in the directory with **No email**, for example staff who were added before invites
+existed. For a person with no email and no password, the row shows an **Invite** button.
+
+1. Select **Invite** on their row.
+2. Enter their email and select **Create invite link**. Pulse saves the email on that person and shows
+   a one-time invite link, with a Copy button. The link works once, for 7 days.
+3. The person opens the link and chooses a password. From then on they sign in with that email and
+   password.
+
+They keep their exercises and roles; Pulse does not add a second person. Pulse refuses the invite if
+another person in your organization already has that email.
+
+Use **Invite** for these people, not **Invite person**. **Invite person** looks people up by email,
+so for someone with no email on file it would add a second, empty person.
 
 ---
 

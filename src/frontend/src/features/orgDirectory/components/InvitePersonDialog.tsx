@@ -2,6 +2,8 @@
  * features/orgDirectory/components/InvitePersonDialog.tsx
  * ---------------------------------------------------------------------------
  * "Invite person" dialog (#575b): Email + Display name, submit -> `POST /org/people/invite`.
+ * With a `person` (#849, the row's "Invite" action) it asks for the Email only and submits
+ * `POST /org/people/{id}/invite`, which saves the email on that existing person (no duplicate).
  * On success the form is replaced by the shared one-time link panel (link shown once, Copy
  * button; the dialog's always-mounted status region speaks the result and the copy outcome). On
  * failure the dialog stays open with the mapped message in a `role="alert"` region with an icon.
@@ -15,7 +17,7 @@ import { Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
-import { useInviteOrgPerson } from '../hooks/useOrgPeople'
+import { useInviteExistingOrgPerson, useInviteOrgPerson } from '../hooks/useOrgPeople'
 import { OneTimeLinkPanel } from './OneTimeLinkPanel'
 import { copyStatusMessage, useCopyLink } from './useCopyLink'
 import { inviteErrorMessage } from './personActions'
@@ -26,13 +28,20 @@ export interface InvitePersonDialogProps {
   readonly onClose: () => void
   /** Receives the short success sentence for the page's status region. */
   readonly onSuccess?: (message: string) => void
+  /**
+   * #849: invite this EXISTING directory person (the row action). Only the email is asked for; it
+   * is saved on the person with the invite, and they keep their exercises. Omitted = a new person.
+   */
+  readonly person?: { readonly id: string; readonly displayName: string }
 }
 
-export function InvitePersonDialog({ onClose, onSuccess }: InvitePersonDialogProps) {
-  const invite = useInviteOrgPerson()
+export function InvitePersonDialog({ onClose, onSuccess, person }: InvitePersonDialogProps) {
+  const inviteNew = useInviteOrgPerson()
+  const inviteExisting = useInviteExistingOrgPerson()
+  const invite = person === undefined ? inviteNew : inviteExisting
   const titleId = useId()
   const [email, setEmail] = useState('')
-  const [displayName, setDisplayName] = useState('')
+  const [displayName, setDisplayName] = useState(person?.displayName ?? '')
   const [validation, setValidation] = useState<string | null>(null)
 
   const result = invite.data
@@ -58,10 +67,12 @@ export function InvitePersonDialog({ onClose, onSuccess }: InvitePersonDialogPro
       return
     }
     setValidation(null)
-    invite.mutate(
-      { email: trimmedEmail, displayName: trimmedName },
-      { onSuccess: () => onSuccess?.(`Invite link created for ${trimmedName}.`) },
-    )
+    const announce = { onSuccess: () => onSuccess?.(`Invite link created for ${trimmedName}.`) }
+    if (person === undefined) {
+      inviteNew.mutate({ email: trimmedEmail, displayName: trimmedName }, announce)
+    } else {
+      inviteExisting.mutate({ personId: person.id, email: trimmedEmail }, announce)
+    }
   }
 
   const errorText =
@@ -85,16 +96,20 @@ export function InvitePersonDialog({ onClose, onSuccess }: InvitePersonDialogPro
       data-testid="invite-person-dialog"
     >
       <DialogTitle id={titleId} sx={{ fontSize: 15, fontWeight: 800 }}>
-        Invite person
+        {person === undefined ? 'Invite person' : `Invite ${person.displayName}`}
       </DialogTitle>
       <form onSubmit={submit} noValidate>
         <DialogContent>
           {result === undefined ? (
             <>
               <Typography sx={{ fontSize: 13, lineHeight: 1.5, mb: 1.5 }}>
-                Creates a one-time link, shown once, that you copy and give them so they can
-                choose a password. Inviting someone who has not set a password yet replaces
-                their earlier link.
+                {person === undefined
+                  ? 'Creates a one-time link, shown once, that you copy and give them so they can '
+                    + 'choose a password. Inviting someone who has not set a password yet replaces '
+                    + 'their earlier link.'
+                  : `${person.displayName} has no email on file. Enter their email: it is saved on `
+                    + 'their account, and a one-time link, shown once, is created for you to copy '
+                    + 'and give them so they can choose a password. They keep their exercises.'}
               </Typography>
               <CobraTextField
                 label="Email"
@@ -109,24 +124,28 @@ export function InvitePersonDialog({ onClose, onSuccess }: InvitePersonDialogPro
                 autoFocus
                 sx={{ mb: 1.5 }}
               />
-              <CobraTextField
-                label="Display name"
-                name="displayName"
-                autoComplete="off"
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-                disabled={pending}
-                required
-                fullWidth
-              />
+              {person === undefined && (
+                <CobraTextField
+                  label="Display name"
+                  name="displayName"
+                  autoComplete="off"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  disabled={pending}
+                  required
+                  fullWidth
+                />
+              )}
             </>
           ) : (
             <>
               <Typography sx={{ fontSize: 13, lineHeight: 1.5 }}>
                 {result.emailed ? 'The invite was also emailed. ' : 'No email was sent. '}
-                {result.created
-                  ? 'They were added to the directory.'
-                  : 'They were already in the directory; any earlier invite link no longer works.'}
+                {person !== undefined
+                  ? 'Their email is now on file and they keep their exercises; any earlier invite link no longer works.'
+                  : result.created
+                    ? 'They were added to the directory.'
+                    : 'They were already in the directory; any earlier invite link no longer works.'}
               </Typography>
               <OneTimeLinkPanel
                 link={result.inviteUrl}

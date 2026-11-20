@@ -8,6 +8,12 @@ Identity-auth-roles story 19 (#574): the organization people directory at `/staf
   (exercise, role, lead). Every action sits behind a confirm dialog; failures (409 `last-org-admin`,
   `cannot-disable-self`, `target-is-org-admin`, 404) show in a `role="alert"` region; the list
   refetches after every mutation. The caller's own row offers no Disable.
+- **Make admin** on a person with no password is refused (409 `person-has-no-password`, #848); the
+  dialog explains that they must set a password from their invite link first.
+- **Invite person** (`POST /api/org/people/invite`, #575b) and the row's **Invite** action
+  (`POST /api/org/people/{id}/invite {email}`, #849). The row action shows only for a person with no
+  email and no password (`hasPassword` on the row); it saves the email on that person with the
+  invite (409 `email-in-use` / `email-mismatch`), so no duplicate person is created.
 - Gated on `usePermissions().role === 'orgAdmin'` (no `StaffAction` was added: that table is frozen
   for this change). The server is the authority.
 - COBRA only, FontAwesome only, MUI 9 `sx`. Live service only (no mock flip point).

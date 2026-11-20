@@ -87,6 +87,17 @@ export function resetUnavailableReason(person: {
   return null
 }
 
+/**
+ * Whether a row offers "Invite" (#849): a person with no email and no password, typically a legacy
+ * allowlist staffer. The by-id invite sets their email so no duplicate person is created.
+ */
+export function canInviteExisting(person: {
+  readonly email: string | null
+  readonly hasPassword: boolean
+}): boolean {
+  return person.email === null && !person.hasPassword
+}
+
 /** Maps a failure to words. `status`/`code` come from `OrgPeopleError`. */
 export function errorMessage(status: number | undefined, code: string | undefined): string {
   if (status === 409) {
@@ -99,6 +110,8 @@ export function errorMessage(status: number | undefined, code: string | undefine
         return 'You cannot create a reset link for another organization admin. They can reset their own password.'
       case 'person-disabled':
         return 'This person is disabled, so a reset link would not work. Enable them first.'
+      case 'person-has-no-password':
+        return 'This person has not set a password yet. Ask them to open their invite link and choose a password, then make them an admin.'
       default:
         return 'The change conflicts with the current state. The list has been refreshed; try again.'
     }
@@ -126,10 +139,15 @@ export function inviteErrorMessage(status: number | undefined, code: string | un
         return 'This person is disabled, so an invite would not work. Enable them first.'
       case 'target-is-org-admin':
         return 'This person is another organization admin and cannot be re-invited. They can reset their own password.'
+      case 'email-in-use':
+        return 'Another person in your organization already has this email. Check the address and try again.'
+      case 'email-mismatch':
+        return 'This person already has a different email on file. Invite them with that address.'
       default:
         return 'The invite conflicts with the current state. The list has been refreshed; try again.'
     }
   }
+  if (status === 404) return 'This person is no longer in your organization. The list has been refreshed.'
   if (status === 503 && code === 'invite-link-unavailable') {
     return 'Invite links are not available because no sign-in address is configured.'
   }

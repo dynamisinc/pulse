@@ -150,8 +150,10 @@ public sealed class AnonymousAccessRegressionTests
         // invalid-token, the staff-login per-IP limiter, the login body limit, no-store.
         // #575b: 16 -> 17 for POST /api/ops/organizations — platform provisioning of a customer org; the X-Bootstrap-Secret
         // header is the credential (bare 404 otherwise), exactly like /api/ops/bootstrap-exercise; own per-IP limiter, no-store.
+        // #847: 17 -> 18 for POST /api/ops/organizations/{slug}/admin-invite — the first-admin invite re-issue; the same
+        // X-Bootstrap-Secret credential (bare 404 otherwise), the same limiter and no-store as the provisioning route.
         PreAuthAllowlist.Routes.Should().HaveCount(
-            17,
+            18,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 
