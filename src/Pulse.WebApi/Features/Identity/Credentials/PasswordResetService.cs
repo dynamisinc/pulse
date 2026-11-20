@@ -20,7 +20,8 @@ using Pulse.WebApi.Features.Realtime;
 /// <remarks>
 /// <para>
 /// <b>Order.</b> (1) The token is looked up; anything but a live, unused token naming an enabled person in the token's
-/// own organization is the uniform <see cref="InvalidTokenError"/>. (2) The password is checked against
+/// own organization — and, when it has an issuer, issued by someone who is STILL an enabled org admin of that
+/// organization (#842) — is the uniform <see cref="InvalidTokenError"/>. (2) The password is checked against
 /// <see cref="PasswordPolicy"/> (staff floor, §3.2) — a policy refusal does NOT consume the token, so the person can
 /// retry. (3) In ONE transaction: the token is claimed by a single conditional statement (a lost race is the uniform
 /// error), the password is hashed with the SAME <see cref="PasswordHasher{TUser}"/> sign-in verifies with, every
@@ -129,6 +130,15 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(InvalidTokenError);
         }
 
+        // #842: a link handed out by an org admin is only as good as that admin's authority. An issuer who has since been
+        // demoted or disabled (or who is gone, or who is not of the token's organization) voids it: the same uniform
+        // answer as an expired link. Bounded by the token's OWN organization. A null issuer (a self-delivered link) has
+        // no issuer authority to re-check.
+        if (token.IssuedByPersonId is { } issuedBy && !await IsEnabledOrgAdminAsync(issuedBy, token.OrganizationId, cancellationToken))
+        {
+            return PasswordResetResult.Invalid(InvalidTokenError);
+        }
+
         // org-scope-exempt(TenantRoot): a by-id lookup of the person's OWN organization (token.OrganizationId, which the
         // server stamped at issue) for its name — the policy refuses a password containing it — and its slug (an invite's
         // landing). Never an enumeration.
@@ -174,6 +184,15 @@ public sealed partial class PasswordResetService
             : null;
         return PasswordResetResult.Ok(landing);
     }
+
+    /// <summary>
+    /// Whether <paramref name="personId"/> is, right now, an ENABLED org admin of <paramref name="organizationId"/> (#842).
+    /// </summary>
+    private Task<bool> IsEnabledOrgAdminAsync(Guid personId, Guid organizationId, CancellationToken cancellationToken) =>
+        _dbContext.People
+            .AsNoTracking()
+            .InOrganization(organizationId)
+            .AnyAsync(p => p.Id == personId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null, cancellationToken);
 
     private static bool IsDeadlock(Exception exception) =>
         exception is SqlException { Number: DeadlockVictimErrorNumber }
