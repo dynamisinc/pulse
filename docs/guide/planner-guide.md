@@ -77,6 +77,8 @@ would refuse the request. Ask your organization administrator to create the exer
    select **Sign in with email instead** on an exercise's address). An organization administrator
    lands on **Exercise Management** straight away, even before the organization has any exercises.
    (See [Signing in to your organization](getting-started.md#signing-in-to-your-organization).)
+   If you are an org admin on a shared exercise address, the page opens on Username and Secret: choose
+   **Sign in with email instead**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
    This is an internal name: **players never see it**. What players see is the *participant-facing
    name*, which you set later in **Exercise Settings > Identity & schedule**.

@@ -121,6 +121,9 @@ the zone named, because staff need real times for troubleshooting.
 > **Org admins:** sign in with your email and password, on your organization's address or the
 > platform address. Signing in with a username and secret on an exercise's address gives you that
 > exercise only, not **Exercise Management** with the create form.
+>
+> If you are an org admin and the address you were given is a shared exercise address, the page opens on
+> Username and Secret. Select **Sign in with email instead** and sign in with your email and password.
 
 Pulse opens your home screen:
 

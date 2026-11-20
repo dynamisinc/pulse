@@ -13,7 +13,7 @@ import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { resetClientSession, setTokens } from '@/core/auth'
@@ -79,6 +79,10 @@ async function signIn(email: string, password: string) {
   await user.click(screen.getByRole('button', { name: /^sign in$/i }))
   return user
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 beforeEach(() => {
   mockPost.mockReset()
@@ -253,11 +257,19 @@ describe('StaffSignInPage — which form is the default', () => {
   it('defaults to email on /o/:slug even where an exercise resolves', async () => {
     mockParams = { slug: 'acme' }
     vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    let resolveScope: (scope: typeof EXERCISE_SCOPE) => void = () => {}
+    vi.mocked(resolveExerciseContext).mockReturnValue(
+      new Promise(resolve => { resolveScope = resolve }),
+    )
     renderPage()
     expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
-    await waitFor(() => expect(resolveExerciseContext).toHaveBeenCalled())
-    await waitFor(() => expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument())
+    // Let the context actually settle (flush the promise and React Query's notify), then assert.
+    await act(async () => {
+      resolveScope(EXERCISE_SCOPE)
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
     expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument()
   })
 
   it('shows a placeholder, not a form, until the context settles, then focuses the first field',
@@ -279,10 +291,79 @@ describe('StaffSignInPage — which form is the default', () => {
     })
 
   it('falls back to the email form when the context never answers', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.mocked(resolveExerciseContext).mockReturnValue(new Promise(() => {}))
     renderPage()
-    expect(await screen.findByLabelText(/^email/i, undefined, { timeout: 4500 })).toHaveFocus()
-  }, 10000)
+    expect(screen.getByTestId('staff-sign-in-loading')).toBeInTheDocument()
+    await act(async () => {
+      vi.advanceTimersByTime(3100)
+    })
+    expect(await screen.findByLabelText(/^email/i)).toHaveFocus()
+  })
+
+  it('keeps what was typed when the context answers after the fallback form showed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let resolveScope: (scope: typeof EXERCISE_SCOPE) => void = () => {}
+    vi.mocked(resolveExerciseContext).mockReturnValue(
+      new Promise(resolve => { resolveScope = resolve }),
+    )
+    renderPage()
+    await act(async () => {
+      vi.advanceTimersByTime(3100)
+    })
+    const email = await screen.findByLabelText(/^email/i)
+    await userEvent.setup().type(email, 'pat')
+
+    await act(async () => {
+      resolveScope(EXERCISE_SCOPE)
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('pat')
+    expect(screen.getByLabelText(/^email/i)).toHaveFocus()
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument()
+  })
+
+  it('re-derives the default when the address changes between / and /o/:slug', async () => {
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    const view = renderPage()
+    await screen.findByLabelText(/username/i)
+
+    mockParams = { slug: 'acme' }
+    view.rerender(<StaffSignInPage />)
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+    expect(screen.getByTestId('staff-org-slug')).toHaveTextContent('acme')
+
+    mockParams = {}
+    view.rerender(<StaffSignInPage />)
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('staff-org-slug')).not.toBeInTheDocument()
+  })
+
+  it('clears the not-configured error once the context arrives', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let resolveScope: (scope: typeof EXERCISE_SCOPE) => void = () => {}
+    vi.mocked(resolveExerciseContext).mockReturnValue(
+      new Promise(resolve => { resolveScope = resolve }),
+    )
+    renderPage()
+    await act(async () => {
+      vi.advanceTimersByTime(3100)
+    })
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', { name: /use a username and secret instead/i }),
+    )
+    await user.type(screen.getByLabelText(/username/i), 'jpace')
+    await user.type(screen.getByLabelText(/secret/i), 'uat-secret')
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/isn't configured/i)
+
+    await act(async () => {
+      resolveScope(EXERCISE_SCOPE)
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
 })
 
 describe('StaffSignInPage — focus', () => {
@@ -398,15 +479,14 @@ describe('StaffSignInPage — messages, slug and choice edge cases', () => {
 })
 
 describe('StaffSignInPage — failures that keep what was typed', () => {
-  it('shows a retry message for a 5xx and keeps the password', async () => {
+  it('treats a 5xx as uniform (a login 5xx only follows a matching password)', async () => {
     mockPost.mockRejectedValue(refusal(503))
     renderPage()
     await signIn('pat@example.org', 'pw-correct-horse')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/something went wrong on our side/i)
-    expect(alert).not.toHaveTextContent(/match/i)
+    expect(alert).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
     const password = screen.getByLabelText(/^password/i)
-    expect(password).toHaveValue('pw-correct-horse')
+    expect(password).toHaveValue('')
     expect(password).toHaveFocus()
   })
 
@@ -498,5 +578,74 @@ describe('StaffSignInPage — slug normalisation', () => {
     renderPage()
     expect(screen.getByTestId('staff-org-slug-invalid')).toBeInTheDocument()
     expect(screen.queryByTestId('staff-org-slug')).not.toBeInTheDocument()
+  })
+})
+
+describe('StaffSignInPage — choice failures that keep the step', () => {
+  it.each([403, 429, 500])('keeps the choice step with a retry message for a %i', async status => {
+    mockPost
+      .mockResolvedValueOnce({ data: CHOICE } as PostResult)
+      .mockRejectedValueOnce(refusal(status))
+    renderPage()
+    const user = await signIn('pat@example.org', 'pw-correct-horse')
+    await user.click(await screen.findByRole('button', { name: 'Acme County' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByRole('heading', { name: /choose an organization/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
+  })
+
+  it('keeps the choice step when the server cannot be reached', async () => {
+    mockPost
+      .mockResolvedValueOnce({ data: CHOICE } as PostResult)
+      .mockRejectedValueOnce({ isAxiosError: true, message: 'Network Error' })
+    renderPage()
+    const user = await signIn('pat@example.org', 'pw-correct-horse')
+    await user.click(await screen.findByRole('button', { name: 'Acme County' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
+  })
+})
+
+describe('StaffSignInPage — exercise-bound form guards', () => {
+  it('sends one request for two submits in the same tick', async () => {
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    mockPost.mockReturnValue(new Promise(() => {}))
+    renderPage()
+    const user = userEvent.setup()
+    await user.type(await screen.findByLabelText(/username/i), 'jpace')
+    await user.type(screen.getByLabelText(/secret/i), 'uat-secret')
+    const form = screen.getByTestId('staff-sign-in-form')
+    act(() => {
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+    })
+    expect(mockPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores focus to the last field after a 5xx and keeps what was typed', async () => {
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    mockPost.mockRejectedValue(refusal(503))
+    renderPage()
+    const user = userEvent.setup()
+    await user.type(await screen.findByLabelText(/username/i), 'jpace')
+    await user.type(screen.getByLabelText(/secret/i), 'uat-secret')
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }))
+    await screen.findByRole('alert')
+    expect(screen.getByLabelText(/secret/i)).toHaveValue('uat-secret')
+    expect(screen.getByLabelText(/secret/i)).toHaveFocus()
+  })
+})
+
+describe('StaffSignInPage — the org note is tied to the email field', () => {
+  it('describes the email field with the Signing in to line', () => {
+    mockParams = { slug: 'acme' }
+    renderPage()
+    expect(screen.getByLabelText(/^email/i)).toHaveAccessibleDescription(/signing in to acme/i)
+  })
+
+  it('describes the email field with the invalid-address note', () => {
+    mockParams = { slug: 'Not A Slug!' }
+    renderPage()
+    expect(screen.getByLabelText(/^email/i)).toHaveAccessibleDescription(/isn't valid/i)
   })
 })

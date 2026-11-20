@@ -23,10 +23,10 @@
  * is mocked to capture `useNavigate()` calls without a real router.
  */
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { api } from '@/core/services/api'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
@@ -99,6 +99,10 @@ async function fillAndSubmit(username: string, secret: string) {
   await user.click(screen.getByRole('button', { name: /^sign in$/i }))
   return user
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 beforeEach(() => {
   mockPost.mockReset()
@@ -222,8 +226,15 @@ describe('StaffSignInPage — AC2: an unresolved exercise context blocks submiss
   })
 
   it('shows the AC2 error and never POSTs when resolution is still PENDING at submit time', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     mockResolveExerciseContext.mockReturnValue(new Promise(() => {})) // never resolves
-    await renderExerciseForm()
+    renderPage()
+    await act(async () => {
+      vi.advanceTimersByTime(3100) // the 3 s wait for the host context ends: the email form shows
+    })
+    fireEvent.click(
+      await screen.findByRole('button', { name: /use a username and secret instead/i }),
+    )
 
     await fillAndSubmit('planner1', 'secret-1')
 

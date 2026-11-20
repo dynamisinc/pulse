@@ -46,8 +46,10 @@
  * `staffOrgChoose`. An expired or used token returns to the form with a plain message. The email
  * field also takes an ALLOWLIST (break-glass) username, which the backend accepts on this route
  * (so it is a text input, not `type="email"`). Credentials-type refusals (400, 401, 403, 429)
- * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password; a 5xx, a network
- * failure and a malformed reply have their own retry messages and KEEP the password. Nothing says
+ * show the one message `UNIFORM_FAILURE_MESSAGE` and clear the password, and so does a 5xx (a
+ * login 5xx can only follow a matching password, so a distinct message would be an oracle). A
+ * network failure and a malformed reply have their own retry messages and KEEP the password.
+ * Nothing says
  * whether an email or org exists. The password is cleared once a reply arrives; never logged.
  *
  * The exercise-bound username + secret form (described below) stays reachable behind "Use a
@@ -155,9 +157,6 @@ const TYPED_IDENTIFIER_ATTRIBUTES = {
 /** Network failure: no response, so nothing about the account can be revealed. */
 const UNREACHABLE_MESSAGE = 'Could not reach the server. Check your connection and try again.'
 
-/** A 5xx: the server is at fault, so the person keeps what they typed and retries. */
-const SERVER_ERROR_MESSAGE = 'Something went wrong on our side. Try again.'
-
 /** AC2 — shown when the host's exercise context cannot be resolved at submit time. */
 const UNRESOLVED_CONTEXT_MESSAGE =
   "This address isn't configured for staff sign-in — check the URL your planner gave you."
@@ -215,7 +214,7 @@ interface ExerciseBoundFormProps {
  *
  *  - `begin()` returns a generation number, or `null` when a request is already in flight. It is
  *    a REF, so two submits in the same tick (autofill plus Enter) cannot both pass.
- *  - `isCurrent(g)` is false once the form has unmounted or backed out (`cancel()`), so a late
+ *  - `isCurrent(g)` is false once the form has unmounted, so a late
  *    reply is ignored: no `completeSignIn`, no navigate, no state update.
  */
 function useSubmitGuard() {
@@ -262,10 +261,18 @@ function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps)
   const [submitting, setSubmitting] = useState(false)
   const usernameRef = useRef<HTMLInputElement>(null)
   const secretRef = useRef<HTMLInputElement>(null)
+  const lastField = useRef<'username' | 'secret'>('username')
 
   useEffect(() => {
     usernameRef.current?.focus()
   }, [])
+
+  // The AC2 "not configured" error is stale the moment the context arrives.
+  useEffect(() => {
+    if (contextQuery.data) {
+      setErrorMessage(previous => (previous === UNRESOLVED_CONTEXT_MESSAGE ? null : previous))
+    }
+  }, [contextQuery.data])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -309,6 +316,9 @@ function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps)
         if (signInError.status === 401) {
           setSecret('')
           secretRef.current?.focus()
+        } else if (signInError.unreachable || (signInError.status ?? 0) >= 500) {
+          // Keep what was typed and put focus back where the person was.
+          ;(lastField.current === 'username' ? usernameRef : secretRef).current?.focus()
         }
       })
       .finally(() => {
@@ -333,7 +343,13 @@ function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps)
         value={username}
         onChange={event => setUsername(event.target.value)}
         inputRef={usernameRef}
-        slotProps={{ htmlInput: { readOnly: submitting, ...TYPED_IDENTIFIER_ATTRIBUTES } }}
+        slotProps={{
+          htmlInput: {
+            readOnly: submitting,
+            onFocus: () => { lastField.current = 'username' },
+            ...TYPED_IDENTIFIER_ATTRIBUTES,
+          },
+        }}
         required
         fullWidth
       />
@@ -345,7 +361,9 @@ function ExerciseBoundForm({ contextQuery, onUseEmail }: ExerciseBoundFormProps)
         value={secret}
         onChange={event => setSecret(event.target.value)}
         inputRef={secretRef}
-        slotProps={{ htmlInput: { readOnly: submitting } }}
+        slotProps={{
+          htmlInput: { readOnly: submitting, onFocus: () => { lastField.current = 'secret' } },
+        }}
         required
         fullWidth
       />
@@ -462,7 +480,9 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
   /**
    * Copy for a failed sign-in. Credentials-type refusals (400, 401, 403, 429 and anything else
    * the server answered) stay uniform and clear the password; 429 cannot be split out without
-   * hinting at a lock. A 5xx, a missing response and a malformed reply say so, and KEEP what was
+   * hinting at a lock. A 5xx is uniform too: the only 5xx a login can raise come after the password
+   * matched (session issue / save), so a distinct 5xx message would be an oracle. A missing
+   * response and a malformed reply say so, and KEEP what was
    * typed so the person can simply retry, with focus back where they were.
    */
   const handleSignInFailure = (error: unknown) => {
@@ -470,7 +490,6 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
     if (!(error instanceof StaffSignInError)) keepMessage = GENERIC_FAILURE_MESSAGE
     else if (error.unreachable) keepMessage = UNREACHABLE_MESSAGE
     else if (error.status === undefined) keepMessage = GENERIC_FAILURE_MESSAGE
-    else if (error.status >= 500) keepMessage = SERVER_ERROR_MESSAGE
 
     if (keepMessage !== null) {
       setErrorMessage(keepMessage)
@@ -607,12 +626,18 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
       sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', maxWidth: 360 }}
     >
       {orgSlug ? (
-        <Typography variant="body2" data-testid="staff-org-slug" sx={{ color: 'text.secondary' }}>
+        <Typography
+          id="staff-org-slug-note"
+          variant="body2"
+          data-testid="staff-org-slug"
+          sx={{ color: 'text.secondary' }}
+        >
           Signing in to <strong>{orgSlug}</strong>
         </Typography>
       ) : null}
       {invalidSlug ? (
         <Typography
+          id="staff-org-slug-note"
           variant="body2"
           data-testid="staff-org-slug-invalid"
           sx={{ color: 'text.secondary' }}
@@ -630,6 +655,7 @@ function OrgSignInForm({ orgSlug, invalidSlug, onUseSecret }: OrgSignInFormProps
         slotProps={{
           htmlInput: {
             readOnly: submitting,
+            'aria-describedby': orgSlug || invalidSlug ? 'staff-org-slug-note' : undefined,
             onFocus: () => { lastField.current = 'email' },
             ...TYPED_IDENTIFIER_ATTRIBUTES,
           },
@@ -696,6 +722,12 @@ type FormMode = 'email' | 'secret'
  */
 function StaffSignInForm() {
   const { slug } = useParams<{ slug?: string }>()
+  // Keyed on the normalised slug, so client-side navigation between `/staff/login` and
+  // `/o/:slug` re-derives the default and resets the form.
+  return <StaffSignInFormBody key={slug?.trim().toLowerCase() ?? ''} slug={slug} />
+}
+
+function StaffSignInFormBody({ slug }: { readonly slug?: string }) {
   const normalizedSlug = slug?.trim().toLowerCase()
   const orgSlug =
     normalizedSlug !== undefined && ORG_SLUG_PATTERN.test(normalizedSlug)
@@ -729,7 +761,9 @@ function StaffSignInForm() {
     if (settled && lockedDefault === null) setLockedDefault(defaultMode)
   }, [settled, lockedDefault, defaultMode])
 
-  const mode = chosenMode ?? lockedDefault
+  // Computed at render time so a settled host never paints a placeholder frame; the lock above
+  // then keeps it from changing.
+  const mode = chosenMode ?? lockedDefault ?? (settled ? defaultMode : null)
   if (mode === null) {
     return (
       <Stack
