@@ -105,14 +105,25 @@ function isAlertsHistoryPage(body: unknown): body is AlertsHistoryPage {
 const MOCK_ALERTS: readonly Alert[] = []
 
 /**
+ * The server's history order: newest scenario time first, then id ascending. Ids compare as
+ * strings here; the server's Guid ordering differs, which only matters for tied mock times.
+ */
+function newestFirst(alerts: readonly Alert[]): readonly Alert[] {
+  return [...alerts].sort((a, b) =>
+    Date.parse(b.scenarioTime) - Date.parse(a.scenarioTime) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+/**
  * Answers both alert reads with the canned set, while still running the shared
  * axios client's request pipeline (base URL, headers, interceptors) exactly as
- * a live call would. History mirrors the active set, so the two never disagree.
+ * a live call would. History mirrors the active set, so the two never disagree,
+ * and comes back newest first like `GET /alerts/history`.
  */
 export const alertsMockAdapter: AxiosAdapter = config => {
   const isHistory = (config.url ?? '').startsWith('/alerts/history')
   const data: AlertsBody | AlertsHistoryPage = isHistory
-    ? { alerts: MOCK_ALERTS, nextCursor: null }
+    ? { alerts: newestFirst(MOCK_ALERTS), nextCursor: null }
     : { alerts: MOCK_ALERTS }
   return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
 }
