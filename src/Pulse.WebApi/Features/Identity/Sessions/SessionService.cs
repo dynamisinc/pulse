@@ -58,6 +58,13 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// sweeps (Gate-2 S-2); this is the defence in depth behind it, so a session that ever outlived a Disable would end
 /// within one access-token lifetime. Staff and read-only sessions carry no account and are not checked.
 /// </para>
+/// <para>
+/// <b>The session's person must still permit it (#839).</b> <c>GET /api/session</c> and refresh read the session's person
+/// in the same statement as the session (<see cref="SessionHolderQueries"/>) and refuse, exactly like a revoked session,
+/// when the person is disabled, when an org-scope session's person is no longer an org admin, or when the password changed
+/// after the session was issued. This closes the window in which a sign-in racing a demote, disable or reset inserts a
+/// session the change's own sweep never saw.
+/// </para>
 /// </remarks>
 public sealed class SessionService
 {
@@ -128,11 +135,21 @@ public sealed class SessionService
         }
 
         var tokenHash = SessionTokens.Hash(rawToken);
-        var session = await _dbContext.Sessions
-            .SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
+        var row = await _dbContext.Sessions
+            .Where(s => s.TokenHash == tokenHash)
+            .WithHolderStanding(_dbContext)
+            .SingleOrDefaultAsync(cancellationToken);
 
-        if (session is null)
+        if (row is null)
         {
+            return SessionQueryResult.Absent();
+        }
+
+        var session = row.Session;
+        if (!SessionHolderQueries.HolderPermits(session, row.Holder))
+        {
+            // #839: the person has since been disabled, lost the org-admin grant an org-scope session needs, or changed
+            // their password. The same silent 401 as a revoked session (no session.expired event).
             return SessionQueryResult.Absent();
         }
 
@@ -159,8 +176,8 @@ public sealed class SessionService
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
     /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
-    /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is not an enabled account
-    /// of the session's own exercise, or (a participant or read-only session) whose exercise's lifecycle refuses
+    /// is revoked or whose refresh window has lapsed, or whose person no longer permits it (#839), or (a participant
+    /// session) whose account is not an enabled account of the session's own exercise, or (a participant or read-only session) whose exercise's lifecycle refuses
     /// participant reads, or (a capped participant session) whose exercise day has ended. In that last case
     /// the session is also revoked (still no event), because its stored window was still open.
     /// </summary>
@@ -175,8 +192,11 @@ public sealed class SessionService
         }
 
         var refreshHash = SessionTokens.Hash(rawRefreshToken);
-        var session = await _dbContext.Sessions
-            .SingleOrDefaultAsync(s => s.RefreshTokenHash == refreshHash, cancellationToken);
+        var row = await _dbContext.Sessions
+            .Where(s => s.RefreshTokenHash == refreshHash)
+            .WithHolderStanding(_dbContext)
+            .SingleOrDefaultAsync(cancellationToken);
+        var session = row?.Session;
 
         var now = _timeProvider.GetUtcNow();
         if (session is null ||
@@ -185,6 +205,15 @@ public sealed class SessionService
             session.RefreshExpiresAt.Value <= now)
         {
             // Unknown / revoked / lapsed refresh window → force a full re-login (fail closed).
+            return RefreshResult.Invalid();
+        }
+
+        if (!SessionHolderQueries.HolderPermits(session, row!.Holder))
+        {
+            // #839, fail closed: the person has since been disabled, lost the org-admin grant an org-scope session needs,
+            // or changed their password after this session was issued. Checked BEFORE IssuedAt is renewed below, so a
+            // stale session can never refresh itself past the password change. Refused exactly as a revoked session is:
+            // 401, no event, nothing written.
             return RefreshResult.Invalid();
         }
 

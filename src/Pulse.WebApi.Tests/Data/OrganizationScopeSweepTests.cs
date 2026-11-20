@@ -183,7 +183,10 @@ public sealed class OrganizationScopeSweepTests
         // server-issued session carries on the principal) in order to DISCOVER their tenant — the one read
         // that cannot be tenant-bound without a chicken-and-egg deadlock, and the same provenance the two
         // StaffAssignmentService sites already claim.
-        ["OwnIdentity"] = 3,
+        // #839: +1 for SessionHolderQueries.WithHolderStanding — the person named by the server-issued session row
+        // itself (PersonId, or the shared-key StaffUserId), read in the same statement as the session so every
+        // authenticated request re-checks that person's disabled / org-admin / password-changed state.
+        ["OwnIdentity"] = 4,
 
         // identity-auth-roles/15: -1 — StaffAssignmentService's switch now reads the target exercise .InOrganization(...).
         ["TenantChecked"] = 1,
