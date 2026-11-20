@@ -18,14 +18,16 @@ using Xunit;
 /// then be refused with 403 and change nothing. The interleaving is staged with a command hook, not timing. Both PATCH
 /// shapes are covered: one that reduces the admin count (takes the last-admin lock first) and one that does not.
 /// </summary>
-[Collection(MsSqlCollection.Name)]
+[Collection(MsSqlRcsiCollection.Name)]
 public sealed class OrgPeopleStaleCallerTests
 {
     private readonly MsSqlContainerFixture _fixture;
     private readonly CredentialTestWorld _world;
 
-    public OrgPeopleStaleCallerTests(MsSqlContainerFixture fixture)
+    public OrgPeopleStaleCallerTests(MsSqlRcsiFixture rcsi)
     {
+        ArgumentNullException.ThrowIfNull(rcsi);
+        var fixture = rcsi.Sql;
         _fixture = fixture;
         _world = new CredentialTestWorld(fixture);
     }

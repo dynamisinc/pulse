@@ -33,14 +33,16 @@ using Pulse.WebApi.Tests.Helpers;
 /// password arm is closed by the lock alone (see <see cref="PersonRowSerializationTests"/>). A control session of a person
 /// whose state did not change keeps authenticating.
 /// </summary>
-[Collection(MsSqlCollection.Name)]
+[Collection(MsSqlRcsiCollection.Name)]
 public sealed class SessionHolderRaceTests
 {
     private readonly MsSqlContainerFixture _fixture;
     private readonly CredentialTestWorld _world;
 
-    public SessionHolderRaceTests(MsSqlContainerFixture fixture)
+    public SessionHolderRaceTests(MsSqlRcsiFixture rcsi)
     {
+        ArgumentNullException.ThrowIfNull(rcsi);
+        var fixture = rcsi.Sql;
         _fixture = fixture;
         _world = new CredentialTestWorld(fixture);
     }

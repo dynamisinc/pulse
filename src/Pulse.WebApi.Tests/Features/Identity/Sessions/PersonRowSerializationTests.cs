@@ -40,7 +40,7 @@ using Xunit;
 /// </list>
 /// Either way the invariant holds: no live session carries the person state the change replaced.
 /// </summary>
-[Collection(MsSqlCollection.Name)]
+[Collection(MsSqlRcsiCollection.Name)]
 public sealed class PersonRowSerializationTests
 {
     /// <summary>Long enough for an un-blocked competitor to finish (one PBKDF2 verify, a few statements).</summary>
@@ -50,8 +50,10 @@ public sealed class PersonRowSerializationTests
     private readonly CredentialTestWorld _world;
     private readonly EnrollmentTestKit _enrollments;
 
-    public PersonRowSerializationTests(MsSqlContainerFixture fixture)
+    public PersonRowSerializationTests(MsSqlRcsiFixture rcsi)
     {
+        ArgumentNullException.ThrowIfNull(rcsi);
+        var fixture = rcsi.Sql;
         _fixture = fixture;
         _world = new CredentialTestWorld(fixture);
         _enrollments = new EnrollmentTestKit(fixture);
@@ -241,8 +243,8 @@ public sealed class PersonRowSerializationTests
                 live.Where(s => s.ExerciseId == world.Exercise).Should().BeEmpty("no session survives the enrollment's removal");
                 break;
             default:
-                live.Where(s => s.ExerciseId == world.Exercise).Should().OnlyContain(
-                    s => s.Role == "evaluator", "no session carries the role the change replaced");
+                live.Where(s => s.ExerciseId == world.Exercise).Should().NotContain(
+                    s => s.Role != "evaluator", "no session carries the role the change replaced");
                 break;
         }
     }

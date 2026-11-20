@@ -189,7 +189,9 @@ public sealed class OrganizationScopeSweepTests
         ["OwnIdentity"] = 4,
 
         // identity-auth-roles/15: -1 — StaffAssignmentService's switch now reads the target exercise .InOrganization(...).
-        ["TenantChecked"] = 1,
+        // #858 review S-001: +1 for PersonSessionLock.TryLockForMintAsync — an existence probe for the minting id in
+        // ANOTHER organization (explicit OrganizationId comparison), whose only effect is to REFUSE the mint.
+        ["TenantChecked"] = 2,
 
         // exercise-lifecycle-admin (review finding WR-008): the tenant ROOT table joined the swept set, so
         // its one existing reader — BootstrapService.ResolveDefaultOrganizationAsync, a lookup by the FIXED
