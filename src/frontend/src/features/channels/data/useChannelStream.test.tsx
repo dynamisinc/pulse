@@ -70,7 +70,7 @@ class FakeConnection implements RealtimeConnection {
     for (const handler of this.handlers.get(eventName) ?? []) handler(payload)
   }
 
-  setState(state: HubConnectionState, reason?: 'stopped'): void {
+  setState(state: HubConnectionState, reason?: 'stopped' | 'scope-changed'): void {
     this.state = state
     for (const listener of this.listeners) listener(state, reason)
   }
@@ -316,6 +316,20 @@ describe('useChannelStream', () => {
 
     act(() => connected.setState(HubConnectionState.Reconnecting))
     act(() => connected.setState(HubConnectionState.Connected))
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats an exercise switch (scope-changed) as a gap: no restart, resync when the hub returns (#856)', () => {
+    const connection = new FakeConnection()
+    connection.state = HubConnectionState.Connected
+    const { onResync } = setup({ connection })
+    expect(connection.startCalls).toBe(1)
+
+    act(() => connection.setState(HubConnectionState.Disconnected, 'scope-changed'))
+    expect(connection.startCalls).toBe(1) // the switch owner resumes the hub, not this stream
+    expect(onResync).not.toHaveBeenCalled()
+
+    act(() => connection.setState(HubConnectionState.Connected))
     expect(onResync).toHaveBeenCalledTimes(1)
   })
 

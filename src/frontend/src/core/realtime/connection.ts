@@ -57,10 +57,19 @@
  *     auto-reconnect cannot deliver B frames early. The reason `'scope-changed'` (not
  *     `'stopped'`) tells consumers this is a missed-push window - they mark a gap and resync
  *     once the connection is back - and that nobody should restart it yet.
- *   - `resume()` once the new scope has been committed: start on the current token, with every
- *     handler re-attached. Idempotent (a consumer that already restarted shares the start), and
- *     a no-op when nothing is subscribed. If the switch fails to re-resolve, nobody calls it and
- *     the hub stays stopped (fail closed).
+ *   - SUSPENSION. `stop('scope-changed')` also SUSPENDS the connection: while suspended,
+ *     `start()` builds nothing and REJECTS quietly (`SUSPENDED`), so a consumer's recovery driver
+ *     (the feed's poll loop, a re-attach) cannot reopen the hub mid-switch, nor after a switch
+ *     whose scope could not be re-resolved (fail closed). Rejecting is the honest answer: the
+ *     connection is not up, so a consumer keeps whatever fallback it has. Only `resume()` or a
+ *     plain `stop()` (sign-out / sign-in, via the session reset) lifts it, so a sign-out in the
+ *     middle of a switch cannot strand the next identity's connection.
+ *   - `resume()` once the new scope has been committed: lifts the suspension and starts on the
+ *     current token, with every handler re-attached. It does nothing when no handler is
+ *     subscribed or nobody is signed in, and it never rejects. If the connection is somehow
+ *     already Connected it announces `Connected` again, so gap consumers still resync under the
+ *     new scope.
+ *     If the switch fails to re-resolve, nobody calls it and the hub stays stopped.
  *   - a TERMINAL close that is not a sign-out (auto-reconnect exhausted, e.g. repeated 403s):
  *     rebuild ONCE with the current token. The attempt budget is spent when it is made and is
  *     refilled only after a connection has stayed Connected for `STABLE_CONNECTION_MS`, so a hub
@@ -156,11 +165,16 @@ export interface ManagedRealtimeConnection extends RealtimeConnection {
   /**
    * Starts the connection again after `stop('scope-changed')`, once the new exercise scope is
    * committed (#856). Starts on the then-current token with every `subscribe`d handler
-   * re-attached. Idempotent (shares a start already made, e.g. by a consumer's own re-attach);
-   * does nothing when no handler is subscribed. Never throws or rejects.
+   * re-attached. Lifts the suspension `stop('scope-changed')` put in place. Does nothing (beyond
+   * lifting it) when no handler is subscribed or no session token is stored. If the connection
+   * is already Connected it emits a fresh `Connected` so gap consumers resync. Never throws or
+   * rejects.
    */
   resume(): Promise<void>
 }
+
+/** Why `start()` refused while the connection is suspended by `stop('scope-changed')`. */
+export const SUSPENDED = 'The realtime connection is suspended while the exercise scope changes.'
 
 /**
  * How long a rebuilt connection must stay `Connected` before the terminal-close rebuild budget
@@ -306,6 +320,8 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   private closing: Promise<void> = Promise.resolve()
   /** True once a terminal close has been answered with a rebuild; refilled by a good connect. */
   private rebuildSpent = false
+  /** Set by `stop('scope-changed')`; while true `start()` refuses. See the module header. */
+  private suspended = false
   /** Refills the rebuild budget once the connection has stayed up for STABLE_CONNECTION_MS. */
   private stableTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -338,6 +354,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   }
 
   start(): Promise<void> {
+    if (this.suspended) return Promise.reject(new Error(SUSPENDED))
     const connection = this.ensureConnection()
     if (connection.state === HubConnectionState.Connected) return Promise.resolve()
     if (this.startPromise !== null) return this.startPromise
@@ -365,6 +382,9 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   }
 
   stop(reason: RealtimeStateReason = 'stopped'): Promise<void> {
+    // A scope change SUSPENDS (no start() until resume()); any other stop - a sign-out or
+    // sign-in - lifts a suspension, so a session that ends mid-switch cannot strand the next one.
+    this.suspended = reason === 'scope-changed'
     const connection = this.connection
     if (connection === null) return this.closing
 
@@ -398,9 +418,18 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   }
 
   resume(): Promise<void> {
-    if (this.subscriptions.size === 0 && this.connection === null) return Promise.resolve()
+    this.suspended = false
+    if (this.subscriptions.size === 0) return Promise.resolve()
+    // Signed out meanwhile: there is no identity to connect as (negotiate would only 401).
+    if (getAccessToken() === null) return Promise.resolve()
     // A deliberate resume starts a new situation, not a retry of the last close.
     this.rebuildSpent = false
+    if (this.connection?.state === HubConnectionState.Connected) {
+      // Suspension makes this unreachable in practice; if it ever happens, consumers that
+      // recorded a gap must still resync under the new scope.
+      this.emitState(HubConnectionState.Connected)
+      return Promise.resolve()
+    }
     return this.start().catch(() => {
       // The consumers' own recovery (polling fallback, retry on Disconnected) owns a failed start.
     })
@@ -460,6 +489,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
     // background and must not speak for the shared connection any more.
     connection.onreconnecting(() => {
       if (this.connection !== connection) return
+      this.clearStableTimer()
       this.emitState(HubConnectionState.Reconnecting)
     })
     connection.onreconnected(() => {

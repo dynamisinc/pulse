@@ -176,7 +176,10 @@ describe('a feed that is still started when the identity changes', () => {
   })
 
   it('still degrades to polling when the hub is genuinely lost (auto-reconnect exhausted)', async () => {
-    const { connection, fakes } = createFakeTransport()
+    // The hub stays down: the one terminal-close rebuild (#856) is refused too.
+    const { connection, fakes } = createFakeTransport((fake, index) => {
+      if (index >= 1) fake.startImpl = () => Promise.reject(new Error('still down'))
+    })
     const fetchFeed = vi.fn<() => Promise<Post[]>>().mockResolvedValue([])
     const feed = createRealtimeFeed({ connection, fetchFeed, pollIntervalMs: 1000 })
     await feed.start()
@@ -184,7 +187,6 @@ describe('a feed that is still started when the identity changes', () => {
     // A bare Disconnected (no 'stopped' reason) is the existing NFR-003 path, unchanged.
     const first = fakes[0]
     if (first === undefined) throw new Error('no connection was built')
-    first.startImpl = () => Promise.reject(new Error('still down'))
     first.triggerClose()
     await vi.advanceTimersByTimeAsync(0)
 

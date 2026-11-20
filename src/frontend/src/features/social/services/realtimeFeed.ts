@@ -602,6 +602,8 @@ class RealtimeFeedController implements SessionResettableFeed {
       case HubConnectionState.Disconnected:
         if (reason === 'stopped') {
           this.reattach()
+        } else if (reason === 'scope-changed') {
+          this.holdForScopeChange()
         } else {
           this.enterPolling()
         }
@@ -609,6 +611,18 @@ class RealtimeFeedController implements SessionResettableFeed {
       default:
         break
     }
+  }
+
+  /**
+   * The shared connection was stopped for an exercise SWITCH (#856): a gap, not a loss. Do NOT
+   * degrade to polling and do NOT restart anything: the connection is suspended until the switch
+   * owner (`useSetActiveExercise`) resumes it once the new scope is committed, and its `Connected`
+   * brings this feed back to real-time. A feed that was already polling keeps its safety net
+   * (the recovery driver's `start()` is refused while suspended).
+   */
+  private holdForScopeChange(): void {
+    this.clearReconnectWindow()
+    if (this.currentMode === 'realtime') this.currentMode = 'connecting'
   }
 
   /**

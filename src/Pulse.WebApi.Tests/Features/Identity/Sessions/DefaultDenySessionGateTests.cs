@@ -283,6 +283,8 @@ public sealed class DefaultDenySessionGateTests
         using var factory = new GateProbeFactory(AcceptedToken);
         using var client = factory.CreateClient();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        client.DefaultRequestHeaders.Authorization.Should().BeNull(
+            "this leg must authenticate by the query string alone, with no Authorization header on any request");
 
         var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
 
@@ -330,6 +332,26 @@ public sealed class DefaultDenySessionGateTests
             $"hubs/exercise?id={connectionToken}&access_token={token}", cts.Token);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HubConnect_WhenTheSessionBehindTheTokenChangesBetweenNegotiateAndTransport_IsRefusedWith403()
+    {
+        // The server behaviour the staff console's exercise-switch handling (#856) relies on: since the
+        // ASP.NET Core servicing update, HttpConnectionDispatcher refuses a long-poll/SSE request whose user
+        // differs from the negotiate request's. A staff exercise switch rewrites the session's principal, so a
+        // connection left running through one gets this 403 - which is why the client stops the hub BEFORE the
+        // switch and rebuilds it after. The stub resolves the same token to session S1 on the first call
+        // (negotiate) and to a different session on every later one.
+        using var factory = new GateProbeFactory(AcceptedToken, rotateSessionAfterFirstCall: true);
+        using var client = factory.CreateClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
+
+        using var response = await client.GetAsync(
+            $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -493,6 +515,7 @@ public sealed class DefaultDenySessionGateTests
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
         private readonly string? _acceptedToken;
+        private readonly bool _rotateSessionAfterFirstCall;
 
         /// <summary>Completes once the server has finished a connection's <c>OnConnectedAsync</c> (its group join).</summary>
         public HubConnectedSignal Connected { get; } = new();
@@ -504,9 +527,14 @@ public sealed class DefaultDenySessionGateTests
         /// still driving the REAL middleware, the REAL token extraction and the REAL gate — the token→session
         /// lookup itself is covered by the session slice's own suites.
         /// </param>
-        public GateProbeFactory(string? acceptedToken = null)
+        /// <param name="rotateSessionAfterFirstCall">
+        /// When true the accepted token resolves to one session on the first authentication and to a DIFFERENT
+        /// session on every later one - the principal-changed-mid-connection case of an exercise switch.
+        /// </param>
+        public GateProbeFactory(string? acceptedToken = null, bool rotateSessionAfterFirstCall = false)
         {
             _acceptedToken = acceptedToken;
+            _rotateSessionAfterFirstCall = rotateSessionAfterFirstCall;
             Environment.SetEnvironmentVariable(
                 ConnectionStringEnvVar,
                 "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
@@ -525,8 +553,11 @@ public sealed class DefaultDenySessionGateTests
 
                 if (_acceptedToken is not null)
                 {
+                    // The authenticator is scoped (one per request), so the call count it rotates on is shared.
+                    var calls = new int[1];
+                    var rotate = _rotateSessionAfterFirstCall;
                     services.AddScoped<ISessionAuthenticator>(
-                        _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId));
+                        _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId, rotate ? calls : null));
                 }
             });
         }
@@ -556,10 +587,15 @@ public sealed class DefaultDenySessionGateTests
         private readonly string _acceptedToken;
         private readonly Guid _exerciseId;
 
-        public SingleTokenSessionAuthenticator(string acceptedToken, Guid exerciseId)
+        private static readonly Guid RotatedSessionId = Guid.Parse("cccccccc-0000-4000-8000-00000000000c");
+
+        private readonly int[]? _rotatingCalls;
+
+        public SingleTokenSessionAuthenticator(string acceptedToken, Guid exerciseId, int[]? rotatingCalls = null)
         {
             _acceptedToken = acceptedToken;
             _exerciseId = exerciseId;
+            _rotatingCalls = rotatingCalls;
         }
 
         public Task<AuthenticatedSession?> AuthenticateAsync(string rawToken, CancellationToken cancellationToken)
@@ -567,7 +603,9 @@ public sealed class DefaultDenySessionGateTests
                 string.Equals(rawToken, _acceptedToken, StringComparison.Ordinal)
                     ? new AuthenticatedSession
                     {
-                        SessionId = StableSessionId,
+                        SessionId = _rotatingCalls is not null && System.Threading.Interlocked.Increment(ref _rotatingCalls[0]) > 1
+                            ? RotatedSessionId
+                            : StableSessionId,
                         ExerciseId = _exerciseId,
                         Kind = "participant",
                         PrincipalId = "gate-probe-principal",

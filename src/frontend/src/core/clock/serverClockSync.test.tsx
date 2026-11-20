@@ -16,7 +16,7 @@ import type { ScenarioClockRead } from './serverClockSync'
 import { ServerClockSync } from './ServerClockMount'
 
 type Handler = (payload: unknown) => void
-type StateListener = (state: HubConnectionState, reason?: 'stopped') => void
+type StateListener = (state: HubConnectionState, reason?: 'stopped' | 'scope-changed') => void
 
 const hub = vi.hoisted(() => ({
   handlers: new Map<string, Set<(payload: unknown) => void>>(),
@@ -65,8 +65,8 @@ function frame(overrides: Partial<ScenarioClockState> = {}, exerciseId = 'ex-1')
 function push(name: string, payload: unknown): void {
   hub.handlers.get(name)?.forEach(handler => handler(payload))
 }
-function emitState(state: HubConnectionState): void {
-  hub.stateListeners.forEach(listener => listener(state))
+function emitState(state: HubConnectionState, reason?: 'stopped' | 'scope-changed'): void {
+  hub.stateListeners.forEach(listener => listener(state, reason))
 }
 function handlerCount(name: string): number {
   return hub.handlers.get(name)?.size ?? 0
@@ -193,6 +193,29 @@ describe('startServerClockSync', () => {
     act(() => emitState(HubConnectionState.Reconnecting))
     act(() => emitState(HubConnectionState.Connected))
     expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats an exercise switch (scope-changed) as a gap: resyncs when the hub returns (#856)', async () => {
+    const clock = createServerExerciseClock()
+    const read = vi.fn().mockResolvedValue({ state: body(), roundTripMs: 0 })
+    startServerClockSync('ex-1', { clock, read })
+    await flush()
+    expect(read).toHaveBeenCalledTimes(1)
+
+    act(() => emitState(HubConnectionState.Disconnected, 'scope-changed'))
+    act(() => emitState(HubConnectionState.Connected))
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('does NOT resync after a deliberate session stop', async () => {
+    const clock = createServerExerciseClock()
+    const read = vi.fn().mockResolvedValue({ state: body(), roundTripMs: 0 })
+    startServerClockSync('ex-1', { clock, read })
+    await flush()
+
+    act(() => emitState(HubConnectionState.Disconnected, 'stopped'))
+    act(() => emitState(HubConnectionState.Connected))
+    expect(read).toHaveBeenCalledTimes(1)
   })
 
   it('resyncs periodically', () => {

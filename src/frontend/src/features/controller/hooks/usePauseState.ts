@@ -460,12 +460,12 @@ function authoritativeTier(server: PauseTierServerState): PauseTier {
 }
 
 /**
- * Whether the live-mode one-shot resync GET has already been kicked off for this
+ * The exercise the live-mode one-shot resync GET was last kicked off for in this
  * runtime — `usePauseState()` is mounted by more than one surface (the pill and
  * the header), and only ONE of them should read the server tier (mirrors
  * `liveReviewStore.ensureStarted`'s idempotence).
  */
-let resyncStarted = false
+let resyncedFor: string | null = null
 
 /**
  * Bumped by everything that SUPERSEDES an in-flight server read: a controller's own
@@ -540,7 +540,7 @@ export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
-  resyncStarted = false
+  resyncedFor = null
   supersedeSequence = 0
   engineModeBeforePause = null
   transitionSequence = 0
@@ -559,7 +559,7 @@ function resetPauseStateForSession(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
-  resyncStarted = false
+  resyncedFor = null
   engineModeBeforePause = null
   transitionSequence++
   supersedeSequence++
@@ -785,8 +785,10 @@ export function usePauseState(): PauseState {
   // gave. It still applies the tier's local effects (the pausable clock, the
   // bar's position) so the console never contradicts the server.
   useEffect(() => {
-    if (USE_MOCK_DATA || resyncStarted) return
-    resyncStarted = true
+    // Keyed on the EXERCISE, not a boolean: a staff switch changes `exerciseId` under a mounted
+    // console, and B's tier must be read even though A's was (#856).
+    if (USE_MOCK_DATA || resyncedFor === exerciseId) return
+    resyncedFor = exerciseId
     void refreshPauseTierFromServer(exerciseId)
   }, [exerciseId])
 

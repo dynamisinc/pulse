@@ -12,6 +12,10 @@
  *  - stop('scope-changed') ends the connection with that reason, nobody restarts it on their
  *    own, `resume()` opens ONE new connection on the CURRENT token with handlers re-attached;
  *  - a consumer that restarts on `'stopped'` builds exactly one connection;
+ *  - SUSPENSION: after stop('scope-changed') start() builds no connection and rejects quietly
+ *    (a recovery driver cannot reopen the hub mid-switch, nor after a failed re-resolve) until
+ *    resume(); a plain stop() (sign-out/sign-in) lifts it; resume() does nothing when signed out
+ *    and re-announces Connected if the connection is somehow already up;
  *  - a stop during a start in flight leaves no overtaken connection live; back-to-back switches
  *    end on a single live connection;
  *  - a terminal close rebuilds ONCE with the current token and recovers; the rebuild budget is
@@ -22,7 +26,7 @@
  *  - a failed rebuild announces the loss only if its connection is still the current one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HubConnectionState, STABLE_CONNECTION_MS } from './connection'
+import { HubConnectionState, STABLE_CONNECTION_MS, SUSPENDED } from './connection'
 import type { RealtimeStateReason } from './connection'
 import { clearTokens, setTokens } from '@/core/auth/tokenStore'
 import { createFakeTransport } from '@/test/fakeHubConnection'
@@ -82,7 +86,7 @@ describe('stop(scope-changed) then resume() - the exercise switch', () => {
     expect(received).toEqual(['hello'])
   })
 
-  it('resume() shares a start a consumer already made, and does nothing when nothing is subscribed', async () => {
+  it('resume() does nothing when nothing is subscribed or nobody is signed in', async () => {
     const idle = createFakeTransport()
     await idle.connection.resume()
     expect(idle.fakes).toHaveLength(0)
@@ -91,10 +95,9 @@ describe('stop(scope-changed) then resume() - the exercise switch', () => {
     transport.connection.subscribe('X', () => {})
     await transport.connection.start()
     void transport.connection.stop('scope-changed')
-    await flush()
-    void transport.connection.start() // a consumer's own re-attach got there first
+    clearTokens() // signed out in the middle of the switch
     await transport.connection.resume()
-    expect(transport.fakes).toHaveLength(2)
+    expect(transport.fakes).toHaveLength(1)
   })
 
   it('resume() never rejects when the new connection cannot start', async () => {
@@ -254,7 +257,8 @@ describe('terminal close that is not a sign-out', () => {
     transport.connection.subscribe('X', () => {})
     await transport.connection.start()
     transport.connection.onStateChange(state => {
-      if (state === HubConnectionState.Disconnected) void transport.connection.start().catch(() => {})
+      if (state !== HubConnectionState.Disconnected) return
+      void transport.connection.start().catch(() => {})
     })
 
     transport.latest().triggerClose()
@@ -299,5 +303,65 @@ describe('terminal close that is not a sign-out', () => {
 
     expect(reasonlessLoss(seen)).toBe(1)
     expect(transport.latest().state).toBe(HubConnectionState.Connected)
+  })
+})
+
+describe('suspension while the exercise scope changes', () => {
+  it('start() builds nothing and rejects quietly until resume()', async () => {
+    const transport = createFakeTransport()
+    transport.connection.subscribe('X', () => {})
+    await transport.connection.start()
+
+    void transport.connection.stop('scope-changed')
+    await flush()
+    for (let i = 0; i < 3; i += 1) {
+      await expect(transport.connection.start()).rejects.toThrow(SUSPENDED)
+    }
+    expect(transport.fakes).toHaveLength(1)
+
+    await transport.connection.resume()
+    expect(transport.fakes).toHaveLength(2)
+    expect(transport.connection.state).toBe(HubConnectionState.Connected)
+  })
+
+  it('suspends even when nothing was live, and a plain stop() (sign-out) lifts it', async () => {
+    const transport = createFakeTransport()
+    transport.connection.subscribe('X', () => {})
+    void transport.connection.stop('scope-changed') // nothing started yet
+    await expect(transport.connection.start()).rejects.toThrow(SUSPENDED)
+
+    void transport.connection.stop() // the session reset of a sign-out / sign-in
+    await expect(transport.connection.start()).resolves.toBeUndefined()
+    expect(transport.connection.state).toBe(HubConnectionState.Connected)
+  })
+
+  it('resume() on an already-Connected connection announces Connected so gap consumers resync', async () => {
+    const transport = createFakeTransport()
+    transport.connection.subscribe('X', () => {})
+    await transport.connection.resume()
+    expect(transport.connection.state).toBe(HubConnectionState.Connected)
+    const seen = observe(transport)
+
+    await transport.connection.resume()
+
+    expect(seen).toEqual([{ state: HubConnectionState.Connected, reason: undefined }])
+    expect(transport.fakes).toHaveLength(1)
+  })
+
+  it('a reconnecting episode cancels the stable timer, so it cannot refill the budget meanwhile', async () => {
+    const transport = createFakeTransport()
+    transport.connection.subscribe('X', () => {})
+    await transport.connection.start()
+    transport.latest().triggerClose() // rebuild #1: budget spent, stable timer armed
+    await flush()
+    expect(transport.fakes).toHaveLength(2)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    transport.latest().triggerReconnecting() // SignalR is reconnecting: not stable any more
+    await vi.advanceTimersByTimeAsync(STABLE_CONNECTION_MS * 2)
+    transport.latest().triggerClose() // the reconnect gave up
+
+    await flush()
+    expect(transport.fakes).toHaveLength(2) // the budget was never refilled: no second rebuild
   })
 })

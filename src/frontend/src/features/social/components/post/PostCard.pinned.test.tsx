@@ -72,7 +72,7 @@ let pinHandlers: PinHandler[] = []
 let stateListeners: RealtimeStateListener[] = []
 
 /** The shared hub connection reports a state, exactly as its `onStateChange` does. */
-function hubState(state: HubConnectionState, reason?: 'stopped') {
+function hubState(state: HubConnectionState, reason?: 'stopped' | 'scope-changed') {
   act(() => {
     for (const listener of [...stateListeners]) listener(state, reason)
   })
@@ -452,6 +452,15 @@ describe('PostCard — recovery reconciles from one authoritative read (#553 Cop
     hubRecoversLive()
     expect(resolvePinnedFeedMock).toHaveBeenCalledTimes(1)
     expect(resolvePinnedFeedMock).toHaveBeenCalledWith()
+  })
+
+  it('an exercise switch (scope-changed) is a gap: it reads once when the hub returns (#856)', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+
+    hubState(HubConnectionState.Disconnected, 'scope-changed')
+    hubRecoversLive()
+
+    expect(resolvePinnedFeedMock).toHaveBeenCalledTimes(1)
   })
 
   it('a push, a gap, then a read that still has it pinned: the marker stays the whole time', async () => {

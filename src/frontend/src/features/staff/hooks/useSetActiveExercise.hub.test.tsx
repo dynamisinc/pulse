@@ -7,7 +7,10 @@
  *  - the hub is stopped (`'scope-changed'`) BEFORE the switch request;
  *  - the exercise-scope resets of the module stores run, then the hub is resumed, only AFTER the
  *    scope has been re-resolved (the second `GET /exercise-context` has answered);
- *  - a failed POST resumes on the old scope (no scope reset);
+ *  - a DEFINITE POST refusal (4xx) resumes on the old scope (no scope reset); an AMBIGUOUS
+ *    failure (5xx, network error, timeout) asks the server: B -> full commit and resume, A ->
+ *    resume, the re-resolve fails -> stay stopped;
+ *  - overlapping switches are serialized and only the LATEST resets the stores and resumes;
  *  - a failed re-resolve leaves the hub STOPPED (fail closed) and resets nothing;
  *  - two back-to-back switches stop and resume once each, in order.
  *
@@ -21,7 +24,7 @@ import { ExerciseContextProvider, useExerciseContext } from '@/core/exerciseCont
 import { resolveExerciseContext } from '@/core/exerciseContext/exerciseContextResolver'
 import { registerExerciseScopeReset } from '@/core/auth/sessionReset'
 import { realtimeConnection } from '@/core/realtime/connection'
-import { setActiveExercise } from '../services/staffAssignmentsService'
+import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
 import { useSetActiveExercise } from './useSetActiveExercise'
 
 vi.mock('@/core/exerciseContext/exerciseContextResolver', () => ({
@@ -125,10 +128,10 @@ describe('useSetActiveExercise - hub connection', () => {
     await waitFor(() => expect(result.current.exerciseId).toBe('ex-b'))
   })
 
-  it('a failed POST resumes on the old scope and resets nothing', async () => {
+  it('a definite refusal (4xx) resumes on the old scope and resets nothing', async () => {
     mockSwitch.mockImplementation(() => {
       log.push('post')
-      return Promise.reject(new Error('409'))
+      return Promise.reject(new StaffAssignmentError('conflict', { status: 409 }))
     })
     const { result } = await mount()
     await act(async () => {
@@ -136,6 +139,58 @@ describe('useSetActiveExercise - hub connection', () => {
     })
 
     expect(log).toEqual(['stop:scope-changed', 'post', 'resume'])
+  })
+
+  it.each([
+    ['a 503', { status: 503 }],
+    ['a network error', {}],
+    ['a 408 timeout', { status: 408 }],
+  ])('an ambiguous failure (%s) asks the server; B means a full commit and resume', async (_name, init) => {
+    mockSwitch.mockImplementation(() => {
+      log.push('post')
+      return Promise.reject(new StaffAssignmentError('boom', init))
+    })
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.mutation.mutateAsync('ex-b').catch(() => {})
+    })
+
+    expect(log).toEqual(['stop:scope-changed', 'post', 'resolve:ex-b', 'scope-reset', 'resume'])
+    await waitFor(() => expect(result.current.exerciseId).toBe('ex-b'))
+  })
+
+  it('an ambiguous failure where the server still reports A just resumes (no store reset)', async () => {
+    mockSwitch.mockImplementation(() => {
+      log.push('post')
+      return Promise.reject(new StaffAssignmentError('boom', { status: 502 }))
+    })
+    const { result } = await mount()
+    mockResolve.mockImplementation(() => {
+      log.push('resolve:ex-a')
+      return Promise.resolve(scope('ex-a'))
+    })
+    await act(async () => {
+      await result.current.mutation.mutateAsync('ex-b').catch(() => {})
+    })
+
+    expect(log).toEqual(['stop:scope-changed', 'post', 'resolve:ex-a', 'resume'])
+  })
+
+  it('an ambiguous failure whose re-resolve also fails leaves the hub stopped', async () => {
+    mockSwitch.mockImplementation(() => {
+      log.push('post')
+      return Promise.reject(new StaffAssignmentError('boom'))
+    })
+    const { result } = await mount()
+    mockResolve.mockImplementation(() => {
+      log.push('resolve:fails')
+      return Promise.reject(new Error('down'))
+    })
+    await act(async () => {
+      await result.current.mutation.mutateAsync('ex-b').catch(() => {})
+    })
+
+    expect(log).toEqual(['stop:scope-changed', 'post', 'resolve:fails'])
   })
 
   it('a failed re-resolve leaves the hub stopped and resets nothing (fail closed)', async () => {
@@ -169,6 +224,45 @@ describe('useSetActiveExercise - hub connection', () => {
       'scope-reset',
       'resume',
       'stop:scope-changed',
+      'post:ex-c',
+      'resolve:ex-c',
+      'scope-reset',
+      'resume',
+    ])
+  })
+})
+
+describe('useSetActiveExercise - overlapping switches', () => {
+  it('serializes the POSTs, and only the latest switch resets the stores and resumes the hub', async () => {
+    let releaseFirst: () => void = () => {}
+    mockSwitch.mockImplementationOnce(id => {
+      log.push(`post:${id}`)
+      return new Promise(resolve => {
+        releaseFirst = () => resolve(enrollment(id))
+      })
+    })
+    const { result } = await mount()
+
+    let first: Promise<unknown> = Promise.resolve()
+    let second: Promise<unknown> = Promise.resolve()
+    await act(async () => {
+      first = result.current.mutation.mutateAsync('ex-b')
+      second = result.current.mutation.mutateAsync('ex-c')
+      await Promise.resolve()
+    })
+    // The second switch's POST has NOT gone out: it waits for the first.
+    expect(log).toEqual(['stop:scope-changed', 'stop:scope-changed', 'post:ex-b'])
+
+    await act(async () => {
+      releaseFirst()
+      await Promise.all([first, second])
+    })
+
+    expect(log).toEqual([
+      'stop:scope-changed',
+      'stop:scope-changed',
+      'post:ex-b',
+      'resolve:ex-b', // the stale switch re-resolves but neither resets nor resumes
       'post:ex-c',
       'resolve:ex-c',
       'scope-reset',
