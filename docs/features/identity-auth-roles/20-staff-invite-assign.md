@@ -139,7 +139,7 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
   ("never to a third party"). The caller holds the bootstrap secret, the admin has no prior credential, and the tenant is
   brand new, so W5 (a PEER admin holding a link) is not engaged. **Once a mailer is configured the link goes by email
   only:** the 201's `inviteUrl` is `null`, even if the send fails. The 201 carries no organization id (XC-002).
-- **Sign-in UI gap (story 27):** there is no `/o/{slug}` page yet. The org sign-in is reached by the invite page's
+- **Sign-in UI gap (story 27, #835):** there is no `/o/{slug}` page yet. The org sign-in is reached by the invite page's
   automatic sign-in only; once that session ends, an org admin of an EMPTY organization has no UI way back in until
   story 27 ships (an admin with an enrollment can use that exercise's `/staff/login` with email + password). The
   "an empty org admin can then sign in at `/o/{slug}`" AC is met at the API (`POST /api/auth/staff/login {orgSlug}`).
@@ -166,3 +166,6 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
   `OrgScopeRouteSweepTests.OrgScopeRoutes` entry for the invite route; `DefaultDenySessionGateTests` allowlist row
 - Frontend: `features/orgDirectory` invite dialog, `features/staffPasswordReset` `/staff/invite` + awaiting-assignment tests
 
+**575b follow-ups filed (2026-11-20):** #847 (ops re-issue of an expired first-admin invite), #848 (granting org admin
+before the invitee sets a password cancels the invite with no re-invite), #849 (an invite does not match a person with no
+email on file and creates a duplicate). The empty-org sign-in gap is #835.
