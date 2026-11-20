@@ -48,18 +48,25 @@
  *     stop from "auto-reconnect exhausted" and re-attach instead of giving up.
  *
  * EXERCISE SWITCH + TERMINAL CLOSE (#856). A staff exercise switch rewrites the session's principal
- * server-side WITHOUT a sign-in, so nothing above ran `stop()`. Since the ASP.NET Core servicing
- * update the server refuses a long-poll/SSE request whose user differs from its negotiate request
- * (403), so a connection left running through a switch goes quiet on networks that fall back from
- * WebSockets. Two remedies live here:
- *   - `reconnect()` (called by `useSetActiveExercise` once the new scope is resolved): stop and
- *     rebuild on the current token, but only if a connection was up/coming up or a consumer is
- *     subscribed. Consumers see the usual `Disconnected('stopped')` then `Connected`.
+ * server-side WITHOUT a sign-in, so nothing above ran `stop()`. The server already cuts the
+ * session's hub connections on a switch (`StaffAssignmentService.SetActiveExerciseAsync` ->
+ * `RevokeAsync`), and SignalR's automatic reconnect then rejoins as exercise B - at a moment the
+ * console has not yet committed B's scope - while, since the ASP.NET Core servicing update, a
+ * long-poll/SSE request whose user changed is refused (403). So the client owns the transition:
+ *   - `stop('scope-changed')` BEFORE the switch request: A's frames stop at once and the
+ *     auto-reconnect cannot deliver B frames early. The reason `'scope-changed'` (not
+ *     `'stopped'`) tells consumers this is a missed-push window - they mark a gap and resync
+ *     once the connection is back - and that nobody should restart it yet.
+ *   - `resume()` once the new scope has been committed: start on the current token, with every
+ *     handler re-attached. Idempotent (a consumer that already restarted shares the start), and
+ *     a no-op when nothing is subscribed. If the switch fails to re-resolve, nobody calls it and
+ *     the hub stays stopped (fail closed).
  *   - a TERMINAL close that is not a sign-out (auto-reconnect exhausted, e.g. repeated 403s):
- *     rebuild ONCE with the current token. The attempt budget is spent when it is made and only
- *     refilled by a successful connect, so a hub that keeps refusing us causes one extra attempt,
- *     not a storm; after that consumers' own polling fallback / recovery driver takes over. No
- *     rebuild when no token is stored (signed out: fail closed).
+ *     rebuild ONCE with the current token. The attempt budget is spent when it is made and is
+ *     refilled only after a connection has stayed Connected for `STABLE_CONNECTION_MS`, so a hub
+ *     that accepts and then drops us cannot make a loop: at most one rebuild per window, then
+ *     consumers' own polling fallback / recovery driver takes over. No rebuild when no token is
+ *     stored (signed out: fail closed).
  *
  * TESTABILITY. `createRealtimeConnection({ hubUrl, buildConnection })` lets a
  * test point the connection at a fake transport (or override the hub URL)
@@ -82,13 +89,17 @@ export { HubConnectionState } from '@microsoft/signalr'
 export type RealtimeEventHandler = (payload: unknown) => void
 
 /**
- * Why a state transition happened, when the transport knows. Only one reason exists:
- * `'stopped'` accompanies the `Disconnected` that `stop()` causes (a DELIBERATE end,
- * e.g. the session's identity changed), as opposed to a bare `Disconnected`, which means
- * the connection was lost and auto-reconnect is exhausted. A consumer that polls as a
- * fallback should degrade on the latter and re-attach on the former.
+ * Why a state transition happened, when the transport knows. A bare `Disconnected` (no reason)
+ * means the connection was LOST and auto-reconnect is exhausted: a consumer that polls as a
+ * fallback should degrade. The two reasons are DELIBERATE ends:
+ *  - `'stopped'`: the session's identity changed (sign-out / sign-in). A consumer still started
+ *    re-attaches, and it is not a gap (its own session reset clears its state).
+ *  - `'scope-changed'`: the session's EXERCISE changed (staff switch, #856). Frames sent while
+ *    the connection is down are lost, so a consumer treats it as a GAP and resyncs when
+ *    `Connected` returns, but must NOT restart the connection itself: the switch owner calls
+ *    `resume()` once the new scope is committed.
  */
-export type RealtimeStateReason = 'stopped'
+export type RealtimeStateReason = 'stopped' | 'scope-changed'
 
 /** Observes connection-state transitions; `reason` is set only for a deliberate stop. */
 export type RealtimeStateListener = (
@@ -131,7 +142,7 @@ export interface RealtimeConnection {
    * that do not care (the session reset) may ignore the promise, and `start()` never
    * waits on it.
    */
-  stop(): Promise<void>
+  stop(reason?: RealtimeStateReason): Promise<void>
 
   /** The current connection state (`Disconnected` before the first start). */
   readonly state: HubConnectionState
@@ -143,13 +154,19 @@ export interface RealtimeConnection {
  */
 export interface ManagedRealtimeConnection extends RealtimeConnection {
   /**
-   * Re-establishes the connection on the then-current session token after the session's
-   * principal changed WITHOUT a sign-in (a staff exercise switch, #856). Stops the live
-   * connection (if any) and starts a fresh one with every `subscribe`d handler re-attached.
-   * Does nothing when nothing is started and nothing subscribed. Never throws or rejects.
+   * Starts the connection again after `stop('scope-changed')`, once the new exercise scope is
+   * committed (#856). Starts on the then-current token with every `subscribe`d handler
+   * re-attached. Idempotent (shares a start already made, e.g. by a consumer's own re-attach);
+   * does nothing when no handler is subscribed. Never throws or rejects.
    */
-  reconnect(): Promise<void>
+  resume(): Promise<void>
 }
+
+/**
+ * How long a rebuilt connection must stay `Connected` before the terminal-close rebuild budget
+ * is refilled. A hub that accepts and then drops us inside this window gets no second rebuild.
+ */
+export const STABLE_CONNECTION_MS = 30_000
 
 /** Options for {@link createRealtimeConnection} — overrides used by tests. */
 export interface CreateRealtimeConnectionOptions {
@@ -289,6 +306,8 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   private closing: Promise<void> = Promise.resolve()
   /** True once a terminal close has been answered with a rebuild; refilled by a good connect. */
   private rebuildSpent = false
+  /** Refills the rebuild budget once the connection has stayed up for STABLE_CONNECTION_MS. */
+  private stableTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
     this.buildConnection = options.buildConnection ?? createDefaultHubConnection
@@ -331,7 +350,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
           // it came up after all): do not announce a connection that is already abandoned.
           throw new Error(STOPPED_DURING_START)
         }
-        this.rebuildSpent = false
+        this.armStableTimer()
         this.emitState(HubConnectionState.Connected)
       })
       .catch((error: unknown) => {
@@ -345,7 +364,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
     return pending
   }
 
-  stop(): Promise<void> {
+  stop(reason: RealtimeStateReason = 'stopped'): Promise<void> {
     const connection = this.connection
     if (connection === null) return this.closing
 
@@ -359,6 +378,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
     // Disconnected and a start() builds a new connection rather than touching this one.
     this.connection = null
     this.startPromise = null
+    this.clearStableTimer()
     try {
       // Detach every handler first, so a frame still in flight from the old identity's
       // exercise reaches nobody - least of all a consumer already subscribed for the next one.
@@ -372,45 +392,62 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
     // token clear that follows it) so a listener that re-attaches sees the world as it
     // will be, not as it was.
     void Promise.resolve().then(() => {
-      this.emitState(HubConnectionState.Disconnected, 'stopped')
+      this.emitState(HubConnectionState.Disconnected, reason)
     })
     return this.closing
   }
 
-  reconnect(): Promise<void> {
-    const live =
-      (this.connection !== null && this.connection.state !== HubConnectionState.Disconnected) ||
-      this.startPromise !== null
-    if (!live && this.subscriptions.size === 0) return Promise.resolve()
-    // A deliberate switch refills the budget: this is a new situation, not a retry of the last.
+  resume(): Promise<void> {
+    if (this.subscriptions.size === 0 && this.connection === null) return Promise.resolve()
+    // A deliberate resume starts a new situation, not a retry of the last close.
     this.rebuildSpent = false
-    const closed = this.stop()
-    this.start().catch(() => {
+    return this.start().catch(() => {
       // The consumers' own recovery (polling fallback, retry on Disconnected) owns a failed start.
     })
-    return closed
+  }
+
+  private armStableTimer(): void {
+    this.clearStableTimer()
+    this.stableTimer = setTimeout(() => {
+      this.stableTimer = null
+      this.rebuildSpent = false
+    }, STABLE_CONNECTION_MS)
+  }
+
+  private clearStableTimer(): void {
+    if (this.stableTimer !== null) clearTimeout(this.stableTimer)
+    this.stableTimer = null
   }
 
   /**
-   * The auto-reconnect budget is exhausted and the hub connection is dead. If someone is still
-   * signed in, build a fresh connection ONCE on the current token (the old one may have been
-   * refused because its principal changed - #856). See the module header for the storm guard.
+   * A terminal close (auto-reconnect exhausted) with a session still signed in: abandon the dead
+   * connection and start ONE fresh one on the current token (the old one may have been refused
+   * because its principal changed - #856). The dead connection is dropped, `startPromise`
+   * included, BEFORE listeners hear `Disconnected`, so a listener that calls `start()` straight
+   * away builds a fresh connection instead of reviving the dead one - and then owns the restart.
    */
-  private rebuildAfterTerminalClose(closed: HubConnection): void {
-    if (this.rebuildSpent) return
-    if (this.connection !== closed) return
-    if (getAccessToken() === null) return
-    this.rebuildSpent = true
-    // Drop the dead connection so start() builds a new one (handlers come from the registry).
-    this.connection = null
-    try {
-      for (const { eventName, handler } of this.subscriptions) closed.off(eventName, handler)
-    } catch {
-      // Best effort; the connection is dead.
+  private handleTerminalClose(closed: HubConnection): void {
+    this.clearStableTimer()
+    this.startPromise = null
+    const rebuild = !this.rebuildSpent && getAccessToken() !== null
+    if (rebuild) {
+      this.rebuildSpent = true
+      this.connection = null
+      try {
+        for (const { eventName, handler } of this.subscriptions) closed.off(eventName, handler)
+      } catch {
+        // Best effort; the connection is dead.
+      }
     }
-    this.start().catch(() => {
-      // Failed: announce the loss so consumers fall back to polling. The budget stays spent.
-      this.emitState(HubConnectionState.Disconnected)
+    this.emitState(HubConnectionState.Disconnected)
+    // A listener (or a stop()) already moved on: the restart is theirs.
+    if (!rebuild || this.connection !== null) return
+    const attempt = this.start()
+    const rebuilt = this.connection
+    attempt.catch(() => {
+      // Failed. Announce the loss only if the connection WE started is still the current one:
+      // a stop()/resume() that overtook it owns the story now. The budget stays spent.
+      if (this.connection === rebuilt) this.emitState(HubConnectionState.Disconnected)
     })
   }
 
@@ -427,15 +464,13 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
     })
     connection.onreconnected(() => {
       if (this.connection !== connection) return
-      this.rebuildSpent = false
+      this.armStableTimer()
       this.emitState(HubConnectionState.Connected)
     })
     connection.onclose(() => {
       if (this.connection !== connection) return
-      // Auto-reconnect exhausted: clear the memo so start() can re-establish later.
-      this.startPromise = null
-      this.emitState(HubConnectionState.Disconnected)
-      this.rebuildAfterTerminalClose(connection)
+      // Auto-reconnect exhausted: see handleTerminalClose.
+      this.handleTerminalClose(connection)
     })
     for (const { eventName, handler } of this.subscriptions) connection.on(eventName, handler)
     this.connection = connection

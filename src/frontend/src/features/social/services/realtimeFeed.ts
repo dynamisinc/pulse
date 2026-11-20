@@ -114,7 +114,7 @@
 
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
 import { parseMediaAssetView } from '@/core/media/mediaGuards'
@@ -845,6 +845,7 @@ export const defaultEngagementChangeSource: EngagementChangeSource = USE_MOCK_DA
 // session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
 // - `resetClientSession()` runs it with the other registered resets. See the module header (H-1).
 registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
+registerExerciseScopeReset(() => appWideFeed.resetForSession(), import.meta.hot)
 
 // Every valid `PostRemoved` on the app-wide transport is recorded in the session's removed-post
 // store (C5) — the one place `<Feed>` and the Explore baseline learn that a post must go. Wired

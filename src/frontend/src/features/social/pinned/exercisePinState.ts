@@ -61,7 +61,7 @@
  */
 
 import { useCallback, useState, useSyncExternalStore } from 'react'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import { realtimeFeed } from '../services/realtimeFeed'
@@ -222,6 +222,7 @@ function resetForTests(): void {
 export const exercisePinState = { get, subscribe, reset, resetForTests }
 
 registerSessionReset(() => exercisePinState.reset(), import.meta.hot)
+registerExerciseScopeReset(() => exercisePinState.reset(), import.meta.hot)
 // A hot-replaced module must not leave its handlers on the shared sources (Gate-1 L-5).
 import.meta.hot?.dispose(() => disconnect?.())
 

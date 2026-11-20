@@ -176,7 +176,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { isServerClockInstalled, serverExerciseClock, setExerciseClock } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
@@ -569,6 +569,7 @@ function resetPauseStateForSession(): void {
 // Registered with `core/auth` (which cannot import this feature) rather than called from
 // `endSession`; the unregister is tied to Vite's hot replacement of this module.
 registerSessionReset(resetPauseStateForSession, import.meta.hot)
+registerExerciseScopeReset(resetPauseStateForSession, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // The hook

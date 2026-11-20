@@ -106,7 +106,7 @@
 import { api } from '@/core/services/api'
 import { scenarioNow } from '@/core/clock'
 import { getAccessToken } from '@/core/auth/tokenStore'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeReset, registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
 import {
@@ -582,3 +582,4 @@ export const liveReviewStore = {
 }
 
 registerSessionReset(resetForSession, import.meta.hot)
+registerExerciseScopeReset(resetForSession, import.meta.hot)

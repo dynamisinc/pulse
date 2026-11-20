@@ -69,3 +69,43 @@ export function runSessionResets(): void {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Exercise-scope resets (#856)
+// ---------------------------------------------------------------------------
+//
+// A staff exercise switch changes the session's exercise WITHOUT ending the session, so none
+// of the session resets above run. React Query data is dropped by `useSetActiveExercise`
+// (`resetQueries`), but module-level stores that hold exercise data outside React Query (the
+// live feed's seen-id baseline, the review queue snapshot, pause/pin/overlay state) would keep
+// exercise A's data on screen under exercise B - above all when B's refetch FAILS. A store
+// registers here, next to its `registerSessionReset`, and `runExerciseScopeResets()` runs once
+// the new scope has been committed. Same contract as the session resets: synchronous, in
+// registration order, a throwing reset isolated.
+
+const scopeResets = new Set<SessionReset>()
+
+/**
+ * Registers a callback `runExerciseScopeResets` runs when the session's exercise changes.
+ * Returns an idempotent unregister; pass `import.meta.hot` so a hot-replaced module's callback
+ * is dropped.
+ */
+export function registerExerciseScopeReset(reset: SessionReset, hot?: HotModule): () => void {
+  scopeResets.add(reset)
+  const unregister = () => {
+    scopeResets.delete(reset)
+  }
+  hot?.dispose(unregister)
+  return unregister
+}
+
+/** Runs every registered exercise-scope reset. Never throws. */
+export function runExerciseScopeResets(): void {
+  for (const reset of [...scopeResets]) {
+    try {
+      reset()
+    } catch {
+      // A failing reset must not stop the others.
+    }
+  }
+}

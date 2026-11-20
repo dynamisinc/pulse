@@ -76,12 +76,25 @@
  * the record in logs/telemetry — but it is NOT the user-facing message; treat it
  * as the machine's copy of an event the human is already being told about.
  *
+ * ### The hub connection (#856)
+ * The shared SignalR connection belongs to ONE principal for its life, and a switch changes it
+ * server-side (which also cuts the old connection; SignalR's own auto-reconnect would rejoin as
+ * the NEW exercise before the console has committed its scope, and the hub refuses long-poll/SSE
+ * requests whose user changed). So the hook owns the transition:
+ *   - BEFORE the POST: `stop('scope-changed')` - the old exercise's frames stop at once and
+ *     nothing can deliver the new exercise's frames early;
+ *   - POST fails: `resume()` - the session is still on the old scope, so reconnect on it;
+ *   - scope re-resolved and committed: run the exercise-scope resets of the module stores that
+ *     hold exercise data outside React Query, then `resume()` on the current token;
+ *   - scope re-resolve FAILS: the hub stays stopped (fail closed, like the provider itself).
+ *
  * World: STAFF. Pure data hook — no UI, no COBRA.
  */
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { useExerciseScopeRefresh } from '@/core/exerciseContext'
 import { realtimeConnection } from '@/core/realtime/connection'
+import { runExerciseScopeResets } from '@/core/auth/sessionReset'
 import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
 import type { Enrollment } from '../types'
 
@@ -103,7 +116,17 @@ export function useSetActiveExercise(): UseMutationResult<
   const refreshExerciseScope = useExerciseScopeRefresh()
 
   return useMutation<Enrollment, StaffAssignmentError, string>({
-    mutationFn: setActiveExercise,
+    mutationFn: async (exerciseId: string) => {
+      // Old exercise's frames stop NOW, before the server switches (see the header).
+      void realtimeConnection.stop('scope-changed')
+      try {
+        return await setActiveExercise(exerciseId)
+      } catch (error) {
+        // Still on the old scope: reconnect on it.
+        void realtimeConnection.resume()
+        throw error
+      }
+    },
     onSuccess: async () => {
       // 1. Nothing issued under the prior scope may still be in flight — the
       //    server has already switched, so its answer would be new-exercise
@@ -128,10 +151,11 @@ export function useSetActiveExercise(): UseMutationResult<
         )
       }
 
-      // 2b. The session's principal changed server-side, and the hub refuses a long-poll/SSE
-      //     request whose user differs from its negotiate (403; #856). Rebuild the shared hub
-      //     connection on the current token. Not awaited and never rejects.
-      void realtimeConnection.reconnect()
+      // 2b. The new scope is committed. Forget the exercise data module stores hold outside
+      //     React Query (a failed refetch must not keep A's snapshot), then start the hub on the
+      //     current token (#856). Not awaited; resume() never rejects.
+      runExerciseScopeResets()
+      void realtimeConnection.resume()
 
       // 3. The new scope is on the context. Discard the prior exercise's data
       //    and refetch the active queries under the new scope.
