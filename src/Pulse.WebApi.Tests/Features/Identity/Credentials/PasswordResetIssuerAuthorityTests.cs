@@ -4,11 +4,13 @@ using System;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Credentials;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Enrollments;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -20,9 +22,14 @@ using Xunit;
 [Collection(MsSqlCollection.Name)]
 public sealed class PasswordResetIssuerAuthorityTests
 {
+    private readonly MsSqlContainerFixture _fixture;
     private readonly CredentialTestWorld _world;
 
-    public PasswordResetIssuerAuthorityTests(MsSqlContainerFixture fixture) => _world = new CredentialTestWorld(fixture);
+    public PasswordResetIssuerAuthorityTests(MsSqlContainerFixture fixture)
+    {
+        _fixture = fixture;
+        _world = new CredentialTestWorld(fixture);
+    }
 
     [RequiresDockerTheory]
     [InlineData(CredentialTokenPurposes.Reset, "demoted")]
@@ -56,6 +63,57 @@ public sealed class PasswordResetIssuerAuthorityTests
 
         result.Outcome.Should().Be(PasswordResetOutcome.Invalid);
         result.Error.Should().Be(PasswordResetService.InvalidTokenError, "the same uniform answer as an expired link");
+
+        await using var read = _world.ReadContext();
+        (await read.People.AsNoTracking().SingleAsync(p => p.Id == target)).PasswordChangedAt.Should().BeNull("no password was set");
+        (await read.CredentialTokens.AsNoTracking().SingleAsync(t => t.Id == issued.Token.Id)).UsedAt.Should().BeNull(
+            "the refused link is not consumed");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("demoted")]
+    [InlineData("disabled")]
+    public async Task AnIssuerWhoLosesOrgAdminBetweenTheCheckAndTheClaim_VoidsTheLink(string loss)
+    {
+        // Sonnet M3 / S-001: the early issuer check passes, then — inside the redemption's transaction, just before its
+        // first lock — the issuer is demoted or disabled and that commits. The locked re-check must refuse the claim.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (issuer, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (target, _) = await _world.SeedPersonAsync(org);
+        var issued = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org, issuedBy: issuer);
+
+        var hook = new BeforeCommandHook(
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[People]", StringComparison.Ordinal),
+            async () =>
+            {
+                await using var competing = _world.ReadContext();
+                var person = await competing.People.SingleAsync(p => p.Id == issuer);
+                if (loss == "demoted")
+                {
+                    person.OrgRole = null;
+                }
+                else
+                {
+                    person.DisabledAt = DateTimeOffset.UtcNow;
+                }
+
+                await competing.SaveChangesAsync();
+            });
+
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString!)
+            .AddInterceptors(hook)
+            .Options;
+        await using (var context = new PulseDbContext(options))
+        {
+            var service = new PasswordResetService(
+                context, new CredentialTokenService(context, TimeProvider.System), TimeProvider.System, new RecordingConnectionRevoker());
+            var result = await service.ResetAsync(new PasswordResetRequest { Token = issued.RawToken, NewPassword = CredentialTestWorld.NewPassword });
+
+            hook.Fired.Should().BeTrue("the issuer lost the grant after the early check, before the claim");
+            result.Outcome.Should().Be(PasswordResetOutcome.Invalid);
+            result.Error.Should().Be(PasswordResetService.InvalidTokenError);
+        }
 
         await using var read = _world.ReadContext();
         (await read.People.AsNoTracking().SingleAsync(p => p.Id == target)).PasswordChangedAt.Should().BeNull("no password was set");
