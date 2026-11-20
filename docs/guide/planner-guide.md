@@ -154,11 +154,13 @@ says it is invalid. Another org admin must make a new one.
 ### Inviting someone already in the directory
 
 Some people are in the directory with **No email**, for example staff who were added before invites
-existed. For a person with no email and no password, the row shows an **Invite** button.
+existed. For a person with no email and no password, the row shows an **Invite** button. It does not
+appear for a disabled person or an org admin.
 
 1. Select **Invite** on their row.
-2. Enter their email and select **Create invite link**. Pulse saves the email on that person and shows
-   a one-time invite link, with a Copy button. The link works once, for 7 days.
+2. Enter their email and select **Create invite link**. Check the address carefully: it becomes the
+   person's sign-in email. Pulse saves the email on that person and shows a one-time invite link, with
+   a Copy button. The link works once, for 7 days.
 3. The person opens the link and chooses a password. From then on they sign in with that email and
    password.
 
@@ -167,6 +169,19 @@ another person in your organization already has that email.
 
 Use **Invite** for these people, not **Invite person**. **Invite person** looks people up by email,
 so for someone with no email on file it would add a second, empty person.
+
+> **If that already happened:** if an earlier **Invite person** created a second person with the
+> same address, **Invite** on the original person is refused because the address is taken. There is
+> no fix for this in the directory yet (#863); raise it with engineering.
+
+**Resend invite.** Someone with an email on file who has not set a password yet (their link was lost
+or has expired) gets a **Resend invite** button on their row. It makes a new invite for the email on
+file, and the old link stops working.
+
+> **While Pulse does not send email** (today), the invite link is shown to you, the admin who made it.
+> Anyone holding that link can set the person's password, including you. This is accepted while email
+> is off: give the link only to the person, over a private channel. Once Pulse emails invites, the
+> **Invite** and **Resend invite** links go straight to the person's address and are not shown to you.
 
 ---
 

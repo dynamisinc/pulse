@@ -419,21 +419,76 @@ describe('invite this person (#849)', () => {
     hasPassword: false,
     enrollments: [{ exerciseId: 'e1', exerciseName: 'Coastal Surge', role: 'controller', isLead: false }],
   })
-  const INVITEE = person({ id: 'p-invitee', displayName: 'Ivy Invitee', hasPassword: false })
-
-  beforeEach(() => {
-    vi.mocked(listOrgPeople).mockResolvedValue(page([ADMIN, PLAIN, LEGACY, INVITEE]))
+  const INVITEE = person({
+    id: 'p-invitee', displayName: 'Ivy Invitee', email: 'ivy@example.org', hasPassword: false,
+  })
+  const LEGACY_DISABLED = person({
+    id: 'p-ld', displayName: 'Dee Disabled', email: null, hasPassword: false, disabled: true,
+  })
+  const LEGACY_ADMIN = person({
+    id: 'p-la', displayName: 'Al Admin', email: null, hasPassword: false, orgRole: 'orgAdmin',
   })
 
-  it('offers Invite only on a row with no email and no password', async () => {
+  beforeEach(() => {
+    vi.mocked(listOrgPeople).mockResolvedValue(
+      page([ADMIN, PLAIN, LEGACY, INVITEE, LEGACY_DISABLED, LEGACY_ADMIN]))
+  })
+
+  it('offers Invite only to a no-email, no-password row that is neither disabled nor an admin', async () => {
     renderPage()
     await screen.findByTestId('org-people-table')
     expect(screen.getByRole('button', { name: 'Invite Leo Legacy' })).toBeTruthy()
     // No email but a password (allowlist-free sign-in already works): no invite.
-    expect(screen.queryByRole('button', { name: 'Invite Pat Plain' })).toBeNull()
-    // An email on file: the Invite person dialog finds them by address.
+    expect(screen.queryByRole('button', { name: /Invite.*Pat Plain/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Invite.*Ada Admin/ })).toBeNull()
+    // The server would refuse these (person-disabled / target-is-org-admin): no button (S-004).
+    expect(screen.queryByRole('button', { name: /Invite.*Dee Disabled/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Invite.*Al Admin/ })).toBeNull()
+    // An email on file but no password yet: Resend invite, not Invite.
     expect(screen.queryByRole('button', { name: 'Invite Ivy Invitee' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Invite Ada Admin' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Resend invite to Ivy Invitee' })).toBeTruthy()
+  })
+
+  it('asks the admin to double-check the address, which becomes the sign-in email', async () => {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    expect((await screen.findByTestId('invite-check-address')).textContent)
+      .toBe('Check the address carefully: it becomes Leo Legacy\'s sign-in email.')
+  })
+
+  it('resends to the stored email with no input, by id', async () => {
+    vi.mocked(inviteExistingOrgPerson).mockResolvedValue({
+      personId: 'p-invitee', inviteUrl: INVITE, emailed: false, created: false,
+    })
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Resend invite to Ivy Invitee' }))
+    const dialog = await screen.findByTestId('invite-person-dialog')
+    expect(within(dialog).getByRole('heading', { name: 'Resend invite to Ivy Invitee' })).toBeTruthy()
+    expect(within(dialog).queryByLabelText(/^Email/)).toBeNull()
+    expect(dialog.textContent).toContain('ivy@example.org')
+    fireEvent.click(within(dialog).getByTestId('invite-submit'))
+    expect((await screen.findByTestId('invite-link')).textContent).toBe(INVITE)
+    expect(inviteExistingOrgPerson).toHaveBeenCalledWith({ personId: 'p-invitee', email: 'ivy@example.org' })
+  })
+
+  it.each([
+    [true, 'The invite was emailed to leo@example.org.', 'Invite emailed to Leo Legacy.'],
+    [false, 'could not be sent', 'The invite email to Leo Legacy could not be sent.'],
+  ] as const)('with a mailer (no link returned, emailed=%s) shows no link panel and says so', async (emailed, text, announced) => {
+    vi.mocked(inviteExistingOrgPerson).mockResolvedValue({
+      personId: 'p-legacy', inviteUrl: null, emailed, created: false,
+    })
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Invite Leo Legacy' }))
+    await screen.findByTestId('invite-person-dialog')
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'leo@example.org' } })
+    fireEvent.click(screen.getByTestId('invite-submit'))
+    await waitFor(() => expect(screen.getByTestId('invite-result').textContent).toContain(text))
+    expect(screen.queryByTestId('invite-link-panel')).toBeNull()
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe(announced)
   })
 
   it('asks for the email only, invites that person by id, shows the link once and refetches', async () => {
@@ -454,7 +509,7 @@ describe('invite this person (#849)', () => {
     expect(inviteExistingOrgPerson).toHaveBeenCalledWith({ personId: 'p-legacy', email: 'leo@example.org' })
     expect(inviteOrgPerson).not.toHaveBeenCalled()
     expect(screen.getByTestId('invite-link-panel').textContent).toContain('give it to Leo Legacy')
-    expect(screen.getByTestId('invite-person-dialog').textContent).toContain('Their email is now on file')
+    expect(screen.getByTestId('invite-person-dialog').textContent).toContain('Their email is on file')
     expect(screen.getByTestId('invite-status').textContent).toBe('Invite link created for Leo Legacy.')
     expect(screen.getByTestId('org-people-action-status').textContent).toBe('Invite link created for Leo Legacy.')
     await waitFor(() =>

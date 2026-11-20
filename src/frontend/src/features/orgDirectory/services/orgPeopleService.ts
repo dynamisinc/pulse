@@ -19,6 +19,7 @@
  *
  *   POST  /api/org/people/{id}/invite { email } (#849: invite an existing person, set their email)
  *     -> { personId, inviteUrl, emailed, created: false }
+ *        (inviteUrl is null once a mailer is configured: email only, CR-001)
  *         400 invalid-email; 404 bare; 409 email-in-use | email-mismatch | already-active |
  *         person-disabled | target-is-org-admin; 503 invite-link-unavailable
  *
@@ -134,25 +135,27 @@ export async function inviteExistingOrgPerson(
     const response = await api.post<OrgInviteResult>(`${personEndpoint(request.personId)}/invite`, {
       email: request.email,
     })
-    return readInviteResult(response.data)
+    return readInviteResult(response.data, true)
   } catch (error) {
     if (error instanceof OrgPeopleError) throw error
     throw toError(error, 'Inviting the person')
   }
 }
 
-function readInviteResult(body: unknown): OrgInviteResult {
+/**
+ * Validates an invite body. `allowNoLink`: the by-id route returns `inviteUrl: null` once a mailer
+ * is configured (email only, CR-001); the email invite always returns a link.
+ */
+function readInviteResult(body: unknown, allowNoLink = false): OrgInviteResult {
   const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
-  if (
-    typeof data.personId !== 'string' ||
-    typeof data.inviteUrl !== 'string' ||
-    data.inviteUrl.length === 0
-  ) {
+  const link = data.inviteUrl
+  const linkOk = typeof link === 'string' ? link.length > 0 : allowNoLink && link === null
+  if (typeof data.personId !== 'string' || !linkOk) {
     throw new OrgPeopleError('Inviting the person failed')
   }
   return {
     personId: data.personId,
-    inviteUrl: data.inviteUrl,
+    inviteUrl: typeof link === 'string' ? link : null,
     emailed: data.emailed === true,
     created: data.created === true,
   }

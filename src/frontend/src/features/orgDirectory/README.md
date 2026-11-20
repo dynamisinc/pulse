@@ -12,8 +12,11 @@ Identity-auth-roles story 19 (#574): the organization people directory at `/staf
   dialog explains that they must set a password from their invite link first.
 - **Invite person** (`POST /api/org/people/invite`, #575b) and the row's **Invite** action
   (`POST /api/org/people/{id}/invite {email}`, #849). The row action shows only for a person with no
-  email and no password (`hasPassword` on the row); it saves the email on that person with the
-  invite (409 `email-in-use` / `email-mismatch`), so no duplicate person is created.
+  email and no password (`hasPassword` on the row) who is neither disabled nor an org admin; it
+  saves the email on that person with the invite (409 `email-in-use` / `email-mismatch`), so no
+  duplicate person is created. **Resend invite** (#862) reuses the same route with the stored email
+  for a person with an email but no password. Once a mailer is configured the by-id route returns
+  `inviteUrl: null` (emailed only); the dialog then says whether the email went out.
 - Gated on `usePermissions().role === 'orgAdmin'` (no `StaffAction` was added: that table is frozen
   for this change). The server is the authority.
 - COBRA only, FontAwesome only, MUI 9 `sx`. Live service only (no mock flip point).

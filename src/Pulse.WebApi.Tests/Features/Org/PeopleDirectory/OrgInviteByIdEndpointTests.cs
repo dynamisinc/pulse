@@ -9,8 +9,11 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Credentials;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Org.PeopleDirectory;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Credentials;
@@ -240,7 +243,104 @@ public sealed class OrgInviteByIdEndpointTests
         (await read.People.AsNoTracking().SingleAsync(p => p.Id == legacy)).Email.Should().BeNull("no refusal sets the email");
     }
 
+    [RequiresDockerFact]
+    public async Task InviteById_WithAMailerConfigured_EmailsTheLinkOnly_AndReturnsNoInviteUrl()
+    {
+        // #862 (Tom): the CR-001 rule of the ops route. The link goes to the person's address only, never to the admin.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (_, adminToken) = await SeedAdminAsync(org);
+        var legacy = await SeedLegacyPersonAsync(org);
+        var email = $"mailed.{Guid.NewGuid():N}@example.com";
+        var mailer = new RecordingMailer();
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!, configureServices: services =>
+        {
+            services.RemoveAll<IPulseMailer>();
+            services.AddSingleton<IPulseMailer>(mailer);
+        });
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        using var response = await InviteAsync(client, legacy, email);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("inviteUrl").ValueKind.Should().Be(JsonValueKind.Null, "a configured mailer means email only");
+        body.GetProperty("emailed").GetBoolean().Should().BeTrue();
+
+        var sent = mailer.Sent.Should().ContainSingle().Which;
+        sent.Purpose.Should().Be(CredentialTokenPurposes.Invite);
+        sent.RecipientAddress.Should().Be(email, "sent to the address now on file");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(OrgInviteEndpointTests.TokenOf(sent.Link));
+
+        await using var read = _world.ReadContext();
+        (await read.CredentialTokens.AsNoTracking().CountAsync(t => t.PersonId == legacy && t.UsedAt == null)).Should().Be(1);
+    }
+
+    [RequiresDockerFact]
+    public async Task ThePersonRow_ReadsAnEmptyStringHashAsNoPassword()
+    {
+        // #862 W-001: an empty-string hash is not a password (the refusals already use IsNullOrEmpty).
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (_, adminToken) = await SeedAdminAsync(org);
+        var legacy = await SeedLegacyPersonAsync(org);
+        await using (var context = _world.ReadContext())
+        {
+            await context.People.IgnoreQueryFilters().Where(p => p.Id == legacy)
+                .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, string.Empty));
+        }
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        using var response = await client.GetAsync(new Uri($"/api/org/people/{legacy}", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("hasPassword").GetBoolean()
+            .Should().BeFalse("so the directory still offers Invite");
+    }
+
+    [RequiresDockerFact]
+    public async Task InviteById_WithAMailerThatFails_StillReturnsNoInviteUrl()
+    {
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (_, adminToken) = await SeedAdminAsync(org);
+        var legacy = await SeedLegacyPersonAsync(org);
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!, configureServices: services =>
+        {
+            services.RemoveAll<IPulseMailer>();
+            services.AddSingleton<IPulseMailer, ThrowingMailer>();
+        });
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        using var response = await InviteAsync(client, legacy, $"fail.{Guid.NewGuid():N}@example.com");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the invite is committed; only the delivery failed");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("inviteUrl").ValueKind.Should().Be(JsonValueKind.Null, "never a copy-link fallback once a mailer exists");
+        body.GetProperty("emailed").GetBoolean().Should().BeFalse();
+        factory.Logs.Messages.Should().NotContain(m => m.Contains("#token=", StringComparison.Ordinal), "no link reaches a log");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private sealed class ThrowingMailer : IPulseMailer
+    {
+        public bool IsConfigured => true;
+
+        public Task<LinkMailSendOutcome> SendCredentialLinkAsync(CredentialMail mail, System.Threading.CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("provider down");
+    }
+
+    private sealed class RecordingMailer : IPulseMailer
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<CredentialMail> Sent { get; } = new();
+
+        public bool IsConfigured => true;
+
+        public Task<LinkMailSendOutcome> SendCredentialLinkAsync(CredentialMail mail, System.Threading.CancellationToken cancellationToken)
+        {
+            Sent.Enqueue(mail);
+            return Task.FromResult(LinkMailSendOutcome.Sent);
+        }
+    }
 
     private static Uri InviteUri(Guid personId) => new($"/api/org/people/{personId}/invite", UriKind.Relative);
 

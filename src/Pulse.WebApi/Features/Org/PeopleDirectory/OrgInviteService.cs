@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.Credentials;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.Providers;
+using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
 /// The org admin's staff invite (identity-auth-roles/20 "Invite", #575b; ADMIN-IDENTITY-MODEL §1.1, §3.3, §7.5):
@@ -350,13 +351,24 @@ public sealed partial class OrgInviteService
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            // Serialize concurrent invites of this person (the email invite's row lock): a second one waits here and its
-            // void statement then sees the first one's committed token. Zero rows for a foreign or missing id: nothing is
-            // locked, and the read below answers the bare 404.
-            await _dbContext.People
+            // #862 S-002 (the #840 rule): the caller was authorized before this transaction opened. Re-check, as a locking
+            // no-op update of their own row, that they are STILL an enabled org admin; a demotion or disable that
+            // committed meanwhile matches nothing and is a 403, and one still in flight waits behind this transaction.
+            // Lock order as OrgPeopleService (PersonSessionLock remarks): the caller first, then the target.
+            var callerStillAdmin = await _dbContext.People
                 .InOrganization(tenant)
-                .Where(p => p.Id == personId)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Email, p => p.Email), cancellationToken);
+                .Where(p => p.Id == caller.StaffUserId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken);
+            if (callerStillAdmin != 1)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return OrgInviteResult.Forbidden();
+            }
+
+            // Serialize concurrent invites of this person with the one person-row lock idiom (#862 S-001): a second invite
+            // waits here and its void statement then sees the first one's committed token. Zero rows for a foreign or
+            // missing id: nothing is locked, and the read below answers the bare 404.
+            await PersonSessionLock.LockAsync(_dbContext, personId, tenant, cancellationToken);
 
             // The bare-404 pattern: another customer's person is indistinguishable from a missing one.
             var person = await _dbContext.People
@@ -420,11 +432,17 @@ public sealed partial class OrgInviteService
         }
 
         var inviteUrl = BuildInviteUrl(baseUrl, issued.RawToken);
-        var emailed = await TrySendAsync(email, inviteUrl, cancellationToken);
+
+        // #862 (Tom, 2026-11-20), the CR-001 rule of the ops route: while this host has NO mailer the link is returned to
+        // the inviting admin for copy-link delivery. That admin could redeem it themselves and take the person's account;
+        // that risk is ACCEPTED and documented (planner guide, OPERATE.md). Once a mailer IS configured, the link goes to
+        // the address by email only and inviteUrl is null, even when the send fails (the admin re-invites).
+        var mailerConfigured = _mailer.IsConfigured;
+        var emailed = mailerConfigured && await TrySendAsync(email, inviteUrl, cancellationToken);
         return OrgInviteResult.Ok(new OrgInviteDto
         {
             PersonId = personId.ToString(),
-            InviteUrl = inviteUrl,
+            InviteUrl = mailerConfigured ? null : inviteUrl,
             Emailed = emailed,
             Created = false,
         });

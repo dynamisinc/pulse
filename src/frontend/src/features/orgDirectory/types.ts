@@ -62,7 +62,11 @@ export interface OrgInviteExistingRequest {
 /** 200 body of the invite: `inviteUrl` is a single-use bearer link returned ONCE; never log it. */
 export interface OrgInviteResult {
   readonly personId: string
-  readonly inviteUrl: string
+  /**
+   * Always set by `POST /org/people/invite`. `POST /org/people/{id}/invite` returns `null` once a
+   * mailer is configured: the link then goes to the person's address by email only (CR-001, #862).
+   */
+  readonly inviteUrl: string | null
   readonly emailed: boolean
   /** False = an existing directory person without a password was re-invited (old link voided). */
   readonly created: boolean

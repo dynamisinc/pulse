@@ -63,6 +63,19 @@ describe('orgPeopleService', () => {
     })
   })
 
+  it('accepts inviteUrl null on the by-id route only (email-only once a mailer exists)', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: { personId: 'p', inviteUrl: null, emailed: true, created: false },
+    })
+    expect(await inviteExistingOrgPerson({ personId: 'p', email: 'a@b.org' })).toEqual({
+      personId: 'p', inviteUrl: null, emailed: true, created: false,
+    })
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: { personId: 'p', inviteUrl: null, emailed: true, created: true },
+    })
+    await expect(inviteOrgPerson({ email: 'a@b.org', displayName: 'Ann' })).rejects.toBeInstanceOf(OrgPeopleError)
+  })
+
   it('carries status and code on a by-id invite failure and rejects a body without a link', async () => {
     const error = new AxiosError('x')
     error.response = { status: 409, data: { error: 'email-in-use' } } as never

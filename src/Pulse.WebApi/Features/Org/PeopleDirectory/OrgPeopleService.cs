@@ -542,7 +542,8 @@ public sealed partial class OrgPeopleService
 
     /// <summary>
     /// The materialized person projection. No credential column is ever selected: whether a password is set is computed
-    /// in SQL (<c>PasswordHash IS NOT NULL</c>), so the hash itself never leaves the database.
+    /// in SQL (a non-null, non-empty <c>PasswordHash</c>; an empty string is no password, #862 W-001), so the hash itself
+    /// never leaves the database.
     /// </summary>
     private sealed record PersonRow(
         Guid Id,
@@ -554,7 +555,8 @@ public sealed partial class OrgPeopleService
         bool HasPassword)
     {
         public static System.Linq.Expressions.Expression<Func<Person, PersonRow>> Projection { get; } =
-            p => new PersonRow(p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil, p.PasswordHash != null);
+            p => new PersonRow(
+                p.Id, p.DisplayName, p.Email, p.OrgRole, p.DisabledAt, p.LockedOutUntil, p.PasswordHash != null && p.PasswordHash != "");
     }
 
     private sealed record EnrollmentRow(Guid PersonId, Guid ExerciseId, string ExerciseName, string Role, bool IsLead);

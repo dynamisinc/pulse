@@ -88,14 +88,22 @@ export function resetUnavailableReason(person: {
 }
 
 /**
- * Whether a row offers "Invite" (#849): a person with no email and no password, typically a legacy
- * allowlist staffer. The by-id invite sets their email so no duplicate person is created.
+ * The invite row action a person gets, or null (#849, #862 S-004):
+ *   - `'invite'`: no email and no password (typically a legacy allowlist staffer); the by-id invite
+ *     saves their email, so no duplicate person is created.
+ *   - `'resend'`: an email on file but no password yet (an unused or expired invite); a fresh
+ *     invite to the stored address.
+ * Never for a disabled person or an org admin: the server would refuse both (409
+ * `person-disabled` / `target-is-org-admin`), so the button is not shown at all.
  */
-export function canInviteExisting(person: {
+export function inviteActionFor(person: {
   readonly email: string | null
   readonly hasPassword: boolean
-}): boolean {
-  return person.email === null && !person.hasPassword
+  readonly disabled: boolean
+  readonly orgRole: 'orgAdmin' | null
+}): 'invite' | 'resend' | null {
+  if (person.hasPassword || person.disabled || person.orgRole === 'orgAdmin') return null
+  return person.email === null ? 'invite' : 'resend'
 }
 
 /** Maps a failure to words. `status`/`code` come from `OrgPeopleError`. */

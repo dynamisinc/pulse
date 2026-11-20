@@ -36,9 +36,13 @@ public sealed class OrgInviteDto
     [JsonPropertyName("personId")]
     public required string PersonId { get; init; }
 
-    /// <summary>The single-use invite link (<c>{FrontendBaseUrl}/staff/invite#token=…</c>). Shown once; never log it.</summary>
+    /// <summary>
+    /// The single-use invite link (<c>{FrontendBaseUrl}/staff/invite#token=…</c>). Shown once; never log it. The email
+    /// invite always returns it. The by-id invite (#849) returns it ONLY while no mailer is configured (the CR-001 rule,
+    /// #862) and <c>null</c> once one is, when the link goes by email only.
+    /// </summary>
     [JsonPropertyName("inviteUrl")]
-    public required string InviteUrl { get; init; }
+    public required string? InviteUrl { get; init; }
 
     /// <summary>Whether the provider accepted the invite email (always <c>false</c> on a host without email).</summary>
     [JsonPropertyName("emailed")]

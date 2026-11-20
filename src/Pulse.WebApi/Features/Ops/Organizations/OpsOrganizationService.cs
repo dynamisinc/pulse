@@ -69,6 +69,12 @@ public sealed partial class OpsOrganizationService
     /// <summary>The 409 error code when an organization with that name already exists (or a concurrent create won).</summary>
     public const string OrganizationExistsError = "organization-exists";
 
+    /// <summary>
+    /// The prefix of a Pulse-local staff subject (<c>pulse|{personId:N}</c>), which every Pulse-created staff facet carries.
+    /// Any other subject is an IdP (Dynamis allowlist) identity (#862).
+    /// </summary>
+    public const string PulseLocalSubjectPrefix = "pulse|";
+
     /// <summary>The most characters an organization name may have (the <c>Organizations.Name</c> column bound).</summary>
     public const int MaxNameLength = 200;
 
@@ -254,7 +260,8 @@ public sealed partial class OpsOrganizationService
     /// org admin of THAT organization are all the same bare 404. The organization id never reaches the wire.
     /// </para>
     /// <para>
-    /// <b>Only a not-yet-credentialed admin.</b> An admin who already has a Pulse password is refused
+    /// <b>Only a not-yet-credentialed admin.</b> An admin who already has a Pulse password, or who signs in through the
+    /// Dynamis allowlist (a staff facet whose subject is not <see cref="PulseLocalSubjectPrefix"/>), is refused
     /// (<c>409 already-active</c>): an invite would let the ops caller, who holds the link while email is off, set the
     /// password of an account already in use. A disabled admin is refused (<c>409 person-disabled</c>), a link they could
     /// never redeem.
@@ -317,19 +324,20 @@ public sealed partial class OpsOrganizationService
                 return OpsOrganizationResult.NotFound();
             }
 
-            // Serialize concurrent re-issues for this admin (the OrgInviteService row lock): a second one waits here and
-            // its void statement then sees the first one's committed token, so there is never more than one live invite.
+            // Serialize concurrent re-issues for this admin: a second one waits here and its void statement then sees the
+            // first one's committed token, so there is never more than one live invite. (By email: the id is not known
+            // yet. The same no-op SET PasswordHash = PasswordHash as PersonSessionLock.)
             await _dbContext.People
                 .InOrganization(organization.Id)
                 .Where(p => p.Email == email && p.OrgRole == Person.OrgAdminRole)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Email, p => p.Email), cancellationToken);
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.PasswordHash, p => p.PasswordHash), cancellationToken);
 
             // Bounded by the slug's own organization: the same address in another customer is a different person.
             var admin = await _dbContext.People
                 .AsNoTracking()
                 .InOrganization(organization.Id)
                 .Where(p => p.Email == email && p.OrgRole == Person.OrgAdminRole)
-                .Select(p => new { p.Id, p.DisabledAt, HasPassword = p.PasswordHash != null })
+                .Select(p => new { p.Id, p.DisabledAt, HasPassword = p.PasswordHash != null && p.PasswordHash != "" })
                 .FirstOrDefaultAsync(cancellationToken);
             if (admin is null)
             {
@@ -337,9 +345,18 @@ public sealed partial class OpsOrganizationService
                 return OpsOrganizationResult.NotFound();
             }
 
+            // #862 (Sonnet 2): an admin who signs in through the Dynamis allowlist is just as active as one with a Pulse
+            // password. Their staff facet carries an IdP subject; only Pulse-created facets carry the Pulse-local
+            // "pulse|" subject (this service, the org-admin grant, the enrollment grant). Redeeming an invite would give
+            // the allowlist admin a Pulse password set by whoever holds the link, so they are refused like any active one.
+            var signsInViaAllowlist = await _dbContext.StaffUsers
+                .AsNoTracking()
+                .InOrganization(organization.Id)
+                .AnyAsync(u => u.Id == admin.Id && !u.ExternalSubject.StartsWith(PulseLocalSubjectPrefix), cancellationToken);
+
             var refusal = admin.DisabledAt is not null
                 ? OrgInviteService.PersonDisabledError
-                : admin.HasPassword ? OrgInviteService.AlreadyActiveError : null;
+                : admin.HasPassword || signsInViaAllowlist ? OrgInviteService.AlreadyActiveError : null;
             if (refusal is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);

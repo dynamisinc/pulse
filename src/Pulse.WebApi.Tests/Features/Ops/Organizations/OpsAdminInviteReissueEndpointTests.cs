@@ -221,6 +221,82 @@ public sealed class OpsAdminInviteReissueEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task AnAllowlistAdminWithNoPulsePassword_Is409AlreadyActive_AndIssuesNothing()
+    {
+        // #862 Sonnet 2: an admin who signs in through the Dynamis allowlist (an IdP subject, not "pulse|") is live. The
+        // bootstrap-secret holder must not be able to set a Pulse password on their account.
+        var (org, slug) = await _world.SeedOrganizationAsync();
+        var (allowlistAdmin, email) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        await using (var context = _world.ReadContext())
+        {
+            await context.People.IgnoreQueryFilters().Where(p => p.Id == allowlistAdmin)
+                .ExecuteUpdateAsync(set => set.SetProperty(p => p.PasswordHash, (string?)null));
+            (await context.StaffUsers.IgnoreQueryFilters().AsNoTracking().SingleAsync(u => u.Id == allowlistAdmin)).ExternalSubject
+                .Should().NotStartWith(OpsOrganizationService.PulseLocalSubjectPrefix, "precondition: an IdP (allowlist) subject");
+        }
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!, settings: SecretSettings);
+        using var client = CredentialTestWorld.CreateClient(factory);
+        using var response = await ReissueAsync(client, slug, new { adminEmail = email }, Secret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString()
+            .Should().Be(OrgInviteService.AlreadyActiveError);
+
+        await using var read = _world.ReadContext();
+        (await read.CredentialTokens.AsNoTracking().AnyAsync(t => t.PersonId == allowlistAdmin)).Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task Reissue_OfAnActuallyExpiredInvite_IssuesAWorkingLink()
+    {
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!, settings: SecretSettings);
+        using var client = CredentialTestWorld.CreateClient(factory);
+        var (slug, admin, email, firstUrl) = await ProvisionAsync(client);
+
+        // The first invite's 7 days run out.
+        await using (var context = _world.ReadContext())
+        {
+            await context.CredentialTokens.IgnoreQueryFilters().Where(t => t.PersonId == admin)
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(t => t.CreatedAt, DateTimeOffset.UtcNow.AddDays(-8))
+                    .SetProperty(t => t.ExpiresAt, DateTimeOffset.UtcNow.AddDays(-1)));
+        }
+
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using (var expired = await anonymous.PostAsJsonAsync(ResetUri, new { token = OrgInviteEndpointTests.TokenOf(firstUrl!), newPassword = CredentialTestWorld.NewPassword }))
+        {
+            expired.StatusCode.Should().Be(HttpStatusCode.BadRequest, "precondition: the first invite has expired");
+        }
+
+        using var response = await ReissueAsync(client, slug, new { adminEmail = email }, Secret);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var newToken = OrgInviteEndpointTests.TokenOf((await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("inviteUrl").GetString()!);
+
+        using (var redeem = await anonymous.PostAsJsonAsync(ResetUri, new { token = newToken, newPassword = CredentialTestWorld.NewPassword }))
+        {
+            redeem.StatusCode.Should().Be(HttpStatusCode.OK, "the re-issued invite replaces the expired one");
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task TheBadSecret404_AndTheUnknownSlug404_AreIdenticalOnTheWire()
+    {
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!, settings: SecretSettings);
+        using var client = CredentialTestWorld.CreateClient(factory);
+        var (slug, _, email, _) = await ProvisionAsync(client);
+
+        using var badSecret = await ReissueAsync(client, slug, new { adminEmail = email }, "not-the-secret");
+        using var unknownSlug = await ReissueAsync(client, $"unknown-{Guid.NewGuid():N}"[..30], new { adminEmail = email }, Secret);
+
+        badSecret.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknownSlug.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await badSecret.Content.ReadAsByteArrayAsync()).Should().Equal(
+            await unknownSlug.Content.ReadAsByteArrayAsync(), "a secret-less prober cannot tell a real slug from a made-up one");
+        badSecret.Content.Headers.ContentType?.ToString().Should().Be(unknownSlug.Content.Headers.ContentType?.ToString());
+    }
+
+    [RequiresDockerFact]
     public async Task WithAMailerConfigured_TheReissuedLinkGoesByEmailOnly_AndAFailedSendStillReturnsNoLink()
     {
         // CR-001 (Tom, 2026-11-20): the same rule as the provisioning — never a copy-link once a mailer exists.
