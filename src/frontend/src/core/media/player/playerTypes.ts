@@ -18,3 +18,28 @@ export interface PlayerMedia {
   readonly height?: number
   readonly durationSec?: number
 }
+
+/**
+ * What the player hands a host's own control row (`VideoPlayer` `renderControls`). A
+ * channel that needs tinted, broadcast-style chrome (news story 05) draws its own buttons
+ * from this state and these actions; the player keeps everything else (one-at-a-time
+ * playback, wrapper fullscreen and its policing, the overlay pause, the EXERCISE bands).
+ */
+export interface PlayerControlsApi {
+  readonly playing: boolean
+  readonly muted: boolean
+  /** Seconds played. */
+  readonly currentTime: number
+  /** Seconds, or `undefined` until known (contract `durationSec`, else the metadata). */
+  readonly duration: number | undefined
+  readonly fullscreen: boolean
+  /** The video exposes at least one captions / subtitles text track. */
+  readonly captionsAvailable: boolean
+  readonly captionsOn: boolean
+  readonly togglePlay: () => void
+  readonly toggleMute: () => void
+  /** Jumps to `seconds` (clamped to the video). */
+  readonly seekTo: (seconds: number) => void
+  readonly toggleFullscreen: () => void
+  readonly toggleCaptions: () => void
+}

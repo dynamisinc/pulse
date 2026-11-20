@@ -12,6 +12,10 @@
  *     centre: Play / Pause
  *   </div>
  *
+ *  HOST CONTROLS (opt-in, news story 05): with `renderControls` set, the native controls,
+ *  the top row and the centre button are NOT drawn; the host's own row (from
+ *  `PlayerControlsApi`) renders inside the wrapper instead. Everything below still holds.
+ *
  * BEHAVIOUR (the ACs)
  *  - NEVER autoplays. `preload="metadata"` only; with a poster the poster is
  *    shown, with none the URL gets `#t=0.1` so Safari paints a first frame.
@@ -69,8 +73,9 @@
  *    swaps the frame for "This video can't be played in this browser" plus the
  *    alt text — never a blank box. A URL the allow-list rejects
  *    (`safeMediaUrl.ts`) renders the alt-text placeholder instead.
- *  - DP-12: there is NO caption track this push (an NFR-001 / WCAG 1.2.2 gap
- *    flagged in the contract); the alt text is the only text alternative.
+ *  - DP-12: the contract carries NO caption track (an NFR-001 / WCAG 1.2.2 gap flagged in
+ *    the contract); the alt text is the only text alternative. A host control row can
+ *    toggle IN-BAND captions tracks when a video happens to expose them (rare for MP4).
  *
  * STACKING: the post card's open-the-thread overlay (`z-index: 1`) covers the
  * media; `PostMediaSlot` lifts this player to `z-index: 2` and the wrapper stops
@@ -93,7 +98,7 @@ import {
   faVolumeXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer'
-import type { PlayerMedia } from './playerTypes'
+import type { PlayerControlsApi, PlayerMedia } from './playerTypes'
 import { ExerciseBands } from './ExerciseBands'
 import { formatDuration } from './formatDuration'
 import {
@@ -133,6 +138,32 @@ export interface VideoPlayerProps {
    * chip), so it stays on screen in fullscreen. Not drawn over the unplayable message.
    */
   readonly overlay?: ReactNode
+  /**
+   * OPT-IN host control row (news story 05's broadcast player). When set, the native
+   * `<video>` controls and the default top row / centre Play button are NOT drawn; this is
+   * rendered inside the fullscreened wrapper instead, from the player's own state and
+   * actions. Everything else (no autoplay, one-at-a-time, wrapper-only fullscreen, the
+   * overlay pause, the EXERCISE bands) is unchanged. Unset (Social): behaviour unchanged.
+   */
+  readonly renderControls?: (api: PlayerControlsApi) => ReactNode
+  /** Extra class on the wrapper (a host's frame shape: radius, border). */
+  readonly className?: string
+  /** Id of an element that describes the video (e.g. its caption), for `aria-describedby`. */
+  readonly describedBy?: string
+}
+
+/** Captions / subtitles tracks the `<video>` exposes (in-band or `<track>`). */
+function captionTracks(video: HTMLVideoElement | null): TextTrack[] {
+  const list = video?.textTracks
+  if (list === undefined || list === null) return []
+  const tracks: TextTrack[] = []
+  for (let index = 0; index < list.length; index += 1) {
+    const track = list[index]
+    if (track !== undefined && (track.kind === 'captions' || track.kind === 'subtitles')) {
+      tracks.push(track)
+    }
+  }
+  return tracks
 }
 
 /** Starts playback without leaking a rejected promise (autoplay policy, abort). */
@@ -146,7 +177,11 @@ export function VideoPlayer({
   onRequestModal,
   startAt,
   overlay,
+  renderControls,
+  className,
+  describedBy,
 }: VideoPlayerProps) {
+  const customControls = renderControls !== undefined
   const alt = mediaAlt(media)
   // A shell Pause / EndEx / break-fiction overlay covers the channel: media must stop.
   const overlayActive = useOverlayState().state !== 'none'
@@ -159,6 +194,10 @@ export function VideoPlayer({
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [metadataDuration, setMetadataDuration] = useState<number | undefined>(undefined)
+  // Host control-row state (only read when `renderControls` is set).
+  const [currentTime, setCurrentTime] = useState(0)
+  const [captionsAvailable, setCaptionsAvailable] = useState(false)
+  const [captionsOn, setCaptionsOn] = useState(false)
 
   // The latest fullscreen-fallback inputs, read from event handlers that must not re-subscribe.
   const latestRef = useRef({ variant, onRequestModal, overlayActive })
@@ -191,6 +230,8 @@ export function VideoPlayer({
   const attachVideo = useCallback((video: HTMLVideoElement | null) => {
     videoRef.current = video
     if (video === null) return undefined
+    // Re-attached while playing (the callback identity changed): keep the one-at-a-time claim.
+    if (!video.paused) claimPlayback(video)
     // iOS Safari presents its own native fullscreen for a `<video>` (no page overlay, so no
     // watermark): leave it the instant it begins and use the in-app viewer instead.
     const handleBeginFullscreen = () => {
@@ -198,11 +239,31 @@ export function VideoPlayer({
       openInModal()
     }
     video.addEventListener('webkitbeginfullscreen', handleBeginFullscreen)
+    // Captions toggle (host control row only; Social pays nothing): follow the video's tracks.
+    const tracks: TextTrackList | undefined = customControls
+      ? video.textTracks ?? undefined
+      : undefined
+    const syncTracks = () => {
+      const found = captionTracks(video)
+      setCaptionsAvailable(found.length > 0)
+      setCaptionsOn(found.some(track => track.mode === 'showing'))
+    }
+    if (customControls) syncTracks()
+    if (typeof tracks?.addEventListener === 'function') {
+      tracks.addEventListener('addtrack', syncTracks)
+      tracks.addEventListener('removetrack', syncTracks)
+      tracks.addEventListener('change', syncTracks)
+    }
     return () => {
       video.removeEventListener('webkitbeginfullscreen', handleBeginFullscreen)
+      if (typeof tracks?.removeEventListener === 'function') {
+        tracks.removeEventListener('addtrack', syncTracks)
+        tracks.removeEventListener('removetrack', syncTracks)
+        tracks.removeEventListener('change', syncTracks)
+      }
       releasePlayback(video)
     }
-  }, [openInModal])
+  }, [openInModal, customControls])
 
   // The shell overlay takes over the screen: pause whatever is playing, and — belt and braces
   // beside the shell's own `useLeaveFullscreenWhileActive` — leave fullscreen if THIS player's
@@ -257,6 +318,26 @@ export function VideoPlayer({
     video.currentTime = Math.min(end, Math.max(0, video.currentTime + deltaSeconds))
   }, [])
 
+  const seekTo = useCallback((seconds: number) => {
+    const video = videoRef.current
+    if (video === null || !Number.isFinite(seconds)) return
+    const end = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY
+    video.currentTime = Math.min(end, Math.max(0, seconds))
+    setCurrentTime(video.currentTime)
+  }, [])
+
+  const toggleCaptions = useCallback(() => {
+    const found = captionTracks(videoRef.current)
+    if (found.length === 0) return
+    const turnOn = !found.some(track => track.mode === 'showing')
+    // On: show the first track only (the contract carries no language / default yet).
+    // Off: `hidden`, not `disabled`, so cues stay loaded for the next toggle.
+    found.forEach((track, index) => {
+      track.mode = turnOn && index === 0 ? 'showing' : 'hidden'
+    })
+    setCaptionsOn(turnOn)
+  }, [])
+
   const toggleFullscreen = useCallback(async () => {
     const wrapper = wrapperRef.current
     if (wrapper === null) return
@@ -276,6 +357,8 @@ export function VideoPlayer({
     // The native <video> already implements these keys while it has focus; handling them
     // here too would toggle twice. Only the wrapper and our own buttons are ours.
     if (event.target instanceof HTMLVideoElement) return
+    // A host control row's scrub slider owns its own arrow keys (a second seek would double).
+    if (event.target instanceof HTMLInputElement) return
     // A focused <button> activates itself on Space/Enter.
     const onButton = event.target instanceof HTMLButtonElement
 
@@ -315,8 +398,11 @@ export function VideoPlayer({
     // Unsafe or missing URL (NFR-004): the alt-text placeholder, in the same frame.
     return (
       <div
-        className={styles.player}
-        style={{ aspectRatio: singleMediaAspectRatio(media.width, media.height) }}
+        className={[styles.player, className].filter(Boolean).join(' ')}
+        style={{
+          aspectRatio: singleMediaAspectRatio(media.width, media.height),
+          '--vp-ratio': singleMediaAspectRatio(media.width, media.height),
+        } as CSSProperties}
         data-testid="video-player-fallback"
       >
         <MediaFallbackTile alt={alt} kind="video" />
@@ -347,10 +433,12 @@ export function VideoPlayer({
   return (
     <div
       ref={wrapperRef}
-      className={`${styles.player} ${variant === 'expanded' ? styles.expanded : ''}`}
+      className={[styles.player, variant === 'expanded' ? styles.expanded : '', className]
+        .filter(Boolean).join(' ')}
       style={frameStyle}
       role="group"
       aria-label={alt}
+      aria-describedby={describedBy}
       tabIndex={0}
       data-testid="video-player"
       onKeyDown={handleKeyDown}
@@ -372,7 +460,7 @@ export function VideoPlayer({
           className={styles.video}
           src={videoSrc}
           poster={posterSrc}
-          controls
+          controls={!customControls}
           controlsList="nofullscreen nodownload noremoteplayback"
           disablePictureInPicture
           disableRemotePlayback
@@ -397,6 +485,11 @@ export function VideoPlayer({
           }}
           onVolumeChange={event => setMuted(event.currentTarget.muted)}
           onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={customControls
+            ? event => setCurrentTime(event.currentTarget.currentTime)
+            : undefined}
+          // No native controls: a click on the picture play-pauses (the host row has the button).
+          onClick={customControls ? togglePlay : undefined}
           onError={() => {
             setPlaying(false)
             setFailedSrc(src)
@@ -413,11 +506,29 @@ export function VideoPlayer({
       {!failed && <ExerciseBands force={fullscreen} clearNativeControls />}
       {!failed && overlay}
 
+      {renderControls !== undefined && !failed && <HostControls
+        render={renderControls}
+        api={{
+          playing,
+          muted,
+          currentTime,
+          duration: knownDuration,
+          fullscreen,
+          captionsAvailable,
+          captionsOn,
+          togglePlay,
+          toggleMute,
+          seekTo,
+          toggleFullscreen: () => void toggleFullscreen(),
+          toggleCaptions,
+        }}
+      />}
+
       {/*
         The overlay top row: duration | Mute . Expand. Painted ABOVE the bands, so the
         controls stay visible and clickable. Click-through except the buttons.
       */}
-      <div className={styles.topBar}>
+      {!customControls && <div className={styles.topBar}>
         {knownDuration !== undefined && (
           <time
             className={styles.duration}
@@ -458,9 +569,9 @@ export function VideoPlayer({
             )}
           </div>
         )}
-      </div>
+      </div>}
 
-      {!failed && (
+      {!failed && !customControls && (
         <ParticipantTooltip label="Play">
           <button
             type="button"
@@ -476,4 +587,20 @@ export function VideoPlayer({
       )}
     </div>
   )
+}
+
+/**
+ * Renders a host's control row (`renderControls`) from the player's state and actions.
+ * A component boundary on purpose: the host row may use hooks, and calling the render
+ * prop inline would run them as the PLAYER's hooks (and trips the React compiler's
+ * "refs during render" rule, since the actions close over the player's refs).
+ */
+function HostControls({
+  render,
+  api,
+}: {
+  readonly render: (api: PlayerControlsApi) => ReactNode
+  readonly api: PlayerControlsApi
+}) {
+  return render(api)
 }
