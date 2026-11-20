@@ -11,7 +11,7 @@
  *    chip showing a text label (not colour only);
  *  - the bar does not overlap the channel nav, and the published
  *    `--pulse-alert-height` matches the bar's measured height (within 1 px);
- *  - "Details ->" navigates client-side to /alerts (most severe first) and
+ *  - "Details ->" navigates client-side to /alerts (newest first) and
  *    browser Back returns to the feed;
  *  - "Details ->" and "+N more" are 44 px touch targets (hit-test based);
  *  - the ChannelNav dateline is absent (story 17: no real clock is installed in
@@ -66,9 +66,11 @@ test.describe('alert bar: emergency + advisory', () => {
     }))
     expect(clip).toEqual({ overflowX: false, overflowY: false, ellipsis: false })
     // Severity is not colour only: the chip carries a text label.
-    await expect(bar.getByText('EMERGENCY')).toBeVisible()
+    await expect(bar.getByTestId('pulse-alert-bar-chip')).toBeVisible()
+    await expect(bar.getByTestId('pulse-alert-bar-chip')).toContainText('EMERGENCY')
     await expect(bar.getByTestId('pulse-alert-bar-more-chip')).toHaveText('+1 more')
-    await expect(bar).toHaveAttribute('role', 'status')
+    // The live region is a hidden role=status child of the bar (#707), not the bar itself.
+    await expect(bar.getByTestId('pulse-alert-bar-live')).toHaveAttribute('role', 'status')
     await expectNoHorizontalScroll(page)
     await expectNoWallClock(page)
   })
@@ -113,7 +115,7 @@ test.describe('alert bar: emergency + advisory', () => {
     }
   })
 
-  test('Details opens /alerts (most severe first) and Back returns', async ({ page }) => {
+  test('Details opens /alerts (newest first) and Back returns', async ({ page }) => {
     await page.getByTestId('pulse-alert-bar-details').click()
     await expect(page).toHaveURL(/\/alerts$/)
     const history = page.getByTestId('pulse-alerts-history')
@@ -142,7 +144,8 @@ test.describe('alert bar: advisory ticker', () => {
     await openFeedWith(page, [ADVISORY])
     const bar = page.getByTestId('pulse-alert-bar')
     await expect(bar.getByTestId('pulse-alert-bar-message')).toHaveText(ADVISORY.message)
-    await expect(bar.getByText('ADVISORY')).toBeVisible()
+    await expect(bar.getByTestId('pulse-alert-bar-chip')).toBeVisible()
+    await expect(bar.getByTestId('pulse-alert-bar-chip')).toContainText('ADVISORY')
     await expect(bar.getByTestId('pulse-alert-bar-more-chip')).toHaveCount(0)
     const barBox = await boxOf(bar)
     expect(Math.abs((await publishedAlertHeight(page)) - barBox.height)).toBeLessThanOrEqual(1)
@@ -190,18 +193,23 @@ const ADVISORY_2: SeedAlert = {
 }
 
 test.describe('alert bar: ticker rotation and reduced motion', () => {
-  test('rotates (and the live region text changes) without a reduced-motion preference', async ({ page }) => {
-    // Rotation announces: the persistent role=status node's text changes.
+  test('rotates without re-announcing when there is no reduced-motion preference', async ({ page }) => {
+    // The live region announces each alert once, on arrival (#707): rotation swaps the
+    // visible message but leaves the role=status node's text alone.
     // (The project default is reduced motion; opt out for the control case.)
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.clock.install()
     await openFeedWith(page, [ADVISORY, ADVISORY_2])
     const bar = page.getByTestId('pulse-alert-bar')
-    await expect(bar).toHaveAttribute('role', 'status')
-    await expect(bar).toHaveAttribute('aria-live', 'polite')
+    const live = bar.getByTestId('pulse-alert-bar-live')
+    await expect(live).toHaveAttribute('role', 'status')
+    await expect(live).toHaveAttribute('aria-live', 'polite')
+    await expect(live).toContainText('ADVISORY')
+    const announced = await live.textContent()
     const first = await bar.getByTestId('pulse-alert-bar-message').innerText()
     await page.clock.runFor(3600)
     await expect(bar.getByTestId('pulse-alert-bar-message')).not.toHaveText(first)
+    await expect(live).toHaveText(announced ?? '')
     await expect(bar).toContainText('ADVISORY')
     // The published height still tracks the bar after the text swapped.
     await expect.poll(async () => {
@@ -224,14 +232,17 @@ test.describe('alert bar: ticker rotation and reduced motion', () => {
 })
 
 test.describe('alert bar: emergency live region at phone, tablet sizes', () => {
-  test('the bar is one role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
+  test('the bar holds one role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
     await openFeedWith(page, [EMERGENCY])
     await expect(page.getByTestId('pulse-alert-bar')).toHaveCount(1)
     await expect(page.getByRole('status').filter({ hasText: EMERGENCY.message })).toHaveCount(1)
     const bar = page.getByTestId('pulse-alert-bar')
-    await expect(bar).toHaveAttribute('role', 'status')
-    await expect(bar).toHaveAttribute('aria-live', 'assertive')
-    await expect(bar).toHaveAttribute('aria-atomic', 'true')
+    const live = bar.getByTestId('pulse-alert-bar-live')
+    await expect(live).toHaveAttribute('role', 'status')
+    await expect(live).toHaveAttribute('aria-live', 'assertive')
+    await expect(live).toHaveAttribute('aria-atomic', 'true')
+    await expect(live).toContainText('EMERGENCY')
+    await expect(live).toContainText(EMERGENCY.message)
     await expect(bar).toContainText('EMERGENCY')
     await expect(bar).toContainText(EMERGENCY.message)
   })

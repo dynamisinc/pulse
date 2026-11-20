@@ -65,8 +65,9 @@ const MOCK_SEAM_REWRITES = [
     key: ROLE_STORAGE_KEY,
   },
   {
-    // Alert-bar content: a JSON array of { id, severity, message, scenarioTime }
-    file: 'src/features/participant-shell/components/AlertBar/useAlerts.ts',
+    // Alert-bar content: a JSON array of { id, severity, message, scenarioTime }. The canned set
+    // lives in alertsSource.ts (moved out of useAlerts.ts in #707); the guard there still applies.
+    file: 'src/features/participant-shell/components/AlertBar/alertsSource.ts',
     find: 'const MOCK_ALERTS: readonly Alert[] = []',
     replace: k => `const MOCK_ALERTS: readonly Alert[] = ${readOverride(k, true)} ?? []`,
     key: 'pulse.guideShots.alerts',
