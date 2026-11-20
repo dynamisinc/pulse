@@ -86,6 +86,7 @@ public sealed class ContentProjector
             Origin = item.Origin,
             ActingHumanId = item.ActingHumanId,
             ScheduledScenarioTime = item.ScheduledScenarioTime is { } scheduled ? Iso(scheduled) : null,
+            LastError = item.LastError,
             PublishedWallClock = item.PublishedWallClock is { } wall ? Iso(wall) : null,
             Background = item.Background,
             FeaturedRank = item.FeaturedRank,

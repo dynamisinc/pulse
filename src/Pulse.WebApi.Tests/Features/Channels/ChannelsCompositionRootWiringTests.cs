@@ -25,11 +25,13 @@ using Pulse.WebApi.Features.Channels;
 using Pulse.WebApi.Features.Channels.Alerts;
 using Pulse.WebApi.Features.Channels.Content.Publish;
 using Pulse.WebApi.Features.Channels.Content.Read;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.Channels.Content.Staff;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.Channels.Enablement;
 using Pulse.WebApi.Features.Channels.Outlets;
 using Pulse.WebApi.Features.ExerciseConfiguration;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Xunit;
 
@@ -248,6 +250,35 @@ public sealed class ChannelsCompositionRootWiringTests
 
         scope.ServiceProvider.GetRequiredService<IChannelEnablement>().Should().BeOfType<ChannelEnablement>(
             "story 08 registers the gate RequireChannelEnabled resolves per request; a missing line 500s every gated route");
+    }
+
+    [Fact]
+    public void ProgramCs_RegistersTheContentScheduleRunner_ThroughAddChannels()
+    {
+        // Story 05: the runner is a hosted service on the REAL host; no Program.cs edit. Its wake-up wiring (#673) is
+        // guarded beside the other sleepers in IdleBackgroundWorkCompositionRootTests.
+        using var factory = new WiringProbeFactory();
+        factory.Services.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
+            .Which.IsActive.Should().BeTrue("Program.cs composes the pause tiers and the exercise clock the runner needs");
+
+        using var scope = factory.Services.CreateScope();
+        ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = Guid.NewGuid();
+        scope.ServiceProvider.GetRequiredService<IScheduledContentPublisher>().Should().BeOfType<ContentPublishService>();
+        scope.ServiceProvider.GetRequiredService<ScheduledByReader>().Should().NotBeNull();
+
+        var twice = new ServiceCollection().AddChannels().AddChannels();
+        twice.Count(d => d.ServiceType == typeof(IHostedService)
+                && d.ImplementationFactory?.Method.ReturnType == typeof(ContentScheduleRunner))
+            .Should().Be(1, "the runner runs once per host however often AddChannels() is called");
+
+        // A slice host that composes no pause tiers or clock still starts, with an inert runner (#817 CI: the outlet hosts).
+        using var slice = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
+            .AddChannels()
+            .BuildServiceProvider();
+        slice.GetServices<IHostedService>().OfType<ContentScheduleRunner>().Should().ContainSingle()
+            .Which.IsActive.Should().BeFalse();
     }
 
     /// <summary>Story 07: every <c>/api/content-items*</c> route, mapped by <c>MapChannels()</c>.</summary>

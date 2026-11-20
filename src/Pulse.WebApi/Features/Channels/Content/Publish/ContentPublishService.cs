@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Channels.Content.Scheduling;
 using Pulse.WebApi.Features.Channels.Contracts;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Injects;
@@ -88,6 +89,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     private readonly IAlertRaiser? _alertRaiser;
     private readonly IPairedSocialPoster? _pairedPoster;
     private readonly IExerciseClock? _clock;
+    private readonly ContentScheduleSignal? _scheduleSignal;
     private readonly TimeProvider _time;
     private readonly ILogger<ContentPublishService> _logger;
 
@@ -106,6 +108,7 @@ public sealed partial class ContentPublishService : IContentPublishService
     /// <param name="clock">The native exercise clock (COR-053).</param>
     /// <param name="timeProvider">The wall clock; <see cref="TimeProvider.System"/> when absent.</param>
     /// <param name="logger">Diagnostics for post-commit failures.</param>
+    /// <param name="scheduleSignal">Woken after a schedule commits, so the sleeping scheduler (story 05) sweeps at once.</param>
     public ContentPublishService(
         PulseDbContext db,
         IExerciseContext exerciseContext,
@@ -120,7 +123,8 @@ public sealed partial class ContentPublishService : IContentPublishService
         IPairedSocialPoster? pairedPoster = null,
         IExerciseClock? clock = null,
         TimeProvider? timeProvider = null,
-        ILogger<ContentPublishService>? logger = null)
+        ILogger<ContentPublishService>? logger = null,
+        ContentScheduleSignal? scheduleSignal = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -143,6 +147,7 @@ public sealed partial class ContentPublishService : IContentPublishService
         _clock = clock;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ContentPublishService>.Instance;
+        _scheduleSignal = scheduleSignal;
     }
 
     /// <inheritdoc />
@@ -278,8 +283,17 @@ public sealed partial class ContentPublishService : IContentPublishService
     }
 
     /// <inheritdoc />
-    public async Task<ContentPublishResult> PublishAsync(
-        Guid id, PublishOptions? options, ContentCaller caller, CancellationToken cancellationToken = default)
+    public Task<ContentPublishResult> PublishAsync(
+        Guid id, PublishOptions? options, ContentCaller caller, CancellationToken cancellationToken = default) =>
+        PublishCoreAsync(id, options, caller, claim: null, cancellationToken);
+
+    /// <summary>
+    /// The one publish path. <paramref name="claim"/> is the scheduler's (story 05): the item must still be the
+    /// <c>scheduled</c>, due item at the version the runner discovered, else <see cref="ContentPublishOutcome.Conflict"/>
+    /// and nothing changes; and it is stamped at its own scheduled time.
+    /// </summary>
+    private async Task<ContentPublishResult> PublishCoreAsync(
+        Guid id, PublishOptions? options, ContentCaller caller, ScheduledClaim? claim, CancellationToken cancellationToken)
     {
         caller = NormalizeCaller(caller);
 
@@ -290,6 +304,25 @@ public sealed partial class ContentPublishService : IContentPublishService
         }
 
         var (item, descriptor, exerciseId) = (load.Item!, load.Descriptor!, load.ExerciseId);
+
+        // Story 05: a staff unschedule, edit or reschedule that landed after the runner found the item wins; the runner
+        // never publishes a draft or an item that is no longer due.
+        if (claim is not null
+            && (item.Version != claim.ExpectedVersion
+                || item.Status != ChannelVocabulary.StatusScheduled
+                || item.ScheduledScenarioTime is not { } due
+                || due > (await ClockAsync(exerciseId, cancellationToken)).ScenarioTime))
+        {
+            return await ConflictAsync(item, ScheduledClaimLostMessage);
+        }
+
+        // Story 05: EVERY publish (publish-now, the scheduler, inject fire, a participant composer) re-checks the item as
+        // it goes live — its outlet still exists and its stored payload still validates for `published` — since both were
+        // only checked when it was written. Fail closed: a refused scheduled publish goes back to draft via the runner.
+        if (await WhyNotPublishableAsync(item, descriptor, exerciseId, cancellationToken) is { Count: > 0 } unpublishable)
+        {
+            return Invalid([.. unpublishable]);
+        }
 
         var gate = await EvaluateGatesAsync(item, PublishContext.Publish, caller, cancellationToken);
         if (gate.Held is { } held)
@@ -303,9 +336,11 @@ public sealed partial class ContentPublishService : IContentPublishService
         var callOptions = caller.Origin == ChannelVocabulary.OriginParticipant ? null : options;
         var (resolved, _) = PublishOptionsResolver.Resolve(callOptions, item, descriptor);
 
+        // Read after the gates, so the stamp is the moment the item goes live (a slow gate never back-dates it).
         var time = await ClockAsync(exerciseId, cancellationToken);
+        var publishedAt = claim is null ? time.ScenarioTime : ScheduledPublishTime(item, claim, time);
         item.Status = ChannelVocabulary.StatusPublished;
-        item.PublishedScenarioTime = time.ScenarioTime;
+        item.PublishedScenarioTime = publishedAt;
         item.PublishedWallClock = time.WallClock;
         item.LastError = null;
         if (caller.InjectId is { } injectId)
@@ -373,6 +408,9 @@ public sealed partial class ContentPublishService : IContentPublishService
         {
             return conflict;
         }
+
+        // After commit: the scheduler sleeps while idle (#673), so a new schedule wakes it (a past time is due at once).
+        _scheduleSignal?.Wake();
 
         return await OkAsync(item, warnings: null);
     }

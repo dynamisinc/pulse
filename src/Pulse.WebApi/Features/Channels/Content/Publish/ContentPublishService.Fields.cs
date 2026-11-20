@@ -49,6 +49,46 @@ public sealed partial class ContentPublishService
         $"outletId does not name a {descriptor.ChannelId} outlet in this exercise.";
 
     /// <summary>
+    /// The go-live re-check of an item written earlier (story 05): its outlet still exists (not soft-deleted) and its
+    /// stored payload still passes the kind's validation for <c>published</c>. Empty when the item may go live.
+    /// </summary>
+    private async Task<List<string>> WhyNotPublishableAsync(
+        ContentItem item, IContentKindDescriptor descriptor, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var errors = new List<string>();
+        if (!await _db.Outlets.AsNoTracking().AnyAsync(
+                outlet => outlet.Id == item.OutletId && outlet.ChannelId == descriptor.ChannelId, cancellationToken))
+        {
+            errors.Add($"The item's outlet no longer exists in this exercise; choose another {descriptor.ChannelId} outlet.");
+        }
+
+        JsonObject payload;
+        try
+        {
+            payload = JsonNode.Parse(string.IsNullOrWhiteSpace(item.PayloadJson) ? "{}" : item.PayloadJson) as JsonObject ?? [];
+        }
+        catch (JsonException)
+        {
+            errors.Add("The item's stored payload is not valid JSON.");
+            return errors;
+        }
+
+        var validation = await descriptor.ValidatePayloadAsync(
+            payload,
+            new PayloadValidationContext
+            {
+                ExerciseId = exerciseId,
+                Db = _db,
+                Services = _services,
+                ContentItemId = item.Id,
+                TargetStatus = ChannelVocabulary.StatusPublished,
+            },
+            cancellationToken);
+        errors.AddRange(validation.Errors);
+        return errors;
+    }
+
+    /// <summary>
     /// Validates and sanitizes the writable fields (NFR-004). Text fields are stripped with <see cref="PostSanitizer"/>
     /// (they render as text); the body is sanitized once with the kind's NAMED profile; media must be in-scope assets the
     /// kind allows; the payload goes through the kind's <c>ValidatePayloadAsync</c> with an exercise-scoped context.
