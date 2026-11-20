@@ -216,6 +216,7 @@ const NO_REFRESH_RETRY_PATHS = new Set([
   '/auth/logout',
   '/auth/login',
   '/auth/staff/login',
+  '/auth/staff/login/choose', // #835: an expired choice is a refused sign-in, never an expired session
   '/auth/shared',
   '/auth/join',
   '/auth/word',

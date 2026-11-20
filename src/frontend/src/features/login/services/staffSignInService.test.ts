@@ -206,3 +206,14 @@ describe('staffOrgChoose', () => {
     expect((caught as StaffSignInError).status).toBe(401)
   })
 })
+
+describe('StaffSignInError cause', () => {
+  it('never keeps the request body (password or choice token) on the error', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401, ''))
+    const caught = await staffOrgSignIn({ email: 'a', password: 'hunter2-secret' }).catch(
+      (error: unknown) => error,
+    )
+    expect(JSON.stringify(Object.entries(caught as object))).not.toContain('hunter2-secret')
+    expect((caught as StaffSignInError).cause).toBeUndefined()
+  })
+})

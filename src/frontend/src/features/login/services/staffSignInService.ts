@@ -120,18 +120,22 @@ export function isStaffOrgChoiceResponse(
 export interface StaffSignInErrorInit {
   readonly status?: number
   readonly serverMessage?: string
+  /** True when the request got no answer (network failure or timeout), not a bad body. */
+  readonly unreachable?: boolean
   readonly cause?: unknown
 }
 
 export class StaffSignInError extends Error {
   readonly status?: number
   readonly serverMessage?: string
+  readonly unreachable: boolean
 
   constructor(message: string, init: StaffSignInErrorInit = {}) {
     super(message)
     this.name = 'StaffSignInError'
     this.status = init.status
     this.serverMessage = init.serverMessage
+    this.unreachable = init.unreachable ?? false
     if (init.cause !== undefined) {
       this.cause = init.cause
     }
@@ -173,10 +177,12 @@ function toStaffSignInError(error: unknown, fallbackMessage: string): StaffSignI
     return error
   }
   if (axios.isAxiosError(error)) {
+    // `cause` is deliberately NOT the AxiosError: its `config.data` holds the request body
+    // (the password or choice token), which a future log of the cause would leak.
     return new StaffSignInError(error.message, {
       status: error.response?.status,
       serverMessage: extractServerMessage(error.response?.data),
-      cause: error,
+      unreachable: error.response === undefined,
     })
   }
   if (error instanceof Error) {

@@ -87,13 +87,16 @@ beforeEach(() => {
   mockResetClientSession.mockReset()
   mockParams = {}
   vi.mocked(resolveExerciseContext).mockReset()
-  vi.mocked(resolveExerciseContext).mockResolvedValue({
-    exerciseId: 'ex-alpha',
-    exerciseName: 'Alpha',
-    timeZone: 'UTC',
-    status: 'active',
-  })
+  // The bare host by default: no exercise context, so email is the default form.
+  vi.mocked(resolveExerciseContext).mockRejectedValue(new Error('no exercise on this host'))
 })
+
+const EXERCISE_SCOPE = {
+  exerciseId: 'ex-alpha',
+  exerciseName: 'Alpha',
+  timeZone: 'UTC',
+  status: 'active',
+} as const
 
 describe('StaffSignInPage — email + password', () => {
   it('opens on email and password fields with the right autocomplete hints', () => {
@@ -214,6 +217,7 @@ describe('StaffSignInPage — exercise-bound path unchanged', () => {
     mockPost.mockResolvedValue({
       data: { token: 'tok', refreshToken: 'ref', session: {} },
     } as PostResult)
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
     renderPage()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /use a username and secret instead/i }))
@@ -227,5 +231,156 @@ describe('StaffSignInPage — exercise-bound path unchanged', () => {
       { username: 'jpace', secret: 'uat-secret', exerciseId: 'ex-alpha' },
     ])
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true }))
+  })
+})
+
+describe('StaffSignInPage — which form is the default', () => {
+  it('defaults to the exercise-bound form on an exercise address, with a link to email', async () => {
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    renderPage()
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^email/i)).not.toBeInTheDocument()
+    await userEvent.setup().click(
+      screen.getByRole('button', { name: /sign in with email instead/i }),
+    )
+    expect(screen.getByLabelText(/^email/i)).toHaveFocus()
+  })
+
+  it('defaults to email on the bare host', async () => {
+    renderPage()
+    await waitFor(() => expect(resolveExerciseContext).toHaveBeenCalled())
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+  })
+
+  it('defaults to email on /o/:slug even where an exercise resolves', async () => {
+    mockParams = { slug: 'acme' }
+    vi.mocked(resolveExerciseContext).mockResolvedValue(EXERCISE_SCOPE)
+    renderPage()
+    await waitFor(() => expect(resolveExerciseContext).toHaveBeenCalled())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument()
+  })
+
+  it('does not swap the form under someone who already started typing an email', async () => {
+    let resolveScope: (scope: typeof EXERCISE_SCOPE) => void = () => {}
+    vi.mocked(resolveExerciseContext).mockReturnValue(
+      new Promise(resolve => { resolveScope = resolve }),
+    )
+    renderPage()
+    await userEvent.setup().type(screen.getByLabelText(/^email/i), 'pat')
+    resolveScope(EXERCISE_SCOPE)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('pat')
+  })
+})
+
+describe('StaffSignInPage — focus', () => {
+  it('focuses the password after a refused sign-in', async () => {
+    mockPost.mockRejectedValue(refusal(401))
+    renderPage()
+    await signIn('pat@example.org', 'wrong-password')
+    await screen.findByRole('alert')
+    expect(screen.getByLabelText(/^password/i)).toHaveFocus()
+  })
+
+  it('focuses the email after an expired choice and after use a different account', async () => {
+    mockPost
+      .mockResolvedValueOnce({ data: CHOICE } as PostResult)
+      .mockRejectedValueOnce(refusal(401))
+      .mockResolvedValueOnce({ data: CHOICE } as PostResult)
+    renderPage()
+    const user = await signIn('pat@example.org', 'pw-correct-horse')
+    await user.click(await screen.findByRole('button', { name: 'Acme County' }))
+    await screen.findByRole('alert')
+    expect(screen.getByLabelText(/^email/i)).toHaveFocus()
+
+    await user.type(screen.getByLabelText(/^password/i), 'pw-correct-horse')
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }))
+    await user.click(await screen.findByRole('button', { name: /use a different account/i }))
+    expect(screen.getByLabelText(/^email/i)).toHaveFocus()
+  })
+
+  it('keeps inputs focusable (readOnly, not disabled) while submitting', async () => {
+    mockPost.mockReturnValue(new Promise(() => {}))
+    renderPage()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    const password = await screen.findByLabelText(/^password/i)
+    expect(password).not.toBeDisabled()
+    expect(password).toHaveAttribute('readonly')
+  })
+})
+
+describe('StaffSignInPage — messages, slug and choice edge cases', () => {
+  it('shows a generic message, not the credentials one, for a malformed 200', async () => {
+    mockPost.mockResolvedValue({ data: {} } as PostResult)
+    renderPage()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/something went wrong/i)
+    expect(alert).not.toHaveTextContent(/match/i)
+  })
+
+  it('does not show the credentials message when completing the sign-in throws', async () => {
+    mockPost.mockResolvedValue({ data: ORG_SESSION } as PostResult)
+    mockSetTokens.mockImplementation(() => { throw new Error('storage full') })
+    renderPage()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    const alert = await screen.findByRole('alert')
+    expect(alert).not.toHaveTextContent(/match/i)
+  })
+
+  it('treats an empty organization list as a uniform failure', async () => {
+    mockPost.mockResolvedValue({ data: { choose: [], choiceToken: 'c' } } as PostResult)
+    renderPage()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    expect(await screen.findByRole('alert')).toHaveTextContent(UNIFORM_FAILURE_MESSAGE)
+  })
+
+  it('keeps the choice step with a retry message on a 500 from choose', async () => {
+    mockPost
+      .mockResolvedValueOnce({ data: CHOICE } as PostResult)
+      .mockRejectedValueOnce(refusal(500))
+    renderPage()
+    const user = await signIn('pat@example.org', 'pw-correct-horse')
+    await user.click(await screen.findByRole('button', { name: 'Acme County' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByRole('button', { name: 'Beta Region' })).toBeInTheDocument()
+  })
+
+  it('neither shows nor sends a malformed /o/ slug', async () => {
+    mockParams = { slug: '<b>Evil Org</b>' }
+    mockPost.mockResolvedValue({ data: ORG_SESSION } as PostResult)
+    renderPage()
+    expect(screen.queryByTestId('staff-org-slug')).not.toBeInTheDocument()
+    await signIn('pat@example.org', 'pw-correct-horse')
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1))
+    expect(mockPost.mock.calls[0]?.[1]).toEqual({
+      email: 'pat@example.org',
+      password: 'pw-correct-horse',
+    })
+  })
+
+  it('resets the form when the slug changes', async () => {
+    mockParams = { slug: 'acme' }
+    const view = renderPage()
+    await userEvent.setup().type(screen.getByLabelText(/^email/i), 'pat@example.org')
+    mockParams = { slug: 'beta' }
+    view.rerender(<StaffSignInPage />)
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('')
+    expect(screen.getByTestId('staff-org-slug')).toHaveTextContent('beta')
+  })
+
+  it('turns off capitalisation and spell checking on the email field', () => {
+    renderPage()
+    const email = screen.getByLabelText(/^email/i)
+    expect(email).toHaveAttribute('autocapitalize', 'none')
+    expect(email).toHaveAttribute('autocorrect', 'off')
+    expect(email).toHaveAttribute('spellcheck', 'false')
+  })
+
+  it('has an h1 title', () => {
+    renderPage()
+    expect(screen.getByRole('heading', { level: 1, name: 'Staff sign-in' })).toBeInTheDocument()
   })
 })
