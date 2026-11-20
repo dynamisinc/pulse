@@ -109,3 +109,33 @@ export function runExerciseScopeResets(): void {
     }
   }
 }
+
+// A successful MOUNT resolution of the exercise scope (not a switch's refresh) means any leftover
+// scope-change state from a previous provider lifetime is stale - e.g. the hub suspended by a
+// switch whose re-resolve failed closed and whose console was then remounted. Handlers register
+// here so `core/exerciseContext` stays free of `core/realtime`.
+const scopeMountHandlers = new Set<SessionReset>()
+
+/** Registers a callback run when the exercise-scope provider resolves successfully on mount. */
+export function registerExerciseScopeMountHandler(
+  handler: () => void,
+  hot?: HotModule,
+): () => void {
+  scopeMountHandlers.add(handler)
+  const unregister = () => {
+    scopeMountHandlers.delete(handler)
+  }
+  hot?.dispose(unregister)
+  return unregister
+}
+
+/** Runs the mount handlers. Called by `ExerciseContextProvider`; never throws. */
+export function runExerciseScopeMountHandlers(): void {
+  for (const handler of [...scopeMountHandlers]) {
+    try {
+      handler()
+    } catch {
+      // Isolated, like the resets.
+    }
+  }
+}

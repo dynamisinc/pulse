@@ -347,10 +347,14 @@ public sealed class DefaultDenySessionGateTests
         using var client = factory.CreateClient();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var connectionToken = await NegotiateAsync(client, AcceptedToken, cts.Token);
+        factory.AuthenticationCalls[0].Should().Be(
+            1,
+            "negotiate must have authenticated exactly once, as session S1, or the 403 below proves nothing");
 
         using var response = await client.GetAsync(
             $"hubs/exercise?id={connectionToken}&access_token={AcceptedToken}", cts.Token);
 
+        factory.AuthenticationCalls[0].Should().BeGreaterThan(1, "the transport request was authenticated as the rotated session");
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
@@ -517,6 +521,9 @@ public sealed class DefaultDenySessionGateTests
         private readonly string? _acceptedToken;
         private readonly bool _rotateSessionAfterFirstCall;
 
+        /// <summary>How many times the stubbed authenticator has resolved the accepted token (one slot, shared across scopes).</summary>
+        internal int[] AuthenticationCalls { get; } = new int[1];
+
         /// <summary>Completes once the server has finished a connection's <c>OnConnectedAsync</c> (its group join).</summary>
         public HubConnectedSignal Connected { get; } = new();
 
@@ -554,7 +561,7 @@ public sealed class DefaultDenySessionGateTests
                 if (_acceptedToken is not null)
                 {
                     // The authenticator is scoped (one per request), so the call count it rotates on is shared.
-                    var calls = new int[1];
+                    var calls = AuthenticationCalls;
                     var rotate = _rotateSessionAfterFirstCall;
                     services.AddScoped<ISessionAuthenticator>(
                         _ => new SingleTokenSessionAuthenticator(_acceptedToken, ResolvedExerciseId, rotate ? calls : null));

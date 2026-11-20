@@ -133,6 +133,7 @@ import {
   type ReactNode,
 } from 'react'
 import { endRefreshCooldown } from '../services/api'
+import { runExerciseScopeMountHandlers } from '../auth/sessionReset'
 import { ReconnectingState } from '../auth/ReconnectingState'
 import { httpStatusOf, signInPathForPage } from '../auth/reconnect'
 import { getAccessToken } from '../auth/tokenStore'
@@ -178,7 +179,16 @@ function shouldStayConnected(error: unknown): boolean {
  * section. Resolves with the newly-committed scope; REJECTS (after failing the
  * provider closed) when re-resolution fails.
  */
-export type ExerciseScopeRefresh = () => Promise<ExerciseScope>
+export interface ExerciseScopeRefreshOptions {
+  /**
+   * Re-read ONCE after this many ms if the first read fails, before failing the provider closed
+   * (a brief network blip after an ambiguous switch failure must not take the console to
+   * "Session unavailable"). Absent: fail closed on the first failure, as ever.
+   */
+  readonly retryOnceAfterMs?: number
+}
+
+export type ExerciseScopeRefresh = (options?: ExerciseScopeRefreshOptions) => Promise<ExerciseScope>
 
 const ExerciseContextInternal = createContext<ExerciseScope | undefined>(undefined)
 const ExerciseScopeRefreshContext = createContext<ExerciseScopeRefresh | undefined>(undefined)
@@ -284,14 +294,25 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
    * refresh) learns the outcome; the failure is already logged + failed closed
    * by the time it re-throws.
    */
-  const resolve = useCallback(async (origin: 'mount' | 'refresh'): Promise<ExerciseScope> => {
+  const resolve = useCallback(async (
+    origin: 'mount' | 'refresh',
+    retryOnceAfterMs?: number,
+  ): Promise<ExerciseScope> => {
     const attempt = attemptRef.current + 1
     attemptRef.current = attempt
     const mayCommit = () => !abandonedRef.current && attempt === attemptRef.current
 
     try {
-      const scope = await resolveExerciseContext()
+      let scope: ExerciseScope
+      try {
+        scope = await resolveExerciseContext()
+      } catch (firstError) {
+        if (retryOnceAfterMs === undefined) throw firstError
+        await new Promise<void>(resolveDelay => setTimeout(resolveDelay, retryOnceAfterMs))
+        scope = await resolveExerciseContext()
+      }
       if (mayCommit()) {
+        if (origin === 'mount') runExerciseScopeMountHandlers()
         // Atomic swap: one commit, no intervening `loading`, so children are
         // never unmounted by a refresh (see the module header).
         setState(previous =>
@@ -348,7 +369,13 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
 
   // The public refresh (a zero-argument function: see the module header). Stable, like
   // `resolve`, so consumers' effects do not re-run.
-  const refresh = useCallback(() => resolve('refresh'), [resolve])
+  // Rest parameter on purpose: the function still DECLARES no argument (`length === 0`; the
+  // refresh is server-authoritative and cannot be told which exercise it is in), while an
+  // optional retry hint is accepted. See ExerciseScopeRefreshOptions.
+  const refresh = useCallback<ExerciseScopeRefresh>(
+    (...args) => resolve('refresh', args[0]?.retryOnceAfterMs),
+    [resolve],
+  )
 
   // "Try again" on the Reconnecting screen: the same MOUNT resolution, started by a person, so
   // it may call the token refresh again even inside the cool-down a no-answer refresh started.

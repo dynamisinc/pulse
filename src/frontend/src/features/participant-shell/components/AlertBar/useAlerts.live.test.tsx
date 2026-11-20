@@ -248,6 +248,19 @@ describe('useAlerts - an exercise switch (scope-changed, #856)', () => {
     act(() => connection().transition(HubConnectionState.Connected))
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
   })
+
+  it('a resume() that fails announces a plain loss, and the alerts are re-read once the hub works', async () => {
+    mockGet.mockResolvedValue(ok({ alerts: [] }))
+    renderHook(() => useAlerts(), { wrapper: makeWrapper(makeQueryClient()) })
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1))
+
+    act(() => connection().transition(HubConnectionState.Disconnected, 'scope-changed'))
+    act(() => connection().transition(HubConnectionState.Disconnected)) // the resumed start failed
+    expect(connection().startCalls()).toBe(1) // a plain loss is not a restart cue either
+    act(() => connection().transition(HubConnectionState.Connected))
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
+  })
 })
 
 describe('useAlertsHistory — GET /alerts/history', () => {

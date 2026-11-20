@@ -275,6 +275,11 @@ interface PauseStoreState {
   readonly overlayRegister: OverlayRegister
   /** The last server refusal to surface, or `null`. Ambient like the tier itself. */
   readonly refusal: PauseRefusal | null
+  /**
+   * Bumped by the exercise-scope reset (#856) so a MOUNTED console re-runs its one-shot server
+   * resync for the current exercise, whichever order the reset and the render came in.
+   */
+  readonly resyncEpoch: number
 }
 
 /** A completed tier transition, returned so the hook can emit telemetry with context. */
@@ -297,6 +302,7 @@ let storeState: PauseStoreState = {
   tier: 'running',
   overlayRegister: 'out-of-fiction',
   refusal: null,
+  resyncEpoch: 0,
 }
 const storeListeners = new Set<() => void>()
 
@@ -539,7 +545,12 @@ export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
 export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
-  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
+  storeState = {
+    tier: 'running',
+    overlayRegister: 'out-of-fiction',
+    refusal: null,
+    resyncEpoch: storeState.resyncEpoch,
+  }
   resyncedFor = null
   supersedeSequence = 0
   engineModeBeforePause = null
@@ -558,7 +569,12 @@ export function resetPauseStateForTest(): void {
 function resetPauseStateForSession(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   serverExerciseClock.clearOptimistic()
-  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
+  storeState = {
+    tier: 'running',
+    overlayRegister: 'out-of-fiction',
+    refusal: null,
+    resyncEpoch: storeState.resyncEpoch,
+  }
   resyncedFor = null
   engineModeBeforePause = null
   transitionSequence++
@@ -569,7 +585,19 @@ function resetPauseStateForSession(): void {
 // Registered with `core/auth` (which cannot import this feature) rather than called from
 // `endSession`; the unregister is tied to Vite's hot replacement of this module.
 registerSessionReset(resetPauseStateForSession, import.meta.hot)
-registerExerciseScopeReset(resetPauseStateForSession, import.meta.hot)
+
+/**
+ * The session's exercise changed (staff switch, #856): forget exercise A's pause state AND ask a
+ * mounted console to read B's tier itself, rather than relying on its `[exerciseId]` effect
+ * running after this reset (the render can come first).
+ */
+function resetPauseStateForScope(): void {
+  resetPauseStateForSession()
+  storeState = { ...storeState, resyncEpoch: storeState.resyncEpoch + 1 }
+  emitStoreChange()
+}
+
+registerExerciseScopeReset(resetPauseStateForScope, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -790,7 +818,7 @@ export function usePauseState(): PauseState {
     if (USE_MOCK_DATA || resyncedFor === exerciseId) return
     resyncedFor = exerciseId
     void refreshPauseTierFromServer(exerciseId)
-  }, [exerciseId])
+  }, [exerciseId, state.resyncEpoch])
 
   const resume = useCallback(() => setTier('running'), [setTier])
 

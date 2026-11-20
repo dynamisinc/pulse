@@ -99,12 +99,19 @@
  * World: STAFF. Pure data hook — no UI, no COBRA.
  */
 
+import { useEffect, useRef } from 'react'
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { useExerciseContext, useExerciseScopeRefresh } from '@/core/exerciseContext'
 import { realtimeConnection } from '@/core/realtime/connection'
 import { runExerciseScopeResets } from '@/core/auth/sessionReset'
 import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
 import type { Enrollment } from '../types'
+
+/** How long the switch POST may take before it is treated as an AMBIGUOUS failure. */
+export const SWITCH_POST_TIMEOUT_MS = 15_000
+
+/** Delay before the one re-read of the scope after an ambiguous failure, before failing closed. */
+export const SCOPE_REREAD_RETRY_MS = 2_000
 
 /** Counts switches as they are asked for; only the latest may reset the stores / resume the hub. */
 let latestSwitch = 0
@@ -116,6 +123,24 @@ function serialize<T>(task: () => Promise<T>): Promise<T> {
   const run = switchQueue.then(task, task)
   switchQueue = run.catch(() => undefined)
   return run
+}
+
+/** Test-only: forgets the generation counter and the queue between tests. */
+export function resetSetActiveExerciseForTests(): void {
+  latestSwitch = 0
+  switchQueue = Promise.resolve()
+}
+
+/** Rejects (ambiguously: no status) if `promise` has not settled within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new StaffAssignmentError('The exercise switch request timed out.')),
+      ms,
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
 /**
@@ -145,14 +170,22 @@ export function useSetActiveExercise(): UseMutationResult<
 > {
   const queryClient = useQueryClient()
   const refreshExerciseScope = useExerciseScopeRefresh()
-  // The exercise the console is on when the switch is asked for (this render's closure).
+  // The exercise the provider currently holds. A ref (updated after each commit), not this
+  // render's closure: an overlapping earlier switch may have committed a different exercise.
   const currentExerciseId = useExerciseContext().exerciseId
+  const heldExerciseIdRef = useRef(currentExerciseId)
+  useEffect(() => {
+    heldExerciseIdRef.current = currentExerciseId
+  }, [currentExerciseId])
 
-  /** The scope is committed: reset module-store data, then start the hub (latest switch only). */
+  /**
+   * A changed scope is committed: ALWAYS reset the module stores (a stale switch's commit must
+   * not leave them holding the old exercise if the latest switch then fails), but only the
+   * LATEST switch starts the hub.
+   */
   const commitScope = (generation: number): void => {
-    if (generation !== latestSwitch) return
     runExerciseScopeResets()
-    void realtimeConnection.resume()
+    if (generation === latestSwitch) void realtimeConnection.resume()
   }
 
   /** The POST failed. Decide, from what the server says, which scope the hub resumes on. */
@@ -164,8 +197,8 @@ export function useSetActiveExercise(): UseMutationResult<
     // Ambiguous: the switch may have landed. Ask the server; the client never guesses.
     try {
       await queryClient.cancelQueries()
-      const scope = await refreshExerciseScope()
-      if (scope.exerciseId !== currentExerciseId) {
+      const scope = await refreshExerciseScope({ retryOnceAfterMs: SCOPE_REREAD_RETRY_MS })
+      if (scope.exerciseId !== heldExerciseIdRef.current) {
         // It landed after all: this is a full switch.
         commitScope(generation)
         await queryClient.resetQueries()
@@ -188,7 +221,7 @@ export function useSetActiveExercise(): UseMutationResult<
       return serialize(async () => {
         let enrollment: Enrollment
         try {
-          enrollment = await setActiveExercise(exerciseId)
+          enrollment = await withTimeout(setActiveExercise(exerciseId), SWITCH_POST_TIMEOUT_MS)
         } catch (error) {
           await recoverFromFailedPost(error, generation)
           throw error

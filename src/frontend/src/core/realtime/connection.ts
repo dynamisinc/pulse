@@ -88,7 +88,7 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { HubConnection } from '@microsoft/signalr'
 import { getAccessToken } from '@/core/auth/tokenStore'
-import { registerSessionReset } from '@/core/auth/sessionReset'
+import { registerExerciseScopeMountHandler, registerSessionReset } from '@/core/auth/sessionReset'
 import type { HotModule } from '@/core/auth/sessionReset'
 
 export { HubConnectionState } from '@microsoft/signalr'
@@ -155,6 +155,14 @@ export interface RealtimeConnection {
 
   /** The current connection state (`Disconnected` before the first start). */
   readonly state: HubConnectionState
+
+  /**
+   * True while `stop('scope-changed')` has the connection suspended (an exercise switch is in
+   * progress): `start()` is refused, and a polling consumer should skip its tick rather than
+   * read the NEW exercise's data into the OLD exercise's state. Optional so test doubles need not
+   * implement it.
+   */
+  readonly suspended?: boolean
 }
 
 /**
@@ -171,6 +179,13 @@ export interface ManagedRealtimeConnection extends RealtimeConnection {
    * rejects.
    */
   resume(): Promise<void>
+
+  /**
+   * Lifts a suspension without starting anything. Run when the exercise scope resolves on a
+   * fresh mount, so a console remounted after a fail-closed switch does not run with a hub that
+   * nobody is going to resume.
+   */
+  clearSuspension(): void
 }
 
 /** Why `start()` refused while the connection is suspended by `stop('scope-changed')`. */
@@ -321,13 +336,17 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   /** True once a terminal close has been answered with a rebuild; refilled by a good connect. */
   private rebuildSpent = false
   /** Set by `stop('scope-changed')`; while true `start()` refuses. See the module header. */
-  private suspended = false
+  private suspendedFlag = false
   /** Refills the rebuild budget once the connection has stayed up for STABLE_CONNECTION_MS. */
   private stableTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
     this.buildConnection = options.buildConnection ?? createDefaultHubConnection
     this.hubUrlOverride = options.hubUrl
+  }
+
+  get suspended(): boolean {
+    return this.suspendedFlag
   }
 
   get state(): HubConnectionState {
@@ -354,7 +373,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   }
 
   start(): Promise<void> {
-    if (this.suspended) return Promise.reject(new Error(SUSPENDED))
+    if (this.suspendedFlag) return Promise.reject(new Error(SUSPENDED))
     const connection = this.ensureConnection()
     if (connection.state === HubConnectionState.Connected) return Promise.resolve()
     if (this.startPromise !== null) return this.startPromise
@@ -384,7 +403,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   stop(reason: RealtimeStateReason = 'stopped'): Promise<void> {
     // A scope change SUSPENDS (no start() until resume()); any other stop - a sign-out or
     // sign-in - lifts a suspension, so a session that ends mid-switch cannot strand the next one.
-    this.suspended = reason === 'scope-changed'
+    this.suspendedFlag = reason === 'scope-changed'
     const connection = this.connection
     if (connection === null) return this.closing
 
@@ -418,7 +437,7 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
   }
 
   resume(): Promise<void> {
-    this.suspended = false
+    this.suspendedFlag = false
     if (this.subscriptions.size === 0) return Promise.resolve()
     // Signed out meanwhile: there is no identity to connect as (negotiate would only 401).
     if (getAccessToken() === null) return Promise.resolve()
@@ -430,9 +449,20 @@ class SharedRealtimeConnection implements ManagedRealtimeConnection {
       this.emitState(HubConnectionState.Connected)
       return Promise.resolve()
     }
-    return this.start().catch(() => {
-      // The consumers' own recovery (polling fallback, retry on Disconnected) owns a failed start.
+    const attempt = this.start()
+    const started = this.connection
+    return attempt.catch(() => {
+      // Failed. Consumers parked themselves on `'scope-changed'` (the feed holds in 'connecting'
+      // and does not poll), so they need a plain loss to fall back and retry: announce it - but
+      // only if this attempt is still the story (not re-suspended, not replaced, not up).
+      if (this.suspendedFlag || this.connection !== started) return
+      if (started?.state === HubConnectionState.Connected) return
+      this.emitState(HubConnectionState.Disconnected)
     })
+  }
+
+  clearSuspension(): void {
+    this.suspendedFlag = false
   }
 
   private armStableTimer(): void {
@@ -541,6 +571,7 @@ export const realtimeConnection: ManagedRealtimeConnection = createRealtimeConne
 registerSessionReset(() => {
   void realtimeConnection.stop()
 }, import.meta.hot)
+registerExerciseScopeMountHandler(() => realtimeConnection.clearSuspension(), import.meta.hot)
 
 /**
  * Stops `connection` when Vite hot-replaces the module that calls this (dev only; `hot` is

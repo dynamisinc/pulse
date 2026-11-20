@@ -335,17 +335,61 @@ describe('suspension while the exercise scope changes', () => {
     expect(transport.connection.state).toBe(HubConnectionState.Connected)
   })
 
-  it('resume() on an already-Connected connection announces Connected so gap consumers resync', async () => {
+  it('after a REAL scope change, a resume() that finds the hub already up re-announces Connected', async () => {
     const transport = createFakeTransport()
     transport.connection.subscribe('X', () => {})
-    await transport.connection.resume()
-    expect(transport.connection.state).toBe(HubConnectionState.Connected)
-    const seen = observe(transport)
+    await transport.connection.start()
+    void transport.connection.stop('scope-changed')
+    await flush()
+    expect(transport.connection.suspended).toBe(true)
 
+    // The provider remounted (clearSuspension) and a consumer connected before the switch owner
+    // got to resume(): gap consumers must still resync under the new scope.
+    transport.connection.clearSuspension()
+    expect(transport.connection.suspended).toBe(false)
+    await transport.connection.start()
+    const seen = observe(transport)
     await transport.connection.resume()
 
     expect(seen).toEqual([{ state: HubConnectionState.Connected, reason: undefined }])
-    expect(transport.fakes).toHaveLength(1)
+    expect(transport.fakes).toHaveLength(2)
+  })
+
+  it('a resume() whose start fails announces a plain loss so consumers fall back and retry', async () => {
+    const transport = createFakeTransport((fake, index) => {
+      if (index === 1) fake.startImpl = () => Promise.reject(new Error('hub down'))
+    })
+    transport.connection.subscribe('X', () => {})
+    await transport.connection.start()
+    const seen = observe(transport)
+
+    void transport.connection.stop('scope-changed')
+    await flush()
+    await transport.connection.resume()
+
+    expect(seen).toEqual([
+      { state: HubConnectionState.Disconnected, reason: 'scope-changed' },
+      { state: HubConnectionState.Disconnected, reason: undefined },
+    ])
+    expect(transport.connection.suspended).toBe(false)
+  })
+
+  it('a failed resume() stays silent when a newer stop() suspended the connection again', async () => {
+    let hold: { fail: () => void } | undefined
+    const transport = createFakeTransport((fake, index) => {
+      if (index === 1) hold = fake.holdStart()
+    })
+    transport.connection.subscribe('X', () => {})
+    await transport.connection.start()
+    void transport.connection.stop('scope-changed')
+    const resuming = transport.connection.resume() // held
+    const seen = observe(transport)
+
+    void transport.connection.stop('scope-changed') // the next switch begins
+    hold?.fail()
+    await resuming
+
+    expect(seen.filter(s => s.reason === undefined)).toEqual([])
   })
 
   it('a reconnecting episode cancels the stable timer, so it cannot refill the budget meanwhile', async () => {

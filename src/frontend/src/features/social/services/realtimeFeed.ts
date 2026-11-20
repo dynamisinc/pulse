@@ -718,6 +718,10 @@ class RealtimeFeedController implements SessionResettableFeed {
     // overlap — two concurrent polls could both observe baselined === false and race the
     // dedup/baseline state. Skip a tick while one is still running; the next cadence retries.
     if (this.pollInFlight) return
+    // An exercise switch is in progress (the connection is suspended): the server may already be
+    // on the NEW exercise, and its posts must not land in the OLD exercise's feed state before
+    // the switch commits. Skip this tick; the resume (or the post-commit reset) takes over.
+    if (this.connection.suspended === true) return
     // Self-heal: polling is the fallback for a connection that is NOT up. If it is up, whatever
     // degraded the feed has since been overtaken (a late-rejecting start), so stop polling.
     if (this.connection.state === HubConnectionState.Connected) {
