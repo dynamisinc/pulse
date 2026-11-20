@@ -103,8 +103,7 @@ public sealed class SessionHolderStandingTests
             .ToQueryString();
 
         sql.Should().Contain("[Sessions]").And.Contain("[People]", "the person is read by the session lookup itself");
-        sql.Split("SELECT", StringSplitOptions.None).Length.Should().BeGreaterThan(
-            2, "the person read is a correlated subquery of the one statement");
+        sql.Should().Contain("APPLY", "the person read is a correlated APPLY of the one statement, not a second query");
         sql.Should().Contain("COALESCE", "a legacy staff session names its person only through the shared-key StaffUserId");
     }
 }

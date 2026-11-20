@@ -142,6 +142,10 @@ Inviting the same email again, before the person has set a password, makes a new
 link stops working. Someone who already has a password needs a **Reset link** instead. You cannot
 invite a disabled person or another org admin.
 
+A link is only as good as the admin who made it. If the org admin who made an invite link or a
+**Reset link** is removed as admin or disabled before the person uses it, the link stops working and
+says it is invalid. Another org admin must make a new one.
+
 > **Adding another org admin:** invite them first and select **Make admin** after they have set their
 > password. Until they have, Pulse refuses **Make admin** with "This person has not set a password yet"
 > and changes nothing, so their invite link keeps working. Once they have opened the link and chosen a

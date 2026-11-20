@@ -186,7 +186,18 @@ public sealed partial class PasswordResetService
     }
 
     /// <summary>
+    /// Inside the open transaction: locks <paramref name="personId"/>'s row while it is still an ENABLED org admin of
+    /// <paramref name="organizationId"/>, and answers whether it is (#842, Sonnet M3).
+    /// </summary>
+    private async Task<bool> LockEnabledOrgAdminAsync(Guid personId, Guid organizationId, CancellationToken cancellationToken) =>
+        await _dbContext.People
+            .InOrganization(organizationId)
+            .Where(p => p.Id == personId && p.OrgRole == Person.OrgAdminRole && p.DisabledAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(p => p.OrgRole, p => p.OrgRole), cancellationToken) == 1;
+
+    /// <summary>
     /// Whether <paramref name="personId"/> is, right now, an ENABLED org admin of <paramref name="organizationId"/> (#842).
+    /// The early, lock-free check; <see cref="LockEnabledOrgAdminAsync"/> repeats it under a lock inside the change.
     /// </summary>
     private Task<bool> IsEnabledOrgAdminAsync(Guid personId, Guid organizationId, CancellationToken cancellationToken) =>
         _dbContext.People
@@ -212,8 +223,27 @@ public sealed partial class PasswordResetService
     {
         List<Guid> revokedSessionIds;
         var hasGrant = false;
+
+        // The slow hash is computed BEFORE the transaction, so no lock is held across it.
+        var newHash = Hasher.HashPassword(person, newPassword);
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
+            // #839: the person's row FIRST, serializing this change against a concurrent sign-in mint (PersonSessionLock):
+            // a sign-in that locked first has committed its session, which the sweep below revokes; one that locks after
+            // finds the new password hash and is refused. Taking it before the claim also makes two concurrent redemptions
+            // for the same person queue here instead of deadlocking on each other's tokens.
+            await PersonSessionLock.LockAsync(_dbContext, person.Id, token.OrganizationId, cancellationToken);
+
+            // Sonnet M3 / S-001 (#842): the issuer's authority, re-checked UNDER A LOCK in this transaction — a locking no-op
+            // over the issuer's row only while it is still an enabled org admin of the token's organization. A demote or
+            // disable of the issuer that committed after the early check matches nothing (the uniform invalid-token); one
+            // that has not committed yet waits for this redemption.
+            if (token.IssuedByPersonId is { } issuedBy && !await LockEnabledOrgAdminAsync(issuedBy, token.OrganizationId, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+
             if (!await _tokens.TryClaimAsync(token.Id, token.OrganizationId, now, cancellationToken))
             {
                 // Lost a race with a concurrent redemption (or it expired in between): the same uniform answer.
@@ -221,8 +251,12 @@ public sealed partial class PasswordResetService
                 return null;
             }
 
-            person.PasswordHash = Hasher.HashPassword(person, newPassword);
-            person.PasswordChangedAt = now;
+            // CR-001: the change is stamped from a clock read taken AFTER the lock and the claim, so it is never earlier
+            // than any session a sign-in committed before this change got the person lock.
+            var changedAt = _timeProvider.GetUtcNow();
+            now = changedAt;
+            person.PasswordHash = newHash;
+            person.PasswordChangedAt = changedAt;
             await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
 
             // The credential-change rule (§3.3): every outstanding token of BOTH purposes and every unconsumed org choice

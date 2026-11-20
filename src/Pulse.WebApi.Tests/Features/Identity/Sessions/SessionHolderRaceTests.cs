@@ -13,7 +13,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
-using Pulse.WebApi.Features.Identity.Credentials;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Org.PeopleDirectory;
@@ -24,14 +23,15 @@ using Pulse.WebApi.Tests.Features.Org.PeopleDirectory;
 using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
-/// #839 — a demote, disable or password reset that misses a session minted by a concurrent sign-in. Each test stages the
-/// race deterministically: the change runs through its REAL service, and at the moment its final save begins — after its
-/// own sweep has read the person's sessions, before it commits — a competing connection inserts the session a racing
-/// sign-in would have minted. The test first proves the race really happened (the change committed, the sweep never saw
-/// the session, so it is still un-revoked), then proves that session authenticates nowhere: not the request middleware's
-/// <see cref="SessionAuthenticator"/>, not <see cref="CurrentStaffSessionAccessor"/>, not <c>GET /api/session</c>, not
-/// refresh. A control session of a person whose state did not change keeps authenticating, so the refusals are the
-/// person check, not a broken lookup.
+/// #839 — the DEFENCE IN DEPTH behind the person-row lock (<see cref="PersonSessionLock"/>, proven by
+/// <see cref="PersonRowSerializationTests"/>): <see cref="SessionHolderQueries"/>' per-request re-check of the session's
+/// person. Each test leaves a session live that a change did not sweep — inserted on its own connection at the start of
+/// the change's final save, as a mint path that took no person lock would — and proves the session then authenticates
+/// nowhere: not the request middleware's <see cref="SessionAuthenticator"/>, not <see cref="CurrentStaffSessionAccessor"/>,
+/// not <c>GET /api/session</c>, not refresh. Only the STATE checks (disabled, org-admin grant) are exercised this way:
+/// the password check compares timestamps, and a lock-free mint could legitimately stamp a later issue time, so the
+/// password arm is closed by the lock alone (see <see cref="PersonRowSerializationTests"/>). A control session of a person
+/// whose state did not change keeps authenticating.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class SessionHolderRaceTests
@@ -89,47 +89,6 @@ public sealed class SessionHolderRaceTests
         await AssertRaceReproducedAsync(hook, escaped.Session.Id);
         await AssertRefusedEverywhereAsync(escaped.Token, escaped.RefreshToken);
         await AssertStillAuthenticatesAsync(callerToken, "the disabling admin's own session is untouched");
-    }
-
-    [RequiresDockerFact]
-    public async Task PasswordReset_RacingASignInOnTheOldPassword_LeavesAnUnrevokedSession_ThatNoLongerAuthenticates()
-    {
-        var (org, _) = await _world.SeedOrganizationAsync();
-        var exercise = await _world.SeedExerciseAsync(org);
-        var (target, _) = await _world.SeedPersonAsync(org);
-        await _world.SeedEnrollmentAsync(exercise, target, "controller");
-        var issued = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org);
-
-        // The reset stamps PasswordChangedAt from its own clock read; the racing sign-in verified the OLD password and
-        // read its clock just before it (it read the person before the reset committed).
-        var resetAt = DateTimeOffset.UtcNow;
-        var escaped = NewSession(target, exercise, "controller", issuedAt: resetAt.AddSeconds(-1));
-        var hook = new MintBeforeFinalSave(_fixture, escaped.Session);
-        var options = new DbContextOptionsBuilder<PulseDbContext>()
-            .UseSqlServer(_fixture.ConnectionString!)
-            .AddInterceptors(hook)
-            .Options;
-        await using (var context = new PulseDbContext(options))
-        {
-            var clock = new FixedClock(resetAt);
-            var service = new PasswordResetService(
-                context, new CredentialTokenService(context, clock), clock, new RecordingConnectionRevoker());
-            (await service.ResetAsync(new PasswordResetRequest { Token = issued.RawToken, NewPassword = CredentialTestWorld.NewPassword }))
-                .Outcome.Should().Be(PasswordResetOutcome.Ok, "the reset commits");
-        }
-
-        await AssertRaceReproducedAsync(hook, escaped.Session.Id);
-        await AssertRefusedEverywhereAsync(escaped.Token, escaped.RefreshToken);
-
-        // Positive control: a sign-in AFTER the reset (on the new password) is not refused by the same check.
-        var fresh = NewSession(target, exercise, "controller", issuedAt: resetAt.AddSeconds(1));
-        await using (var seed = _fixture.CreateContext())
-        {
-            seed.Sessions.Add(fresh.Session);
-            await seed.SaveChangesAsync();
-        }
-
-        await AssertStillAuthenticatesAsync(fresh.Token, "a session issued after the password change carries the new credential");
     }
 
     [RequiresDockerFact]
@@ -260,11 +219,5 @@ public sealed class SessionHolderRaceTests
 
             return result;
         }
-    }
-
-    /// <summary>A clock frozen at one instant.</summary>
-    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
     }
 }

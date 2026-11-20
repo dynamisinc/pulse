@@ -332,7 +332,7 @@ public sealed partial class OrgStaffLoginService
         }
 
         AddAudit(organization.Id, ChoiceAuditKind, SuccessOutcome, person.Id, "{}", now);
-        return await MintAsync(person, staffUser, organization.Id, now, cancellationToken);
+        return await MintAsync(person, staffUser, organization.Id, person.PasswordHash, now, cancellationToken);
     }
 
     /// <summary>
@@ -430,7 +430,9 @@ public sealed partial class OrgStaffLoginService
             return OrgStaffLoginResult.Rejected();
         }
 
-        return await MintAsync(person, staffUser!, organization.Id, now, cancellationToken);
+        // The hash the Pulse password verified against (the provider read the same tracked row), or none when the
+        // allowlist verified a person no candidate matched.
+        return await MintAsync(person, staffUser!, organization.Id, candidate?.PasswordHash, now, cancellationToken);
     }
 
     private async Task<OrgStaffLoginResult> LoginWithoutSlugAsync(
@@ -504,7 +506,7 @@ public sealed partial class OrgStaffLoginService
         if (verified.Count == 1)
         {
             var (person, staffUser) = verified[0];
-            return await MintAsync(person, staffUser, person.OrganizationId, now, cancellationToken);
+            return await MintAsync(person, staffUser, person.OrganizationId, person.PasswordHash, now, cancellationToken);
         }
 
         // More than one organization verified: offer the choice. The other (non-verified) candidates' counters are
@@ -579,21 +581,44 @@ public sealed partial class OrgStaffLoginService
             return OrgStaffLoginResult.Rejected();
         }
 
-        return await MintAsync(person, staffUser, staffUser.OrganizationId, now, cancellationToken);
+        // The allowlist verified no Pulse password (it refuses anyone who has one), so the mint requires there still is none.
+        return await MintAsync(person, staffUser, staffUser.OrganizationId, verifiedPasswordHash: null, now, cancellationToken);
     }
 
     /// <summary>
     /// Mints the session for a verified person: ORG scope for an org admin, otherwise the person's most recently used
     /// staff enrollment in <paramref name="organizationId"/>; neither is the uniform refusal.
     /// </summary>
+    /// <remarks>
+    /// <b>Serialized against every session sweep (#839).</b> The mint runs in ONE transaction that first takes the
+    /// person-row lock (<see cref="PersonSessionLock.TryLockForMintAsync"/>) conditioned on what the sign-in verified —
+    /// the same password hash, not disabled, and the org-admin grant for an org-scope session — and only then reads the
+    /// landing enrollment and inserts the session. A demote, disable, credential change or enrollment change locks the
+    /// same row before its sweep, so either it committed first (and the lock or the grant read refuses this mint) or this
+    /// session is committed before its sweep runs (and is revoked by it). A changed person is the uniform refusal.
+    /// </remarks>
     private async Task<OrgStaffLoginResult> MintAsync(
         Person person,
         StaffUser staffUser,
         Guid organizationId,
+        string? verifiedPasswordHash,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        if (Person.IsOrgAdmin(person.OrgRole))
+        var orgScope = Person.IsOrgAdmin(person.OrgRole);
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        if (!await PersonSessionLock.TryLockForMintAsync(
+                _dbContext, person.Id, organizationId, verifiedPasswordHash, requireOrgAdmin: orgScope, cancellationToken))
+        {
+            // The person changed after the sign-in read it (a new password, a disable, a lost org-admin grant).
+            await transaction.RollbackAsync(cancellationToken);
+            AddAudit(organizationId, SignInAuditKind, RefusedOutcome, person.Id, "{\"reason\":\"changed\"}", now);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return OrgStaffLoginResult.Rejected();
+        }
+
+        if (orgScope)
         {
             await StaffSignInLockout.RecordSuccessAsync(_dbContext, person, cancellationToken);
             staffUser.LastLoginAt = now;
@@ -603,15 +628,18 @@ public sealed partial class OrgStaffLoginService
             var orgSession = await _sessionIssuer.IssueAsync(
                 StaffSessionRequest(staffUser.Id, exerciseId: null, Person.OrgAdminRole),
                 cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return OrgStaffLoginResult.Authenticated(orgSession, isLead: false);
         }
 
+        // Read UNDER the person lock, so an enrollment removed or changed by a change that locked first is already gone.
         var enrollment = await MostRecentlyUsedStaffEnrollmentAsync(person.Id, organizationId, cancellationToken);
         if (enrollment is null)
         {
             // The password was right but there is nothing to sign in to — not a credential failure, so no counter.
             AddAudit(organizationId, SignInAuditKind, RefusedOutcome, person.Id, "{\"reason\":\"no-grant\"}", now);
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return OrgStaffLoginResult.Rejected();
         }
 
@@ -633,6 +661,7 @@ public sealed partial class OrgStaffLoginService
         var issued = await _sessionIssuer.IssueAsync(
             StaffSessionRequest(staffUser.Id, enrollment.ExerciseId, enrollment.Role),
             cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return OrgStaffLoginResult.Authenticated(issued, enrollment.IsLead);
     }
 

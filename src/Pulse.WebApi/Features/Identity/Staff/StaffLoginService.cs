@@ -267,6 +267,26 @@ public sealed class StaffLoginService
             return StaffLoginResult.NotAssigned();
         }
 
+        // #839: from here the mint is serialized against every change that sweeps this person's sessions (a disable, a
+        // credential change, an enrollment removal or role change). ONE transaction takes the person-row lock first —
+        // conditioned on the password hash that verified (none, for an allowlist sign-in) and on not being disabled —
+        // and only then reads the enrollment and inserts the session. A change that locked first has committed, so a
+        // changed person is refused here and a removed enrollment is not found below; a change that locks after this
+        // waits for the commit and its sweep sees this session. See PersonSessionLock.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var verifiedPasswordHash = passwordPerson is not null && passwordPerson.Id == staffUser.Id ? passwordPerson.PasswordHash : null;
+        if (!await PersonSessionLock.TryLockForMintAsync(
+                _dbContext, staffUser.Id, exercise.OrganizationId, verifiedPasswordHash, requireOrgAdmin: false, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
+                exerciseId, role: null, actingHumanId: null, outcome: FailureOutcomePayload,
+                now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: null));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return StaffLoginResult.Rejected();
+        }
+
         // 6. Authorization: the staff user must hold a STAFF enrollment in the selected exercise (identity-auth-roles/16:
         //    Enrollment replaces StaffAssignment; StaffUser.Id == Person.Id). Login runs before any exercise scope
         //    exists, so the central exercise filter would match nothing — it is bypassed and the exercise is named
@@ -289,6 +309,7 @@ public sealed class StaffLoginService
                 exerciseId, role: null, actingHumanId: staffUser.Id.ToString(), outcome: FailureOutcomePayload,
                 now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: staffUser.Id));
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             return StaffLoginResult.NotAssigned();
         }
@@ -323,6 +344,7 @@ public sealed class StaffLoginService
                 PersonId = staffUser.Id,
             },
             cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         // isLead is read LIVE from the enrollment (never stored on the session) — here, the one just authorized.
         return StaffLoginResult.Authenticated(issued, assignment.IsLead);

@@ -39,7 +39,10 @@ using Pulse.WebApi.Features.Realtime;
 /// <para>
 /// <b>Grant-revoke rule (§1.1).</b> Revoking the grant revokes the person's org-scope sessions; disabling revokes ALL of
 /// their sessions (any exercise and org scope) — both in the same transaction, access and refresh — and the matching
-/// live hub connections are cut after the commit.
+/// live hub connections are cut after the commit. Granting the grant, and enabling, ALSO revoke any still-live session in
+/// that same scope (W-001), so a session that somehow outlived the earlier revoke can never come back to life. The
+/// target's person row is locked before every sweep, serializing it against a concurrent sign-in (#839,
+/// <see cref="PersonSessionLock"/>).
 /// </para>
 /// <para>
 /// <b>Promotion voids credential links.</b> Granting the org-admin grant voids every outstanding credential token
@@ -81,6 +84,9 @@ public sealed partial class OrgPeopleService
     /// their unused invite and a peer admin cannot be re-invited, so the grant waits until they have set a password.
     /// </summary>
     public const string PersonHasNoPasswordError = "person-has-no-password";
+
+    /// <summary>409: the change lost a deadlock twice to a concurrent change; nothing changed, retry.</summary>
+    public const string ConcurrentChangeError = "concurrent-change";
 
     /// <summary>400: <c>page</c> / <c>pageSize</c> out of range.</summary>
     public const string InvalidPagingError = "invalid-paging";
@@ -203,6 +209,27 @@ public sealed partial class OrgPeopleService
     /// <returns>The outcome the endpoint maps to a status.</returns>
     public async Task<OrgPeopleResult> UpdateAsync(Guid personId, UpdateOrgPersonRequest? request, CancellationToken cancellationToken = default)
     {
+        // Sonnet L6: the change locks several person rows, so two concurrent changes can deadlock. SQL Server rolls the
+        // victim back whole (nothing changed); it is retried ONCE from the top, then answered with a clean 409.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await UpdateOnceAsync(personId, request, cancellationToken);
+            }
+            catch (Exception exception) when (SqlDeadlock.IsDeadlock(exception))
+            {
+                _dbContext.ChangeTracker.Clear();
+                if (attempt >= 2)
+                {
+                    return OrgPeopleResult.Conflict(ConcurrentChangeError);
+                }
+            }
+        }
+    }
+
+    private async Task<OrgPeopleResult> UpdateOnceAsync(Guid personId, UpdateOrgPersonRequest? request, CancellationToken cancellationToken)
+    {
         var (caller, refusal) = await AuthorizeAsync(cancellationToken);
         if (refusal is not null)
         {
@@ -247,6 +274,11 @@ public sealed partial class OrgPeopleService
                 return OrgPeopleResult.Forbidden();
             }
 
+            // #839: the target's person row is locked BEFORE its sessions are swept (and before it is read), serializing
+            // this change against a concurrent sign-in mint for the same person (see PersonSessionLock). Lock order: the
+            // enabled admin rows (above), the caller, then the target — sessions only after.
+            await PersonSessionLock.LockAsync(_dbContext, personId, tenant, cancellationToken);
+
             // The bare-404 pattern: another customer's person is indistinguishable from a missing one.
             var person = await _dbContext.People
                 .InOrganization(tenant)
@@ -282,8 +314,13 @@ public sealed partial class OrgPeopleService
                     // credential). Every outstanding token of both purposes is voided in this transaction.
                     var voided = await CredentialTokenService.StageCredentialChangeInvalidationAsync(
                         _dbContext, CredentialSubject.ForPerson(person.Id), tenant, now, cancellationToken);
+
+                    // W-001: an org-scope session that outlived an earlier revoke of the grant must not come back to life
+                    // with it. Any still-live org-scope session of the person is revoked; they sign in again.
+                    revokedSessionIds = await PersonSessionRevoker.StageRevokeAsync(
+                        _dbContext, person.Id, PersonSessionScope.OrgScopeOnly, now, cancellationToken);
                     auditKind = OrgRoleGrantedKind;
-                    payload = Payload(caller.Role, revoked: 0, tokensVoided: voided);
+                    payload = Payload(caller.Role, revokedSessionIds.Count, tokensVoided: voided);
                 }
                 else if (!grant && Person.IsOrgAdmin(person.OrgRole))
                 {
@@ -333,8 +370,13 @@ public sealed partial class OrgPeopleService
             else if (person.DisabledAt is not null)
             {
                 person.DisabledAt = null;
+
+                // W-001: a session that outlived the disable must not come back to life with the enable. Every still-live
+                // session of the person is revoked; they sign in again.
+                revokedSessionIds = await PersonSessionRevoker.StageRevokeAsync(
+                    _dbContext, person.Id, PersonSessionScope.All, now, cancellationToken);
                 auditKind = EnabledKind;
-                payload = Payload(caller.Role, revoked: 0);
+                payload = Payload(caller.Role, revokedSessionIds.Count);
             }
 
             if (auditKind is null)
