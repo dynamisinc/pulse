@@ -10,6 +10,13 @@
  * No token -> the invalid-link state. Submit POSTs `{ token, newPassword }` once; an
  * `invalid-token` 400 is terminal (the same token is never retried).
  *
+ * INVITE variant (#575b): the same page mounted at `/staff/invite` (`StaffInvitePage`) with invite
+ * copy. Redeeming an invite token answers 200 `{ next, orgSlug, email }`: `sign-in` signs the
+ * person straight in via the org-shape staff login then `completeSignIn` (any failure or a choice
+ * list falls back to the plain success state); `awaiting-assignment` shows
+ * `AwaitingAssignmentPanel`. The password is held only in a closure for that one login call and
+ * cleared from state; it is never logged or rendered.
+ *
  * Policy (staff): 12-128 characters, no composition rules. The client only enforces
  * confirm-match and non-empty; length is hinted live and judged by the server.
  *
@@ -33,6 +40,12 @@ import {
 import { CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
+import { completeSignIn } from '@/features/login/completeSignIn'
+import {
+  isStaffOrgChoiceResponse,
+  staffOrgSignIn,
+} from '@/features/login/services/staffSignInService'
+import { AwaitingAssignmentPanel } from '../components/AwaitingAssignmentPanel'
 import { readResetToken, stripResetFragment } from '../resetFragment'
 import {
   INVALID_TOKEN_CODE,
@@ -42,6 +55,8 @@ import {
 
 const INVALID_LINK_MESSAGE =
   'This link is invalid or has expired. Ask your organization admin for a new one.'
+const INVALID_INVITE_MESSAGE =
+  'This invite link is invalid or has expired. Ask your organization admin to send a new invite.'
 const RATE_LIMIT_MESSAGE = 'Too many attempts. Wait a minute and try again.'
 const GENERIC_POLICY_MESSAGE = 'Choose a different password.'
 const MISMATCH_MESSAGE = 'The two passwords do not match.'
@@ -54,7 +69,14 @@ const POLICY_MESSAGES: Readonly<Record<string, string>> = {
   'password-contains-personal-info': 'Do not include your name, email, or username in the password.',
 }
 
-type Phase = 'form' | 'success' | 'invalid'
+type Phase = 'form' | 'signingIn' | 'success' | 'invalid' | 'awaiting'
+
+export type SetPasswordVariant = 'reset' | 'invite'
+
+const COPY: Readonly<Record<SetPasswordVariant, { heading: string; formLabel: string }>> = {
+  reset: { heading: 'Set your password', formLabel: 'Set your password' },
+  invite: { heading: 'Set up your Pulse account', formLabel: 'Choose a password' },
+}
 
 function StatusLine({ icon, children }: { icon: typeof faCircleCheck; children: string }) {
   return (
@@ -67,7 +89,7 @@ function StatusLine({ icon, children }: { icon: typeof faCircleCheck; children: 
   )
 }
 
-function SetPasswordBody() {
+function SetPasswordBody({ variant }: { variant: SetPasswordVariant }) {
   const navigate = useNavigate()
   // Read once (pure); the strip happens in the effect below.
   const [token] = useState<string | null>(() => readResetToken())
@@ -102,14 +124,42 @@ function SetPasswordBody() {
     setSubmitting(true)
     setError(null)
     resetPassword({ token, newPassword: password })
-      .then(() => {
-        setPassword('')
+      .then(async landing => {
         setConfirm('')
+        if (landing?.next === 'awaiting-assignment') {
+          setPassword('')
+          setPhase('awaiting')
+          return
+        }
+        if (landing?.next === 'sign-in') {
+          setPhase('signingIn')
+          try {
+            const result = await staffOrgSignIn({
+              orgSlug: landing.orgSlug,
+              email: landing.email,
+              password,
+            })
+            if (!isStaffOrgChoiceResponse(result)) {
+              setPassword('')
+              completeSignIn(
+                { token: result.token, refreshToken: result.refreshToken },
+                { persist: false, navigate },
+              )
+              return
+            }
+          } catch {
+            // Fall through to the plain success state; the password is already set.
+          }
+        }
+        setPassword('')
         setPhase('success')
       })
       .catch((caught: unknown) => {
         const failure = caught instanceof PasswordResetError ? caught : undefined
         if (failure?.status === 400 && failure.code === INVALID_TOKEN_CODE) {
+          // Terminal: the form never comes back, so drop the typed password now.
+          setPassword('')
+          setConfirm('')
           setPhase('invalid')
         } else if (failure?.status === 400) {
           setError(POLICY_MESSAGES[failure.code ?? ''] ?? GENERIC_POLICY_MESSAGE)
@@ -121,6 +171,23 @@ function SetPasswordBody() {
       })
       .finally(() => setSubmitting(false))
   }
+
+  if (phase === 'signingIn') {
+    return (
+      <Stack
+        direction="row"
+        role="status"
+        aria-live="polite"
+        data-testid="set-password-signing-in"
+        sx={{ alignItems: 'center', gap: 1 }}
+      >
+        <FontAwesomeIcon icon={faCircleNotch} spin aria-hidden />
+        <Typography variant="body1">Signing you in…</Typography>
+      </Stack>
+    )
+  }
+
+  if (phase === 'awaiting') return <AwaitingAssignmentPanel />
 
   if (phase === 'success') {
     return (
@@ -143,7 +210,9 @@ function SetPasswordBody() {
           Link not valid
         </Typography>
         <Box role="alert">
-          <StatusLine icon={faTriangleExclamation}>{INVALID_LINK_MESSAGE}</StatusLine>
+          <StatusLine icon={faTriangleExclamation}>
+            {variant === 'invite' ? INVALID_INVITE_MESSAGE : INVALID_LINK_MESSAGE}
+          </StatusLine>
         </Box>
       </Stack>
     )
@@ -167,11 +236,11 @@ function SetPasswordBody() {
     <Box
       component="form"
       onSubmit={handleSubmit}
-      aria-label="Set your password"
+      aria-label={COPY[variant].formLabel}
       sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%' }}
     >
       <Typography variant="h5" component="h1">
-        Set your password
+        {COPY[variant].heading}
       </Typography>
       <CobraTextField
         label="New password"
@@ -220,7 +289,11 @@ function SetPasswordBody() {
   )
 }
 
-export function StaffSetPasswordPage() {
+export interface StaffSetPasswordPageProps {
+  readonly variant?: SetPasswordVariant
+}
+
+export function StaffSetPasswordPage({ variant = 'reset' }: StaffSetPasswordPageProps) {
   return (
     <ThemeProvider theme={cobraTheme}>
       <Box
@@ -234,11 +307,16 @@ export function StaffSetPasswordPage() {
         }}
       >
         <Box sx={{ width: '100%', maxWidth: 400 }}>
-          <SetPasswordBody />
+          <SetPasswordBody variant={variant} />
         </Box>
       </Box>
     </ThemeProvider>
   )
+}
+
+/** `/staff/invite`: the invite-copy variant. */
+export function StaffInvitePage() {
+  return <StaffSetPasswordPage variant="invite" />
 }
 
 export default StaffSetPasswordPage

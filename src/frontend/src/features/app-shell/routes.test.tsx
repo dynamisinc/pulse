@@ -34,7 +34,13 @@ import type { ExerciseScope } from '@/core/exerciseContext'
 import { api } from '@/core/services/api'
 import { createRoleAwareRoutes } from './routes'
 import type { RoleAwareEntryProps } from './RoleAwareEntry'
-import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH, STAFF_RESET_PATH } from './constants'
+import {
+  JOIN_PATH,
+  LOGIN_PATH,
+  STAFF_INVITE_PATH,
+  STAFF_LOGIN_PATH,
+  STAFF_RESET_PATH,
+} from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
@@ -122,6 +128,7 @@ describe('createRoleAwareRoutes', () => {
       LOGIN_PATH,
       STAFF_LOGIN_PATH,
       STAFF_RESET_PATH, // #576
+      STAFF_INVITE_PATH, // #575b
       `${JOIN_PATH}/:token`,
       JOIN_PATH,
       '*',
@@ -160,6 +167,14 @@ describe('createRoleAwareRoutes', () => {
 
     expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
     expect(screen.getByTestId('staff-sign-in-form')).toBeInTheDocument()
+  })
+
+  it('serves the invite page at /staff/invite', () => {
+    // The token is read from the real window fragment, not the memory router.
+    window.history.replaceState(null, '', `${STAFF_INVITE_PATH}#token=t`)
+    renderAt(STAFF_INVITE_PATH)
+
+    expect(screen.getByRole('heading', { name: 'Set up your Pulse account' })).toBeInTheDocument()
   })
 
   it('links from the participant sign-in page to the staff sign-in page (the one cross-world reference)', async () => {

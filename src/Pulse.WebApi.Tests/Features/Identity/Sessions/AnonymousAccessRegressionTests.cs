@@ -148,8 +148,10 @@ public sealed class AnonymousAccessRegressionTests
         // identity-auth-roles/21 (#576): 15 -> 16 for POST /api/auth/password/reset — sets a password from a single-use
         // invite/reset link, so the person has no session; the 256-bit token in the body is the credential. Uniform 400
         // invalid-token, the staff-login per-IP limiter, the login body limit, no-store.
+        // #575b: 16 -> 17 for POST /api/ops/organizations — platform provisioning of a customer org; the X-Bootstrap-Secret
+        // header is the credential (bare 404 otherwise), exactly like /api/ops/bootstrap-exercise; own per-IP limiter, no-store.
         PreAuthAllowlist.Routes.Should().HaveCount(
-            16,
+            17,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 

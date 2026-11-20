@@ -18,7 +18,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { api } from '@/core/services/api'
-import { StaffSignInError, staffSignIn } from './staffSignInService'
+import { StaffSignInError, staffOrgSignIn, staffSignIn } from './staffSignInService'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn() },
@@ -158,5 +158,34 @@ describe('staffSignIn — never logs the secret', () => {
 
     expect(String((caught as StaffSignInError).message)).not.toContain(CREDENTIALS.secret)
     expect(JSON.stringify(caught)).not.toContain(CREDENTIALS.secret)
+  })
+})
+
+describe('staffOrgSignIn', () => {
+  const ORG = { orgSlug: 'acme', email: 'a@b.org', password: 'pw-pw-pw-pw-pw' }
+
+  it('posts the org-shape body to the staff login endpoint and returns the envelope', async () => {
+    mockPost.mockResolvedValue({ data: { token: 't', session: {} } })
+    await expect(staffOrgSignIn(ORG)).resolves.toEqual({ token: 't', session: {} })
+    expect(mockPost).toHaveBeenCalledWith('/auth/staff/login', ORG)
+  })
+
+  it('returns a choice list as-is', async () => {
+    const choice = { choose: [{ slug: 'acme', orgName: 'Acme' }], choiceToken: 'c' }
+    mockPost.mockResolvedValue({ data: choice })
+    await expect(staffOrgSignIn(ORG)).resolves.toEqual(choice)
+  })
+
+  it('throws StaffSignInError with the status on 401 and never echoes the password', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401, ''))
+    const caught = await staffOrgSignIn(ORG).catch((error: unknown) => error)
+    expect(caught).toBeInstanceOf(StaffSignInError)
+    expect((caught as StaffSignInError).status).toBe(401)
+    expect((caught as StaffSignInError).message).not.toContain(ORG.password)
+  })
+
+  it('fails closed on a malformed body', async () => {
+    mockPost.mockResolvedValue({ data: {} })
+    await expect(staffOrgSignIn(ORG)).rejects.toBeInstanceOf(StaffSignInError)
   })
 })

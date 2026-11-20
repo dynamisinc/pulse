@@ -107,9 +107,10 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("POST", "/api/ops/bootstrap-exercise")]
     [InlineData("POST", "/api/ops/seed-engine-content")]
     [InlineData("POST", "/api/ops/bind-participant-persona")]
+    [InlineData("POST", "/api/ops/organizations")]
     public async Task AllowlistedRoute_WithNoCredential_IsNeverRejectedByTheGate(string method, string route)
     {
-        // These fifteen (identity-auth-roles/15 added the org choice, identity-auth-roles/21 the password reset) must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
+        // These sixteen (identity-auth-roles/15 added the org choice, identity-auth-roles/21 the password reset, #575b the ops org provisioning) must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
         // a missing body, 404 for an unconfigured ops secret, and 401 from /api/auth/refresh itself when no
         // refresh token is presented); the regression guarded here is narrower and exact: the GATE must not be
         // what answers. The RFC 6750 challenge header is the discriminator — only the gate writes it.
@@ -120,7 +121,7 @@ public sealed class DefaultDenySessionGateTests
         using var response = await client.SendAsync(request);
 
         response.Headers.WwwAuthenticate.Should().BeEmpty(
-            "{0} {1} is on the pre-auth allowlist and must remain reachable without a session — the three "
+            "{0} {1} is on the pre-auth allowlist and must remain reachable without a session — the four "
             + "/api/ops/* routes especially, since bootstrap runs against an empty database with no session to "
             + "present and its X-Bootstrap-Secret is checked INSIDE the handler, after the gate",
             method,
@@ -413,8 +414,16 @@ public sealed class DefaultDenySessionGateTests
     /// token resolves to <c>null</c> (fail closed), exactly as the real authenticator does for an unknown,
     /// expired or revoked token.
     /// </summary>
+    /// <remarks>
+    /// The SAME token always resolves to the SAME session (one stable <see cref="AuthenticatedSession.SessionId"/>),
+    /// as the real authenticator does: a token names one session row. A fresh id per call made the negotiate and the
+    /// long-poll requests of one hub connection look like two different users, which ASP.NET Core's connection
+    /// dispatcher refuses with 403 ("The name of the user changed") on the 10.0 servicing runtime CI now runs.
+    /// </remarks>
     private sealed class SingleTokenSessionAuthenticator : ISessionAuthenticator
     {
+        private static readonly Guid StableSessionId = Guid.Parse("bbbbbbbb-0000-4000-8000-00000000000b");
+
         private readonly string _acceptedToken;
         private readonly Guid _exerciseId;
 
@@ -429,7 +438,7 @@ public sealed class DefaultDenySessionGateTests
                 string.Equals(rawToken, _acceptedToken, StringComparison.Ordinal)
                     ? new AuthenticatedSession
                     {
-                        SessionId = Guid.NewGuid(),
+                        SessionId = StableSessionId,
                         ExerciseId = _exerciseId,
                         Kind = "participant",
                         PrincipalId = "gate-probe-principal",

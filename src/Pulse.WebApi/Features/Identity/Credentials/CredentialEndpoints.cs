@@ -28,7 +28,8 @@ using Pulse.WebApi.Features.Realtime;
 /// to present. Behind its OWN per-IP fixed-window limiter, <see cref="PasswordResetRateLimitPolicy"/> (NFR-009; its own
 /// partition, so reset attempts and sign-in attempts do not spend each other's budget), and the login body limit;
 /// <c>Cache-Control: no-store</c>.
-/// <c>204</c> on success; <c>400 {"error":"invalid-token"}</c> for any bad / expired / used token (uniform);
+/// <c>204</c> on a reset; <c>200 {"next":"sign-in"|"awaiting-assignment","orgSlug":"…","email":"…"}</c> on an invite
+/// (#575b, <see cref="InviteLanding"/>); <c>400 {"error":"invalid-token"}</c> for any bad / expired / used token (uniform);
 /// <c>400 {"error":"&lt;policy-code&gt;"}</c> for a <see cref="PasswordPolicy"/> refusal.
 /// </para>
 /// <para>
@@ -142,6 +143,8 @@ public static class CredentialEndpoints
 
         return result.Outcome switch
         {
+            // #575b: a redeemed INVITE answers where to go next (sign in, or "awaiting assignment"); a reset stays 204.
+            PasswordResetOutcome.Ok when result.Landing is { } landing => Results.Ok(landing),
             PasswordResetOutcome.Ok => Results.NoContent(),
             PasswordResetOutcome.Invalid => Results.BadRequest(new CredentialErrorDto { Error = result.Error ?? PasswordResetService.InvalidTokenError }),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),

@@ -307,6 +307,11 @@ gh variable set VITE_USE_MOCK_DATA --env uat --body 'true'   # then re-run Deplo
 
 ### Adding test staff accounts (role smoke)
 
+> **Superseded for normal use by the in-app invite (#575b).** An org admin adds staff with **People → Invite person**
+> and a planner assigns them on the **Staff** tab — see [OPERATE.md → Adding staff](../../OPERATE.md#adding-staff-invite-575b).
+> The steps below edit the `STAFF_IDENTITY_ACCOUNTS_JSON` **break-glass** allowlist (ADMIN-IDENTITY-MODEL §1.3); use them
+> only when no org admin can sign in. Do not delete the secret or its infrastructure plumbing.
+
 UAT was seeded with one staff login, `controller1`. A1b made `controller1` the exercise's lead: the
 backfill picks the earliest person-backed controller. A role smoke (A1c, story identity-auth-roles/17)
 also needs a non-lead controller, a planner and an evaluator. Each extra staff login needs two things:

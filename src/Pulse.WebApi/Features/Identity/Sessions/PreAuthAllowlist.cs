@@ -71,7 +71,7 @@ public static class PreAuthAllowlist
 
     /// <summary>
     /// The allowlist, as <c>"{METHOD} {routePattern}"</c> keys matching
-    /// <see cref="RoutePattern.RawText"/>. Exactly sixteen routes.
+    /// <see cref="RoutePattern.RawText"/>. Exactly seventeen routes.
     /// </summary>
     public static IReadOnlySet<string> Routes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -88,6 +88,7 @@ public static class PreAuthAllowlist
         $"{AnyMethod} /health",
         $"{AnyMethod} /health/ready",
         "POST /api/ops/bootstrap-exercise",
+        "POST /api/ops/organizations",
         "POST /api/ops/seed-engine-content",
         "POST /api/ops/bind-participant-persona",
         "GET /api/build",

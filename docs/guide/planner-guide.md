@@ -18,6 +18,7 @@ refuses it and nothing changes.
 | Task | Org admin | Planner | Controller | Evaluator |
 |---|---|---|---|---|
 | Create an exercise | Yes | No | No | No |
+| Invite people to the organization | Yes | No | No | No |
 | Rename or archive an exercise | Yes | Yes, for exercises you plan | No | No |
 | Change settings, chrome or practice mode | Only through a planner enrollment | Yes | No | No |
 | Stage the exercise | Only through a planner enrollment | Yes | No | No |
@@ -123,6 +124,27 @@ can open it.
   Removing the last enabled admin, or disabling yourself, is refused with a message.
 - **Reset link** shows a one-time link once, with a Copy button. Give it to the person directly. You
   cannot make a link for another org admin.
+
+### Inviting a new person
+
+To add someone who is not in Pulse yet, select **Invite person**, enter their email and name, and
+select **Invite**.
+
+1. Pulse adds them to the directory and shows a one-time **invite link**, with a Copy button. Pulse
+   does not email it yet, so send it to the person yourself. The link works once, for 7 days.
+2. The person opens the link and chooses a password (at least 12 characters).
+3. If they already have a role, Pulse signs them straight in. If not, they see **Your account is
+   ready**: assign them to an exercise (see [Staff assignment](#staff-assignment)) or make them an
+   org admin, and they can then sign in with their email and password.
+
+Inviting the same email again, before the person has set a password, makes a new link and the old
+link stops working. Someone who already has a password needs a **Reset link** instead. You cannot
+invite a disabled person or another org admin.
+
+> **Adding another org admin:** invite them first and select **Make admin** only after they have set
+> their password. Making someone an admin cancels any link they have not used yet, and you cannot send a
+> link to another org admin. If you made them an admin too early, select **Remove admin**, invite them
+> again, and make them an admin once they have set their password.
 
 ---
 
